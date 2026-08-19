@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+frontend/dist/
+
+# OS / editor
+.DS_Store
+.vscode/
+.claude/
+
+# Excel lock files
+~$*
+
+# Real business data — do not publish
+Receipt_reconciliation_and_IDR _ Requested_sample_documents/
+Recon_*.xlsx
