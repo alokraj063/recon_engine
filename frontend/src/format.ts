@@ -7,9 +7,27 @@ export function inr(v: number | null | undefined): string {
   return '₹' + INR.format(v)
 }
 
-/** Column names holding money, formatted with Indian grouping. */
+/** Backend timestamps are naive UTC (no offset in the ISO string);
+ *  append Z so the browser doesn't parse them as local time. */
+export function parseUtc(iso: string): Date {
+  return new Date(/[Zz]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z')
+}
+
+const WHEN = new Intl.DateTimeFormat('en-IN', {
+  day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+})
+
+export function fmtWhen(iso: string): string {
+  return WHEN.format(parseUtc(iso))
+}
+
+/** Column names holding money, formatted with Indian grouping.
+ *  The PascalCase entries are the pre-canonicalization vocabulary — kept
+ *  so runs persisted before the gold-schema rename still show ₹. */
 export const AMOUNT_COLS = new Set([
-  'amount', 'Amount', 'BillAmt', 'PassedAmt', 'DeductedAmt', 'NetAmt',
+  'amount', 'gross_amount', 'approved_amount', 'deduction_amount',
+  'net_payable_amount', 'recovery_sum', 'recovery_amt',
+  'Amount', 'BillAmt', 'PassedAmt', 'DeductedAmt', 'NetAmt',
   'RecoverySum', 'RecoveryAmt',
 ])
 

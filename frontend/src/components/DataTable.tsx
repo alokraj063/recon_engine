@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ChevronRight } from 'lucide-react'
 import {
   flexRender,
   getCoreRowModel,
@@ -111,7 +112,7 @@ export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, r
                 >
                   {renderDetail && (
                     <td className="mono">
-                      <span className="chev">▶</span>
+                      <ChevronRight className="chev chev-ic" size={14} strokeWidth={2} aria-hidden />
                     </td>
                   )}
                   {row.getVisibleCells().map((cell) => (

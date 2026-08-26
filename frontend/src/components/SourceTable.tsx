@@ -3,81 +3,36 @@ import type { ColumnDef } from '@tanstack/react-table'
 import type { FrameName, Row } from '../types'
 import { fetchFrame } from '../api'
 import { AMOUNT_COLS, fmtCell } from '../format'
+import { SHARED_PRESETS, type FramePreset } from '../framePresets'
 import { BillTrailDetail } from './BillTrailDetail'
 import { DataTable } from './DataTable'
 
-/** Per-frame presets: curated column order + labels; everything else in
- *  the payload is appended hidden, reachable via the columns menu. */
-const PRESETS: Record<FrameName, { curated: Array<[string, string]>; hidden: string[] }> = {
-  bank: {
-    curated: [
-      ['UsedInRecon', 'Used'],
-      ['txn_type', 'Type'],
-      ['amount', 'Amount'],
-      ['value_date', 'Value date'],
-      ['zone_guess', 'Zone'],
-      ['narrative', 'Narrative'],
-      ['bank_ref', 'Bank ref'],
-      ['customer_ref', 'Customer ref'],
-      ['page', 'Page'],
-    ],
-    hidden: ['supplementary', 'timestamp'],
-  },
-  bills: {
-    curated: [
-      ['BillNumber', 'Bill no.'],
-      ['ContractNo', 'Contract'],
-      ['Zone', 'Zone'],
-      ['Status', 'Status'],
-      ['BillDate', 'Bill date'],
-      ['BillAmt', 'Bill amt'],
-      ['PassedAmt', 'Passed amt'],
-      ['DeductedAmt', 'Deducted amt'],
-      ['NetAmt', 'Net amt'],
-      ['CO6No', 'CO6 no.'],
-      ['CO6Date', 'CO6 date'],
-      ['CO7No', 'CO7 no.'],
-      ['CO7Date', 'CO7 date'],
-      ['PaymentAdviceDateToBank', 'Advice date'],
-      ['RecoveryCount', 'Recov.'],
-      ['ReasonForReturn', 'Reason for return'],
-      ['NetCheck', 'Net ✓'],
-      ['RecoveryCheck', 'Recov ✓'],
-      ['Sheet', 'Sheet'],
-      ['DataRow', 'Row'],
-    ],
-    hidden: ['PartyName', 'PartyCode', 'UnparsedHeader', 'HeaderRow', 'Recoveries',
-             'RecoverySum', 'AccountingUnit', 'ContractDate'],
-  },
+/** Per-frame presets: bank/bills/recoveries are shared with GoldTable
+ *  (framePresets.ts); bills_enriched is a run artifact with settlement
+ *  stamps, so it stays private here. Everything not curated is appended
+ *  hidden, reachable via the columns menu. */
+const PRESETS: Record<FrameName, FramePreset> = {
+  bank: SHARED_PRESETS.bank,
+  bills: SHARED_PRESETS.bills,
+  recoveries: SHARED_PRESETS.recoveries,
   bills_enriched: {
     curated: [
-      ['BillNumber', 'Bill no.'],
-      ['Zone', 'Zone'],
-      ['Status', 'Status'],
+      ['bill_number', 'Bill no.'],
+      ['zone', 'Zone'],
+      ['bill_status', 'Status'],
       ['Settled', 'Settled in stmt'],
       ['AttemptCount', 'Attempts'],
-      ['NetAmt', 'Net amt'],
-      ['PaymentAdviceDateToBank', 'Advice date'],
+      ['net_payable_amount', 'Net payable'],
+      ['payment_advice_date', 'Advice date'],
       ['LineageStatus', 'Lineage'],
       ['PO', 'PO'],
       ['Receipt_Doc', 'Receipt doc'],
       ['RNOTE_MatchedVia', 'RNOTE via'],
       ['CRN_MatchedVia', 'CRN via'],
-      ['CO7No', 'CO7 no.'],
-      ['CO7Date', 'CO7 date'],
+      ['payment_order_ref', 'Pay order ref'],
+      ['payment_order_date', 'Pay order date'],
     ],
     hidden: [],   // computed below: everything not curated
-  },
-  recoveries: {
-    curated: [
-      ['BillNumber', 'Bill no.'],
-      ['CO6No', 'CO6 no.'],
-      ['Sheet', 'Sheet'],
-      ['RecoveryHead', 'Recovery head'],
-      ['RecoveryAmt', 'Amount'],
-      ['RecoveryText', 'Raw text'],
-    ],
-    hidden: ['BillIndex'],
   },
 }
 
@@ -146,6 +101,12 @@ export function SourceTable({ runId, name }: Props) {
     setError(null)
     fetchFrame(runId, name)
       .then((d) => {
+        // frames are immutable per run, so the cache is always correct;
+        // cap it so browsing many persisted runs can't grow it unbounded
+        if (frameCache.size >= 32) {
+          const oldest = frameCache.keys().next().value
+          if (oldest !== undefined) frameCache.delete(oldest)
+        }
         frameCache.set(cacheKey, d.rows)
         if (live) setRows(d.rows)
       })
@@ -184,7 +145,7 @@ export function SourceTable({ runId, name }: Props) {
       initialHidden={hidden}
       renderDetail={
         name === 'bills_enriched'
-          ? (row) => <BillTrailDetail row={row} title={`Bill ${row.BillNumber ?? ''} — document history`} />
+          ? (row) => <BillTrailDetail row={row} title={`Bill ${row.bill_number ?? ''} — document history`} />
           : undefined
       }
     />

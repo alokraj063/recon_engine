@@ -7,18 +7,20 @@ import { DataTable } from './DataTable'
 /** Ordered, labelled columns; anything else in the payload is appended
  *  hidden so the column menu can still reveal it. */
 const CURATED: Array<[string, string]> = [
+  // present only when several runs are selected (run filter)
+  ['Run', 'Run'],
   ['confidence', 'Confidence'],
   ['amount', 'Amount'],
   ['value_date', 'Value date'],
-  ['zone_from_narrative', 'Zone (bank)'],
-  ['bill_zone', 'Zone (bill)'],
+  ['zone_from_narrative', 'Signal (bank)'],
+  ['bill_zone', 'Signal (bill)'],
   ['bill_number', 'Bill no.'],
   ['contract_no', 'Contract'],
-  ['advice_date', 'Advice date'],
-  ['co7_no', 'CO7 no.'],
-  ['co7_date', 'CO7 date'],
-  ['status', 'Status'],
-  ['accounting_unit', 'Accounting unit'],
+  ['payment_advice_date', 'Advice date'],
+  ['payment_order_ref', 'Pay order ref'],
+  ['payment_order_date', 'Pay order date'],
+  ['bill_status', 'Status'],
+  ['org_unit', 'Org unit'],
   ['LineageStatus', 'Lineage'],
   ['PO', 'PO'],
   ['Receipt_Doc', 'Receipt doc'],
@@ -27,12 +29,13 @@ const CURATED: Array<[string, string]> = [
   ['bank_ref', 'Bank ref'],
 ]
 
+// mirrors engine.MATCH_SIDE_COLS + TRAIL leftovers
 const HIDDEN_BY_DEFAULT = [
   'narrative', 'bank_ref', 'date_gap_days', 'date_source', 'amount_check', 'zone_check',
   'date_check', 'n_candidates', 'tied_candidates', 'customer_ref', 'timestamp', 'page',
-  'BillDate', 'ContractDate', 'PartyCode', 'AccountingUnit', 'CO6Date', 'CO6No',
-  'BillAmt', 'PassedAmt', 'DeductedAmt', 'Recoveries', 'RecoveryCount',
-  'ReasonForReturn', 'RNOTE_MatchedVia', 'CRN_MatchedVia', 'PO_Date',
+  'bill_date', 'contract_date', 'vendor_code', 'submission_date',
+  'gross_amount', 'approved_amount', 'deduction_amount', 'recoveries', 'recovery_count',
+  'return_reason', 'RNOTE_MatchedVia', 'CRN_MatchedVia', 'PO_Date',
   'Receipt_Date', 'Receipt_Qty', 'DRR_or_Challan', 'Bill_Reg_No', 'bill_indices',
 ]
 

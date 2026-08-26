@@ -7,25 +7,25 @@ import { LineageTimeline } from './LineageTimeline'
  *  bills source tab. */
 
 export const BILL_IDENTITY: Array<[string, string]> = [
-  ['BillNumber', 'Bill number'],
-  ['ContractNo', 'Contract no'],
-  ['BillDate', 'Bill date'],
-  ['Zone', 'Zone'],
-  ['AccountingUnit', 'Accounting unit'],
-  ['Status', 'Status'],
+  ['bill_number', 'Bill number'],
+  ['contract_no', 'Contract no'],
+  ['bill_date', 'Bill date'],
+  ['zone', 'Zone'],
+  ['org_unit', 'Org unit'],
+  ['bill_status', 'Status'],
   ['ExpectedBasis', 'Expected basis'],
-  ['Sheet', 'Export sheet'],
-  ['DataRow', 'Export row'],
+  ['sheet', 'Export sheet'],
+  ['data_row', 'Export row'],
 ]
 
 export const BILL_MONEY: Array<[string, string]> = [
-  ['BillAmt', 'Bill amt'],
-  ['PassedAmt', 'Passed amt'],
-  ['DeductedAmt', 'Deducted amt'],
-  ['NetAmt', 'Net amt'],
-  ['RecoveryCount', 'Recovery lines'],
-  ['Recoveries', 'Recoveries'],
-  ['ReasonForReturn', 'Reason for return'],
+  ['gross_amount', 'Gross amt'],
+  ['approved_amount', 'Approved amt'],
+  ['deduction_amount', 'Deducted amt'],
+  ['net_payable_amount', 'Net payable'],
+  ['recovery_count', 'Recovery lines'],
+  ['recoveries', 'Recoveries'],
+  ['return_reason', 'Reason for return'],
 ]
 
 export function DetailField({ row, k, label }: { row: Row; k: string; label: string }) {

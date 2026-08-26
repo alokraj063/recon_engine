@@ -14,10 +14,26 @@ export function ErrorBanner({ error }: { error: ApiError }) {
       </div>
     )
   }
+  if (error.code === 'RUN_IN_PROGRESS') {
+    return (
+      <div className="error-banner">
+        <h3>An incremental run is already in flight for this customer</h3>
+        <p>
+          Incremental runs update a shared ledger, so only one can run at a time. Runs typically
+          take 10–30 seconds — wait for it to finish, then check the Runs view, or run again.
+        </p>
+        <p className="figures">{error.message}</p>
+      </div>
+    )
+  }
   const titles: Record<string, string> = {
     INVALID_INPUT: 'Input rejected',
     PARSE_FAILED: 'A source document could not be parsed',
     NETWORK: 'Backend unreachable',
+    RUN_NOT_FOUND: 'Run not found',
+    STATEMENT_NOT_FOUND:
+      'Statement not found in gold — it may belong to another customer or was never ingested',
+    RECONCILE_FAILED: 'Reconciliation failed',
   }
   return (
     <div className="error-banner">

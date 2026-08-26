@@ -48,49 +48,53 @@ function buildEvents(row: Row): TlEvent[] {
     source,
   ])
   // invoice and advice details derive from fields that always exist
-  // (BillNumber, NetAmt), so these two events only count when dated —
-  // otherwise a bill with no advice would still show an "advice" entry.
+  // (bill_number, net_payable_amount), so these two events only count
+  // when dated — otherwise a bill with no advice would still show an
+  // "advice" entry.
   const invoiceDate = str(row.RN_InvoiceDate) ?? str(row.CR_InvoiceDate)
-  if (invoiceDate) push(invoiceDate, 'Invoice raised', [`invoice ${row.BillNumber}`])
+  if (invoiceDate) push(invoiceDate, 'Invoice raised', [`invoice ${row.bill_number}`])
   push(str(row.RN_BillRegDate) ?? str(row.CR_BillRegDate), 'Bill registered', [
     str(row.Bill_Reg_No) && `reg no ${row.Bill_Reg_No}`,
   ])
-  push(str(row.BillDate), 'Bill date', [
-    str(row.BillNumber) && `bill ${row.BillNumber}`,
-    money(row.BillAmt) && `bill amt ${money(row.BillAmt)}`,
+  push(str(row.bill_date), 'Bill date', [
+    str(row.bill_number) && `bill ${row.bill_number}`,
+    money(row.gross_amount) && `bill amt ${money(row.gross_amount)}`,
   ])
-  push(str(row.CO6Date), 'CO6 — bill accounted', [
-    str(row.CO6No) && `CO6 ${row.CO6No}`,
-    money(row.PassedAmt) && `passed ${money(row.PassedAmt)}`,
-    typeof row.DeductedAmt === 'number' && row.DeductedAmt > 0
-      ? `deducted ${money(row.DeductedAmt)}`
+  push(str(row.submission_date), 'CO6 — bill accounted', [
+    str(row.submission_ref) && `CO6 ${row.submission_ref}`,
+    money(row.approved_amount) && `passed ${money(row.approved_amount)}`,
+    typeof row.deduction_amount === 'number' && row.deduction_amount > 0
+      ? `deducted ${money(row.deduction_amount)}`
       : null,
   ])
-  push(str(row.CO7Date), 'CO7 — payment order', [str(row.CO7No) && `CO7 ${row.CO7No}`])
+  push(str(row.payment_order_date), 'CO7 — payment order',
+       [str(row.payment_order_ref) && `CO7 ${row.payment_order_ref}`])
   // earlier processing attempts of the same bill (grouped view): each
-  // returned attempt is its own sienna event, merged into the date order
+  // returned attempt is its own sienna event, merged into the date order.
+  // Attempt keys mirror engine.ATTEMPT_FIELDS.
   if (Array.isArray(row.Attempts)) {
     for (const a of row.Attempts as Array<Record<string, string | number | boolean | null>>) {
       if (a.Current === true || typeof a !== 'object') continue
-      const returned = a.Status === 'RETURNED'
+      const returned = a.bill_status === 'RETURNED'
       push(
-        str(a.CO6Date),
-        returned ? 'Bill returned — resubmitted later' : `Earlier attempt — ${a.Status}`,
+        str(a.submission_date),
+        returned ? 'Bill returned — resubmitted later' : `Earlier attempt — ${a.bill_status}`,
         [
-          str(a.CO6No) && `CO6 ${a.CO6No}`,
-          str(a.CO7No) && `CO7 ${a.CO7No}`,
-          money(a.NetAmt) && `net ${money(a.NetAmt)}`,
-          str(a.ReasonForReturn),
+          str(a.submission_ref) && `CO6 ${a.submission_ref}`,
+          str(a.payment_order_ref) && `CO7 ${a.payment_order_ref}`,
+          money(a.net_payable_amount) && `net ${money(a.net_payable_amount)}`,
+          str(a.return_reason),
         ],
         returned ? 'returned' : 'normal',
       )
     }
   }
 
-  const adviceDate = str(row.PaymentAdviceDateToBank)
+  const adviceDate = str(row.payment_advice_date)
   if (adviceDate)
     push(adviceDate, 'Advice to bank',
-         [money(row.NetAmt) && `IREPS instructed the bank to pay ${money(row.NetAmt)}`])
+         [money(row.net_payable_amount)
+          && `IREPS instructed the bank to pay ${money(row.net_payable_amount)}`])
 
   // closure: the credit landing at HSBC (HIGH-confidence matches only —
   // the Settled token is injected by the bills_enriched view)
@@ -115,7 +119,7 @@ function buildEvents(row: Row): TlEvent[] {
       kind: 'hollow',
     })
   }
-  if (str(row.CO7No) && !str(row.PaymentAdviceDateToBank)) {
+  if (str(row.payment_order_ref) && !str(row.payment_advice_date)) {
     events.push({
       date: null,
       title: 'Advice not yet issued',
@@ -123,11 +127,11 @@ function buildEvents(row: Row): TlEvent[] {
       kind: 'hollow',
     })
   }
-  if (str(row.Status) === 'RETURNED') {
+  if (str(row.bill_status) === 'RETURNED') {
     events.push({
       date: null,
       title: 'Bill returned',
-      detail: str(row.ReasonForReturn) ?? 'no reason recorded',
+      detail: str(row.return_reason) ?? 'no reason recorded',
       kind: 'returned',
     })
   }
