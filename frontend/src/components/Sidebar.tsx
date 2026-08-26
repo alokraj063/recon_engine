@@ -1,7 +1,7 @@
 import type { ComponentType } from 'react'
 import {
-  Boxes, FileSearch, FileStack, Gauge, GitBranch, GitMerge, Landmark,
-  LayoutDashboard, Link2, ListChecks, ListMinus, ReceiptText,
+  ArrowDownLeft, Boxes, FileSearch, FileStack, Gauge, GitBranch, GitMerge,
+  Landmark, LayoutDashboard, Link2, ListChecks, ListMinus, ReceiptText,
   TriangleAlert, Upload, Download,
 } from 'lucide-react'
 import type { ReconResponse } from '../types'
@@ -13,6 +13,7 @@ export type View =
   | 'ingest'
   | 'reconcile'
   | 'ledger'
+  | 'ar'
   | 'audit'
   | 'architecture'
   | 'summary'
@@ -109,7 +110,6 @@ export function Sidebar({ view, onNavigate, result }: Props) {
         <h1>
           Recon <span className="amp">Engine</span>
         </h1>
-        <p className="strapline">receivables</p>
       </div>
 
       <nav className="sidebar-nav">
@@ -120,6 +120,7 @@ export function Sidebar({ view, onNavigate, result }: Props) {
 
         <div className="nav-group-label">Workspace</div>
         {openItem({ view: 'ledger', label: 'Analyst queue', icon: ListChecks })}
+        {openItem({ view: 'ar', label: 'AR Reconciliation', icon: ArrowDownLeft })}
         {openItem({ view: 'audit', label: 'Audit trail', icon: FileSearch })}
 
         <div className="nav-group-label">Reconciliation result</div>

@@ -1,4 +1,4 @@
-import type { ReconMeta, ReconResponse, Row, SummaryRow } from './types'
+import type { FrameName, ReconMeta, ReconResponse, Row, SummaryRow } from './types'
 
 /** One selected run, payload + a short human label ("24 Aug, 06:21 pm · snapshot"). */
 export interface SelectedRun {
@@ -60,6 +60,62 @@ export function combinedRows(runs: SelectedRun[], key: 'matched' | 'exceptions')
       return [{ Run: r.label, run_id: r.runId, ...row }]
     }),
   )
+}
+
+/**
+ * Stable entity identity for a Run-data frame row, mirroring the backend
+ * identities: bank txns ingest on (bank_ref, value_date, amount), bills
+ * entity-upsert on (bill_number, submission_ref), recovery lines ride
+ * their bill. Returns null = never dedupe. Old-name fallbacks keep
+ * pre-canonicalization persisted runs deduping against new ones.
+ */
+export function frameKey(name: FrameName, row: Row): string | null {
+  const cell = (a: string, b: string) => row[a] ?? row[b] ?? null
+  const join = (parts: unknown[]) =>
+    parts.every((p) => p === null) ? null : parts.join('|')
+  if (name === 'bank') {
+    return join([cell('bank_ref', 'Bank_Ref'), cell('value_date', 'Value_Date'),
+                 cell('amount', 'Amount')])
+  }
+  if (name === 'bills' || name === 'bills_enriched') {
+    return join([cell('bill_number', 'BillNumber'), cell('submission_ref', 'CO6No')])
+  }
+  // recoveries: the whole line is the identity
+  return join([cell('bill_number', 'BillNumber'), cell('submission_ref', 'CO6No'),
+               cell('recovery_head', 'RecoveryHead'), cell('recovery_amt', 'RecoveryAmt'),
+               cell('recovery_text', 'RecoveryText')])
+}
+
+/**
+ * Union of one frame across the selected runs, duplicates collapsed.
+ * Single selection returns the run's rows untouched. Multi selection
+ * stacks newest-first with a leading `Run` column and keeps the FIRST
+ * occurrence per entity — most runs re-reconcile the SAME documents, so
+ * each row appears once, in the newest selected run's state.
+ */
+export function combineFrameRows(
+  runs: Array<{ runId: string; label: string; rows: Row[] }>,
+  name: FrameName,
+): Row[] {
+  if (runs.length === 1) return runs[0].rows
+  // dedupe by key OCCURRENCE: a statement can legitimately repeat the
+  // same (ref, date, amount) triple, so within-run duplicates survive
+  // while cross-run copies collapse
+  const seen = new Set<string>()
+  return runs.flatMap((r) => {
+    const local = new Map<string, number>()
+    return r.rows.flatMap((row) => {
+      const k = frameKey(name, row)
+      if (k !== null) {
+        const n = local.get(k) ?? 0
+        local.set(k, n + 1)
+        const occ = `${k}#${n}`
+        if (seen.has(occ)) return []
+        seen.add(occ)
+      }
+      return [{ Run: r.label, run_id: r.runId, ...row }]
+    })
+  })
 }
 
 /** Sidebar/tile counts that agree with the combined tables: matched and

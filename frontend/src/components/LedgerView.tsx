@@ -8,6 +8,7 @@ import {
   type LedgerException, type LedgerMatch, type LedgerViewData, type Row,
 } from '../types'
 import { fmtWhen, inr } from '../format'
+import { BillLineage } from './BillLineage'
 import { ConfidenceBadge } from './ConfidenceBadge'
 import { MatchedEvidence, ReviewEvidence } from './ReviewEvidence'
 import { RunsView } from './RunsView'
@@ -21,6 +22,9 @@ interface Props {
   /** match_ledger id to highlight + scroll to (arriving from the
    *  Exception queue's "Decide in Analyst queue" link) */
   focusId?: string | null
+  /** called once the arrival flash has played so the parent clears
+   *  focusId — the highlight is transient, not a selection */
+  onFocusHandled?: () => void
   /** run history inset (⧉ Runs, top right) */
   activeRunId: string | null
   onOpenRun: (runId: string) => void
@@ -44,7 +48,8 @@ function excLine(e: LedgerException): string {
   return '—'
 }
 
-export function LedgerView({ customerId, focusId, activeRunId, onOpenRun }: Props) {
+export function LedgerView({ customerId, focusId, onFocusHandled,
+                             activeRunId, onOpenRun }: Props) {
   const [showRuns, setShowRuns] = useState(false)
   const [data, setData] = useState<LedgerViewData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -74,7 +79,8 @@ export function LedgerView({ customerId, focusId, activeRunId, onOpenRun }: Prop
     if (!evidence[m.id]) loadEvidence(m)
   }
 
-  // arriving from the Exception queue: open that match's evidence too
+  // arriving from the Exception queue: open that match's evidence too,
+  // then release the focus once the flash has played
   useEffect(() => {
     if (!focusId || !data) return
     const m = data.matches.find((x) => x.id === focusId)
@@ -82,6 +88,8 @@ export function LedgerView({ customerId, focusId, activeRunId, onOpenRun }: Prop
       setExpanded((x) => ({ ...x, [m.id]: true }))
       if (!evidence[m.id]) loadEvidence(m)
     }
+    const t = window.setTimeout(() => onFocusHandled?.(), 3000)
+    return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId, data])
 
@@ -197,7 +205,9 @@ export function LedgerView({ customerId, focusId, activeRunId, onOpenRun }: Prop
                                       strokeWidth={2} aria-hidden />
                         {fmtWhen(m.created_at)}
                       </td>
-                      <td>{m.match_id}</td>
+                      <td title={`run-internal label: ${m.match_id}`}>
+                        {m.seq !== null ? `M-${m.seq}` : m.match_id}
+                      </td>
                       <td><ConfidenceBadge label={m.confidence} /></td>
                       <td><span className={`stamp stamp-${m.status}`}>{m.status}</span></td>
                       <td>
@@ -206,16 +216,18 @@ export function LedgerView({ customerId, focusId, activeRunId, onOpenRun }: Prop
                           <div className="chip-note">{fmtWhen(m.locked_at)}</div>
                         )}
                       </td>
-                      <td>{txnLine(m)}</td>
+                      <td><span className="chip chip-bank">{txnLine(m)}</span></td>
                       <td>
-                        {picked.map((b) => (
-                          <span key={b.gold_bill_id} className="chip">
-                            {b.bill_number ?? b.gold_bill_id.slice(0, 8)} · {inr(b.net_payable_amount)}
-                          </span>
-                        ))}
-                        {candidates > 0 && (
-                          <span className="chip-note"> +{candidates} candidate{candidates === 1 ? '' : 's'}</span>
-                        )}
+                        <span className="bill-chips">
+                          {picked.map((b) => (
+                            <span key={b.gold_bill_id} className="chip chip-bill">
+                              {b.bill_number ?? b.gold_bill_id.slice(0, 8)} · {inr(b.net_payable_amount)}
+                            </span>
+                          ))}
+                          {candidates > 0 && (
+                            <span className="chip-note">+{candidates} candidate{candidates === 1 ? '' : 's'}</span>
+                          )}
+                        </span>
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
                         {m.status === 'OPEN' && (
@@ -237,24 +249,28 @@ export function LedgerView({ customerId, focusId, activeRunId, onOpenRun }: Prop
                           </span>
                         )}
                         {m.status === 'LOCKED' && (
-                          <button
-                            className="btn-refresh"
-                            title="Reopen this decision — the match returns to OPEN for review"
-                            disabled={busy[m.id]}
-                            onClick={() => decide(m.id, 'unlock')}
-                          >
-                            Unlock
-                          </button>
+                          <span className="decide">
+                            <button
+                              className="btn-open"
+                              title="Reopen this decision — the match returns to OPEN for review"
+                              disabled={busy[m.id]}
+                              onClick={() => decide(m.id, 'unlock')}
+                            >
+                              Unlock
+                            </button>
+                          </span>
                         )}
                         {m.status === 'REJECTED' && (
-                          <button
-                            className="btn-reopen"
-                            title="Undo this rejection — the match returns to OPEN and re-claims its credit and bills"
-                            disabled={busy[m.id]}
-                            onClick={() => decide(m.id, 'reopen')}
-                          >
-                            Reopen
-                          </button>
+                          <span className="decide">
+                            <button
+                              className="btn-reopen"
+                              title="Undo this rejection — the match returns to OPEN and re-claims its credit and bills"
+                              disabled={busy[m.id]}
+                              onClick={() => decide(m.id, 'reopen')}
+                            >
+                              Reopen
+                            </button>
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -277,6 +293,10 @@ export function LedgerView({ customerId, focusId, activeRunId, onOpenRun }: Prop
                                 <div className="dt-label">Narrative</div>
                                 <div className="dt-value">{m.txn?.narrative ?? '—'}</div>
                               </div>
+                              {m.bills.filter((b) => b.role === 'picked').map((b) => (
+                                <BillLineage key={b.gold_bill_id} runId={m.run_id}
+                                             billNumber={b.bill_number} />
+                              ))}
                             </div>
                           ) : (
                             <div className="detail-grid">
@@ -289,7 +309,7 @@ export function LedgerView({ customerId, focusId, activeRunId, onOpenRun }: Prop
                                   <div className="pick-list">
                                     {m.bills.map((b) => (
                                       <span key={b.gold_bill_id} className="pick-row">
-                                        <span className="chip">
+                                        <span className="chip chip-bill">
                                           {b.bill_number ?? b.gold_bill_id.slice(0, 8)}
                                           {' · '}{inr(b.net_payable_amount)}
                                           {b.zone ? ` · ${b.zone}` : ''}
@@ -307,8 +327,8 @@ export function LedgerView({ customerId, focusId, activeRunId, onOpenRun }: Prop
                                 </>
                               )}
                               {ev.exception_type === 'MATCH_REVIEW'
-                                ? <ReviewEvidence row={ev} />
-                                : <MatchedEvidence row={ev} />}
+                                ? <ReviewEvidence row={ev} runId={m.run_id} />
+                                : <MatchedEvidence row={ev} runId={m.run_id} />}
                             </div>
                           )}
                         </td>

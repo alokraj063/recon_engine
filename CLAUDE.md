@@ -105,7 +105,10 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
   models.py    all tables, snake_case, customer_id everywhere: customers,
                source_configs, match_rule_sets, bronze.files, silver.records,
                gold.bank_txns/bills/recoveries/lineage_docs, runs, run_frames,
-               run_match_bills, match_ledger(+bills), exception_ledger, ingest_conflicts,
+               run_match_bills, match_ledger(+bills — `seq` is the durable
+               per-customer match number, UI "M-{n}"; the engine's match_id
+               m0/m1/… restarts per run and stays run-internal),
+               exception_ledger, ingest_conflicts,
                audit_log (general-purpose event stream, app schema — NOT a
                replacement for match_ledger/exception_ledger/ingest_conflicts,
                which stay the detailed domain-specific trails for their own concerns)
@@ -192,6 +195,7 @@ backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/inge
   routes.py    legacy POST /api/runs (multipart one-shot) KEPT for compat/tests
                but retired from the UI; GET /api/runs/{id}[/frames/{name}|
                /workbook], GET /api/customers, GET /api/runs, GET /api/ledger,
+               GET /api/overview, GET /api/ar, GET /api/audit,
                POST /api/matches/{id}/accept|reject; errors map to
                BANK_SELFCHECK_FAILED (422) / PARSE_FAILED (422) / INVALID_INPUT (400)
                / RUN_IN_PROGRESS (409); sample-file fallback via GET /api/defaults
@@ -267,7 +271,14 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                sends no tunables so the saved config governs) -> results.
                "Workspace": Analyst queue (LedgerView renamed in UI
                ONLY — /api/ledger and DB names unchanged; RunsView opens
-               inline from its "⧉ Runs" button top right) + Audit trail
+               inline from its "⧉ Runs" button top right) + AR Reconciliation
+               (ARReconciliationView over GET /api/ar — db/overview.py
+               ar_view: the bill-centric AR working set (settled / in-review
+               from the match ledger, outstanding = open BILL_ONLY aged from
+               payment_advice/order/submission date, OVERDUE > 30d), KPIs +
+               aging buckets; settled rows cross-link into the Analyst queue
+               focus; recon-alpha's milestone tracker deliberately omitted —
+               not an IREPS concept) + Audit trail
                (AuditTrailView over GET /api/audit — the real audit_log
                stream with client-side category/actor/window filters and a
                by-record timeline). "Platform": Architecture

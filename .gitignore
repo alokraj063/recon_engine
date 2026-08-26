@@ -12,6 +12,9 @@ frontend/dist/
 .vscode/
 .claude/
 
+# Playwright MCP browser-session artifacts (page snapshots, console logs)
+.playwright-mcp/
+
 # Excel lock files
 ~$*
 

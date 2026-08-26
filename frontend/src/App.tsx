@@ -8,6 +8,7 @@ import {
 import { amountsFromRows, combinedRows, countsFromRows,
          type SelectedRun } from './combineRuns'
 import { ArchitectureView } from './components/ArchitectureView'
+import { ARReconciliationView } from './components/ARReconciliationView'
 import { AuditTrailView } from './components/AuditTrailView'
 import { CommandCenter } from './components/CommandCenter'
 import { ErrorBanner } from './components/ErrorBanner'
@@ -32,7 +33,7 @@ const GOLD_VIEWS: Record<string, GoldFrameName> = {
 }
 
 const VIEW_TITLES: Record<
-  Exclude<View, 'command' | 'ingest' | 'reconcile' | 'ledger' | 'audit'
+  Exclude<View, 'command' | 'ingest' | 'reconcile' | 'ledger' | 'ar' | 'audit'
     | 'architecture' | 'gold_bank' | 'gold_bills' | 'gold_recoveries' | 'gold_lineage'>,
   string
 > = {
@@ -57,8 +58,11 @@ const FALLBACK_CUSTOMERS: CustomerInfo[] = [
   { key: 'default', name: 'Default', sources: {} },
 ]
 
-// views the run filter applies to (Run data tabs stay single-run)
+// views whose ROWS are selection-filtered/combined across runs
 const FILTERED_VIEWS = new Set<View>(['summary', 'matched', 'exceptions'])
+// views that carry the run picker — Run data tabs included, but their
+// frames stay single-run (always the selection's primary run)
+const PICKER_VIEWS = new Set<View>([...FILTERED_VIEWS, ...FRAME_VIEWS])
 
 // loaded run payloads, kept across selections (payloads are immutable)
 const payloadCache = new Map<string, ReconResponse>()
@@ -214,14 +218,23 @@ export default function App() {
     [selectedRuns])
 
   // Sidebar badges reflect the whole selection AND agree with the tables;
-  // everything run-specific (workbook, frames, filenames) stays primary
+  // everything run-specific (workbook, filenames) stays primary. Frame
+  // badges disappear on multi selection: the Run data tabs show a lazily
+  // computed deduped union, so no fixed count is known up front — and
+  // summing 28 copies of one statement would read as duplicated data.
   const displayResult = primary && selectedRuns
     ? (multi
         ? { ...primary,
             meta: { ...primary.meta,
-                    counts: countsFromRows(
-                      matchedRows, exceptionRows,
-                      selectedRuns.map((r) => r.payload.meta)) } }
+                    counts: {
+                      ...countsFromRows(
+                        matchedRows, exceptionRows,
+                        selectedRuns.map((r) => r.payload.meta)),
+                      bank_txns: undefined,
+                      bills: undefined,
+                      bills_grouped: undefined,
+                      recoveries: undefined,
+                    } } }
         : primary)
     : null
 
@@ -278,8 +291,20 @@ export default function App() {
           <LedgerView
             customerId={customerId}
             focusId={ledgerFocus}
+            onFocusHandled={() => setLedgerFocus(null)}
             activeRunId={primary?.run_id ?? null}
             onOpenRun={openRun}
+          />
+        )}
+
+        {view === 'ar' && (
+          <ARReconciliationView
+            customerId={customerId}
+            refreshKey={ingestEpoch + (selectedRuns?.length ?? 0)}
+            onOpenInQueue={(id) => {
+              setLedgerFocus(id)
+              setView('ledger')
+            }}
           />
         )}
 
@@ -314,15 +339,6 @@ export default function App() {
             <div className="result-head">
               <h2>{VIEW_TITLES[view as keyof typeof VIEW_TITLES]}</h2>
               <span className="file-note">
-                {FILTERED_VIEWS.has(view) ? (
-                  <RunPicker runs={runList} selection={selection}
-                             onChange={(ids) => void applySelection(ids)} />
-                ) : (
-                  <>
-                    {primary.meta.filenames.statement} ✕ {primary.meta.filenames.bills}
-                    {multi && <span className="chip">showing primary run</span>}
-                  </>
-                )}
                 {primary.meta.mode && !multi && (
                   <span className="stamp head-stamp">{primary.meta.mode}</span>
                 )}
@@ -330,16 +346,32 @@ export default function App() {
                   <span className="stamp head-stamp">{primary.meta.customer}</span>
                 )}
                 {restoring && <span className="chip-note">loading runs…</span>}
+                {PICKER_VIEWS.has(view) && (
+                  <RunPicker runs={runList} selection={selection}
+                             onChange={(ids) => void applySelection(ids)} />
+                )}
               </span>
             </div>
 
-            {error && FILTERED_VIEWS.has(view) && <ErrorBanner error={error} />}
+            {FRAME_VIEWS.includes(view as FrameName) && (
+              <p className="head-sub">
+                <span className="head-sub-files">
+                  {primary.meta.filenames.statement} ✕ {primary.meta.filenames.bills}
+                </span>
+                {multi && (
+                  <span className="chip">deduped across {selectedRuns.length} runs</span>
+                )}
+              </p>
+            )}
+
+            {error && PICKER_VIEWS.has(view) && <ErrorBanner error={error} />}
 
             <div className="view-card">
               {view === 'summary' && (
                 <SummaryDashboard
                   runs={selectedRuns.map((r) => ({
-                    label: r.label, summary: r.payload.summary, meta: r.payload.meta,
+                    runId: r.runId, label: r.label,
+                    summary: r.payload.summary, meta: r.payload.meta,
                   }))}
                   aggregate={multi && displayResult
                     ? { counts: displayResult.meta.counts,
@@ -351,6 +383,7 @@ export default function App() {
               {view === 'exceptions' && (
                 <ExceptionQueue
                   rows={exceptionRows}
+                  primaryRunId={primary?.run_id ?? null}
                   onOpenInQueue={(id) => {
                     setLedgerFocus(id)
                     setView('ledger')
@@ -358,7 +391,10 @@ export default function App() {
                 />
               )}
               {FRAME_VIEWS.includes(view as FrameName) && (
-                <SourceTable runId={primary.run_id} name={view as FrameName} />
+                <SourceTable
+                  runs={selectedRuns.map((r) => ({ runId: r.runId, label: r.label }))}
+                  name={view as FrameName}
+                />
               )}
             </div>
 

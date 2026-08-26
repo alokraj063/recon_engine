@@ -1,5 +1,5 @@
 import type { Row } from '../types'
-import { inr } from '../format'
+import { inr, stripFloatArtifact } from '../format'
 
 /**
  * The bill's document history as a vertical timeline: date on the left,
@@ -18,7 +18,7 @@ interface TlEvent {
 const str = (v: unknown): string | null => {
   if (v === null || v === undefined || v === '') return null
   const s = String(v)
-  return s === 'nan' ? null : s
+  return s === 'nan' ? null : stripFloatArtifact(s)
 }
 
 const money = (v: unknown): string | null =>

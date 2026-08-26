@@ -37,10 +37,16 @@ export function isNumericCol(col: string): boolean {
   return AMOUNT_COLS.has(col) || /(_days|Count|Qty|amount)/i.test(col)
 }
 
+/** Reference strings persisted before the parser normalized them carry a
+ *  float artifact ("1120425700382.0"); strip it for display only. */
+export function stripFloatArtifact(s: string): string {
+  return /^\d+\.0$/.test(s) ? s.slice(0, -2) : s
+}
+
 /** One display string for any cell the API can produce. */
 export function fmtCell(col: string, v: Cell): string {
   if (v === null || v === undefined || v === '') return '—'
-  if (Array.isArray(v)) return `${v.length} bills`
+  if (Array.isArray(v)) return `${v.length} bill${v.length === 1 ? '' : 's'}`
   if (typeof v === 'object') {
     const entries = Object.entries(v)
     if (!entries.length) return '—'
@@ -48,5 +54,5 @@ export function fmtCell(col: string, v: Cell): string {
   }
   if (typeof v === 'boolean') return v ? '✓' : '✗'
   if (typeof v === 'number') return AMOUNT_COLS.has(col) ? inr(v) : String(v)
-  return String(v)
+  return stripFloatArtifact(String(v))
 }

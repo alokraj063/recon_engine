@@ -3,6 +3,7 @@ import { findAmount, sumAmount, sumCounts } from '../combineRuns'
 import { inr } from '../format'
 
 export interface SummaryRun {
+  runId: string
   label: string
   summary: SummaryRow[]
   meta: ReconMeta
@@ -133,15 +134,22 @@ export function SummaryDashboard({ runs, aggregate }: Props) {
       )}
 
       {!multi && selfcheck && (
-        <p className="selfcheck-line reveal reveal-2">
-          <span className="tick">✓ parse verified</span> — HSBC states {selfcheck.stated_count} credits
-          / {inr(selfcheck.stated_total)}; parsed {selfcheck.parsed_count} / {inr(selfcheck.parsed_total)}
-        </p>
+        selfcheck.passed === false ? (
+          <p className="selfcheck-line selfcheck-warn reveal reveal-2">
+            <span className="tick">⚠ parse mismatch</span> — statement states {selfcheck.stated_count} credits
+            / {inr(selfcheck.stated_total)}; gold rebuilt {selfcheck.parsed_count} / {inr(selfcheck.parsed_total)}
+          </p>
+        ) : (
+          <p className="selfcheck-line reveal reveal-2">
+            <span className="tick">✓ parse verified</span> — statement states {selfcheck.stated_count} credits
+            / {inr(selfcheck.stated_total)}; parsed {selfcheck.parsed_count} / {inr(selfcheck.parsed_total)}
+          </p>
+        )
       )}
 
       {multi ? (
         runs.map((r) => (
-          <div key={r.label} className="reveal reveal-3">
+          <div key={r.runId} className="reveal reveal-3">
             <h3 className="ledger-h">
               {r.label}
               {r.meta.mode && <span className="stamp seg-inline"> {r.meta.mode}</span>}

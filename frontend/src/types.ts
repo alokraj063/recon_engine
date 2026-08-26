@@ -141,7 +141,10 @@ export interface LedgerBillInfo {
 export interface LedgerMatch {
   id: string
   run_id: string
+  /** per-run engine label (m0, m1, …) — repeats across runs */
   match_id: string
+  /** durable per-customer match number, shown as "M-{seq}"; never reused */
+  seq: number | null
   confidence: string
   status: 'OPEN' | 'LOCKED' | 'REJECTED'
   locked_by: 'AUTO_HIGH' | 'USER' | null
@@ -250,6 +253,39 @@ export interface Overview {
   last_run: { run_id: string; mode: string; created_at: string
               counts: ReconMeta['counts'] | null } | null
   last_ingestion: { at: string; original_name: string; source_type: string } | null
+}
+
+// --- AR reconciliation -------------------------------------------------
+
+export type ArStatus = 'SETTLED' | 'IN_REVIEW' | 'AWAITING' | 'OVERDUE'
+
+export interface ArRow {
+  bill_number: string | null
+  zone: string | null
+  org_unit: string | null
+  bill_status: string | null
+  gross_amount: number | null
+  net_payable_amount: number | null
+  due_date: string | null
+  age_days: number | null
+  status: ArStatus
+  pay: { bank_ref: string | null; amount: number | null; value_date: string | null } | null
+  variance: number | null
+  match_ledger_id: string | null
+  match_seq: number | null
+  exception_id: string | null
+}
+
+export interface ArView {
+  as_of: string
+  kpis: {
+    outstanding: { count: number; value: number }
+    received: { count: number; value: number; mtd_value: number }
+    match_rate: number | null
+    overdue: { count: number; value: number }
+  }
+  aging: Array<{ bucket: string; count: number; value: number }>
+  rows: ArRow[]
 }
 
 // --- audit trail -------------------------------------------------------

@@ -379,7 +379,7 @@ export function IngestForm({
               conflicts {result.stats.conflicts}
             </span>
           </div>
-          {result.selfcheck && (
+          {result.selfcheck && result.selfcheck.passed !== false && (
             <p className="selfcheck-line">
               <span className="tick">✓ parse verified</span> — statement states{' '}
               {result.selfcheck.stated_count} credits / {inr(result.selfcheck.stated_total)};

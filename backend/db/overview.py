@@ -1,12 +1,16 @@
 """
-Command Center overview: cheap aggregate counts for one customer, all
-via SQL — no gold frames are loaded. Read-only (no audit event).
+Command Center overview + AR reconciliation + audit feed: cheap read-only
+aggregates for one customer, all via SQL — no gold frames are loaded.
+Read-only (no audit events).
 """
+
+from datetime import date
 
 from sqlalchemy import func, select
 
 from .models import (AuditLog, BronzeFile, ExceptionLedger, GoldBankTxn,
-                     GoldBill, GoldLineageDoc, GoldRecovery, MatchLedger, Run)
+                     GoldBill, GoldLineageDoc, GoldRecovery, MatchLedger,
+                     MatchLedgerBill, Run)
 
 
 def audit_events(session, customer_pk: int, limit: int = 500) -> list:
@@ -152,4 +156,142 @@ def overview(session, customer_pk: int) -> dict:
         "top_exceptions": top[:8],
         "last_run": last_run,
         "last_ingestion": last_ingestion,
+    }
+
+
+# --- AR reconciliation ---------------------------------------------------
+
+OVERDUE_DAYS = 30
+
+_AR_STATUS_ORDER = {"OVERDUE": 0, "AWAITING": 1, "IN_REVIEW": 2, "SETTLED": 3}
+
+
+def _due_date(bill: GoldBill):
+    """Economic due date: the day the money was advised to the bank,
+    falling back to the payment order, then the CO6 submission."""
+    return (bill.payment_advice_date or bill.payment_order_date
+            or bill.submission_date)
+
+
+def ar_view(session, customer_pk: int) -> dict:
+    """Bill-centric receivables working set: every bill that is settled
+    by the ledger, under review, or still owed (open BILL_ONLY) — plus
+    KPIs and an aging analysis. Historic bills outside the recon working
+    set are deliberately excluded; every row here is actionable."""
+    today = date.today()
+    rows: list = []
+
+    # --- settled / in-review: picked bills of non-REJECTED matches ------
+    ledger_rows = list(session.execute(
+        select(MatchLedger, MatchLedgerBill, GoldBill, GoldBankTxn)
+        .join(MatchLedgerBill, MatchLedgerBill.match_ledger_id == MatchLedger.id)
+        .join(GoldBill, GoldBill.id == MatchLedgerBill.gold_bill_id)
+        .join(GoldBankTxn, GoldBankTxn.id == MatchLedger.gold_bank_txn_id)
+        .where(MatchLedger.customer_id == customer_pk,
+               MatchLedger.status != "REJECTED",
+               MatchLedgerBill.role == "picked")))
+    picked_per_match: dict = {}
+    for m, _l, _b, _t in ledger_rows:
+        picked_per_match[m.id] = picked_per_match.get(m.id, 0) + 1
+    received_txns: dict = {}
+    for m, _link, bill, txn in ledger_rows:
+        received_txns[txn.id] = txn
+        net = bill.net_payable_amount
+        # a batched credit covers several bills — per-bill variance would
+        # mislead, so it is only computed for 1:1 matches
+        variance = (round((txn.amount or 0) - (net or 0), 2)
+                    if picked_per_match[m.id] == 1 and txn.amount is not None
+                    and net is not None else None)
+        due = _due_date(bill)
+        rows.append({
+            "bill_number": bill.bill_number,
+            "zone": bill.zone,
+            "org_unit": bill.org_unit,
+            "bill_status": bill.bill_status,
+            "gross_amount": bill.gross_amount,
+            "net_payable_amount": net,
+            "due_date": due.isoformat() if due else None,
+            "age_days": None,
+            "status": "SETTLED" if m.status == "LOCKED" else "IN_REVIEW",
+            "pay": {"bank_ref": txn.bank_ref, "amount": txn.amount,
+                    "value_date": (txn.value_date.isoformat()
+                                   if txn.value_date else None)},
+            "variance": variance,
+            "match_ledger_id": m.id,
+            "match_seq": m.seq,
+            "exception_id": None,
+        })
+
+    # --- outstanding: open BILL_ONLY exceptions -------------------------
+    for exc, bill in session.execute(
+            select(ExceptionLedger, GoldBill)
+            .join(GoldBill, GoldBill.id == ExceptionLedger.gold_bill_id)
+            .where(ExceptionLedger.customer_id == customer_pk,
+                   ExceptionLedger.status == "OPEN",
+                   ExceptionLedger.exception_type == "BILL_ONLY")):
+        due = _due_date(bill)
+        age = (today - due).days if due else None
+        rows.append({
+            "bill_number": bill.bill_number,
+            "zone": bill.zone,
+            "org_unit": bill.org_unit,
+            "bill_status": bill.bill_status,
+            "gross_amount": bill.gross_amount,
+            "net_payable_amount": bill.net_payable_amount,
+            "due_date": due.isoformat() if due else None,
+            "age_days": age,
+            "status": ("OVERDUE" if age is not None and age > OVERDUE_DAYS
+                       else "AWAITING"),
+            "pay": None,
+            "variance": (-bill.net_payable_amount
+                         if bill.net_payable_amount is not None else None),
+            "match_ledger_id": None,
+            "match_seq": None,
+            "exception_id": exc.id,
+        })
+
+    rows.sort(key=lambda r: (_AR_STATUS_ORDER[r["status"]],
+                             -(abs(r["net_payable_amount"] or 0))))
+
+    # --- KPIs + aging ---------------------------------------------------
+    open_rows = [r for r in rows if r["status"] in ("AWAITING", "OVERDUE")]
+    overdue_rows = [r for r in rows if r["status"] == "OVERDUE"]
+    received_value = sum(t.amount or 0 for t in received_txns.values())
+    mtd_value = sum(
+        t.amount or 0 for t in received_txns.values()
+        if t.value_date and t.value_date.year == today.year
+        and t.value_date.month == today.month)
+    credits = _count(session, GoldBankTxn,
+                     GoldBankTxn.customer_id == customer_pk,
+                     GoldBankTxn.used_in_recon.is_(True))
+    match_rate = (len(received_txns) / credits) if credits else None
+
+    buckets = [("0-30", 0, 30), ("31-60", 31, 60), ("61-90", 61, 90),
+               ("90+", 91, None)]
+    aging = []
+    for label, lo, hi in buckets:
+        hit = [r for r in open_rows
+               if r["age_days"] is not None and r["age_days"] >= lo
+               and (hi is None or r["age_days"] <= hi)]
+        aging.append({"bucket": label, "count": len(hit),
+                      "value": sum(r["net_payable_amount"] or 0 for r in hit)})
+    undated = [r for r in open_rows if r["age_days"] is None]
+    aging.append({"bucket": "undated", "count": len(undated),
+                  "value": sum(r["net_payable_amount"] or 0 for r in undated)})
+
+    return {
+        "as_of": today.isoformat(),
+        "kpis": {
+            "outstanding": {"count": len(open_rows),
+                            "value": sum(r["net_payable_amount"] or 0
+                                         for r in open_rows)},
+            "received": {"count": len(received_txns), "value": received_value,
+                         "mtd_value": mtd_value},
+            "match_rate": match_rate,
+            "overdue": {"count": len(overdue_rows),
+                        "value": sum(r["net_payable_amount"] or 0
+                                     for r in overdue_rows)},
+        },
+        "aging": aging,
+        "rows": rows,
     }

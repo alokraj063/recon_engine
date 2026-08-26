@@ -33,7 +33,9 @@ function buildColumns(frame: GoldFrameName, rows: Row[]): { columns: ColumnDef<R
 
   return {
     columns: [...curated.map(([k, l]) => make(k, l)), ...rest.map((k) => make(k, k))],
-    hidden: preset.hidden.filter((k) => present.has(k)),
+    // uncurated extras append hidden (framePresets' contract) — reachable
+    // via the columns menu
+    hidden: [...preset.hidden.filter((k) => present.has(k)), ...rest],
   }
 }
 

@@ -672,6 +672,16 @@ def customer_overview(customer_id: str = "default"):
         return db_overview.overview(session, customer_pk)
 
 
+@router.get("/ar")
+def ar_reconciliation(customer_id: str = "default"):
+    """AR working set: settled / in-review / outstanding bills with the
+    settling credit, variance, due-date age, KPIs and aging buckets —
+    the AR Reconciliation view. Read-only."""
+    with SessionLocal() as session:
+        customer_pk = _get_customer(session, customer_id).id
+        return db_overview.ar_view(session, customer_pk)
+
+
 @router.get("/audit")
 def audit_trail(customer_id: str = "default", limit: int = 500):
     """The customer's audit_log event stream, newest first — feeds the
@@ -1122,9 +1132,18 @@ async def _reconcile_incremental_from_gold(customer_pk, customer_key,
         if not out["queue"].empty and "match_id" in out["queue"].columns:
             out["queue"]["match_ledger_id"] = \
                 out["queue"]["match_id"].map(ledger_ids)
-        selfcheck = await run_in_threadpool(
-            _gold_selfcheck, bank_adapter, bank_adapter_params, out["bank"],
-            stmt_path, customer_pk, statement_bronze_id)
+        # selfcheck must see the statement's FULL gold credits, not the
+        # pool — the pool is a designed subset (ledger-consumed credits
+        # excluded) and would mismatch the printed totals on every run
+        def statement_selfcheck():
+            with SessionLocal() as session:
+                bank_df = reconcile_gold.statement_credits_frame(
+                    session, statement_bronze_id)
+            return _gold_selfcheck(bank_adapter, bank_adapter_params,
+                                   bank_df, stmt_path, customer_pk,
+                                   statement_bronze_id)
+
+        selfcheck = await run_in_threadpool(statement_selfcheck)
         payload = _build_payload(
             out, form_config, selfcheck, names, customer_key, "incremental",
             extra_meta={"ledger": ledger_stats,

@@ -37,6 +37,7 @@ const HIDDEN_BY_DEFAULT = [
   'gross_amount', 'approved_amount', 'deduction_amount', 'recoveries', 'recovery_count',
   'return_reason', 'RNOTE_MatchedVia', 'CRN_MatchedVia', 'PO_Date',
   'Receipt_Date', 'Receipt_Qty', 'DRR_or_Challan', 'Bill_Reg_No', 'bill_indices',
+  'candidate_indices',
 ]
 
 function buildColumns(rows: Row[]): ColumnDef<Row>[] {

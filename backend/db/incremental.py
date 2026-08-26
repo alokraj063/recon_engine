@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from logging_setup import get_logger, run_id_var
@@ -240,6 +240,13 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
     txn_by_match_row = _matched_txn_ids(out, bank_ids)
     matched_bill_ids, matched_txn_ids = set(), set()
 
+    # durable per-customer match number ("M-{seq}" in the UI): unlike
+    # match_id it never restarts. max+1 is safe under the documented
+    # single-worker assumption (same one run-locking relies on).
+    next_seq = (session.execute(
+        select(func.max(MatchLedger.seq))
+        .where(MatchLedger.customer_id == customer_id)).scalar() or 0) + 1
+
     if not out["matched"].empty:
         for i, r in enumerate(out["matched"].itertuples()):
             gold_txn = txn_by_match_row.get(i)
@@ -249,11 +256,13 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
             status = "LOCKED" if r.confidence == "HIGH" else "OPEN"
             ledger = MatchLedger(
                 customer_id=customer_id, run_id=run_id, match_id=r.match_id,
+                seq=next_seq,
                 gold_bank_txn_id=gold_txn, confidence=r.confidence,
                 status=status,
                 locked_at=now if status == "LOCKED" else None,
                 locked_by="AUTO_HIGH" if status == "LOCKED" else None,
             )
+            next_seq += 1
             session.add(ledger)
             session.flush()
             ledger_ids[r.match_id] = ledger.id
@@ -504,6 +513,7 @@ def ledger_view(customer_id: int) -> dict:
 
         matches = [{
             "id": m.id, "run_id": m.run_id, "match_id": m.match_id,
+            "seq": m.seq,
             "confidence": m.confidence, "status": m.status,
             "locked_by": m.locked_by,
             "created_at": m.created_at.isoformat(),

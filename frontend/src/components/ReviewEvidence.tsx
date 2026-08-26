@@ -1,5 +1,6 @@
 import type { Candidate, Cell, Row } from '../types'
-import { fmtCell } from '../format'
+import { fmtCell, inr } from '../format'
+import { BillLineage } from './BillLineage'
 import { DetailField } from './BillTrailDetail'
 
 /**
@@ -87,11 +88,12 @@ const MATCHED_AMOUNTS: Array<[string, string]> = [
   ['recovery_count', 'Recovery lines'],
 ]
 
-export function CandidateCard({ cand }: { cand: Candidate }) {
+export function CandidateCard({ cand, runId }: { cand: Candidate; runId?: string | null }) {
   return (
     <div className={`candidate-card${cand.Picked ? ' picked' : ''}`}>
       <div className="candidate-head">
         {cand.Picked ? <span className="chip chip-picked">PICKED</span> : <span className="chip">candidate</span>}
+        <span className="side-tag tag-bill">IREPS BILL</span>
       </div>
       <div className="detail-grid">
         {CANDIDATE_LABELS.map(([k, l]) => {
@@ -99,32 +101,106 @@ export function CandidateCard({ cand }: { cand: Candidate }) {
           return (
             <div key={k}>
               <div className="dt-label">{l}</div>
-              <div className="dt-value">{v === '—' ? <span className="empty-cell">—</span> : v}</div>
+              <div className={`dt-value${k === 'net_payable_amount' ? ' match-key' : ''}`}>
+                {v === '—' ? <span className="empty-cell">—</span> : v}
+              </div>
             </div>
           )
         })}
+        <BillLineage runId={runId} billNumber={cand.bill_number}
+                     fallbackRow={cand as Row} />
       </div>
     </div>
   )
 }
 
+/** How the two sides compare, value against value: bank amount ⇄ bill
+ *  net payable (the match key), bank zone ⇄ bill zone, statement value
+ *  date ⇄ the bill date the matcher compared against. */
+function MatchPairs({ bank, bill }: {
+  bank: { amount: Cell; zone: Cell; value_date: Cell;
+          zone_check: Cell; date_check: Cell; date_gap_days: Cell; date_source: Cell }
+  bill: { net_payable_amount: Cell; zone: Cell;
+          payment_advice_date: Cell; payment_order_date: Cell } | null
+}) {
+  if (!bill) return null
+  const pill = (side: 'bank' | 'bill', v: Cell, col: string) => (
+    <span className={`pair-pill pill-${side}`}>
+      {typeof v === 'number' ? inr(v) : fmtCell(col, v)}
+    </span>
+  )
+  const verdict = (ok: boolean, note?: string) => (
+    <span className={`pair-verdict ${ok ? 'ok' : 'bad'}`}>
+      {ok ? '✓' : '✗'}{note ? <span className="pair-note"> {note}</span> : null}
+    </span>
+  )
+  const usesCo7 = bank.date_source === 'co7'
+  const billDate = usesCo7 ? bill.payment_order_date : bill.payment_advice_date
+  const dateOk = bank.date_check === true || bank.date_check === '✓'
+  const zoneOk = bank.zone_check === true || bank.zone_check === '✓'
+  const gap = bank.date_gap_days
+  return (
+    <div className="pair-rows">
+      <span className="pair-label">Amount</span>
+      {pill('bank', bank.amount, 'amount')}
+      {verdict(true)}
+      {pill('bill', bill.net_payable_amount, 'net_payable_amount')}
+      <span className="pair-note">the match key — pairs only form on equal amounts</span>
+
+      <span className="pair-label">Signal</span>
+      {pill('bank', bank.zone, 'zone')}
+      {verdict(zoneOk)}
+      {pill('bill', bill.zone, 'zone')}
+      <span className="pair-note">{zoneOk ? 'signals agree' : 'signal mismatch'}</span>
+
+      <span className="pair-label">Date</span>
+      {pill('bank', bank.value_date, 'value_date')}
+      {verdict(dateOk, dateOk ? undefined : `${fmtCell('date_gap_days', gap)}d gap`)}
+      {pill('bill', billDate, 'payment_advice_date')}
+      <span className="pair-note">
+        vs {usesCo7 ? 'pay order date' : 'advice date'}
+        {dateOk ? ' — within tolerance' : ' — over tolerance'}
+      </span>
+    </div>
+  )
+}
+
 /** Review-queue row evidence: bank side, why-flagged signals, candidate
- *  cards. Render inside a `.detail-grid`. */
-export function ReviewEvidence({ row }: { row: Row }) {
+ *  cards. Render inside a `.detail-grid`. `runId` (the creating run)
+ *  lets each candidate card pull its full lineage timeline. */
+export function ReviewEvidence({ row, runId }: { row: Row; runId?: string | null }) {
   const cands = Array.isArray(row.Candidates) ? (row.Candidates as Candidate[]) : []
+  const picked = cands.find((c) => c.Picked) ?? cands[0] ?? null
   return (
     <>
-      {REVIEW_BANK.map(([k, l]) => (
-        <DetailField key={k} row={row} k={k} label={l} />
-      ))}
+      <div className="side-panel side-bank">
+        <span className="side-tag tag-bank">BANK STATEMENT</span>
+        {REVIEW_BANK.map(([k, l]) => (
+          <DetailField key={k} row={row} k={k} label={l}
+                       valueClass={k === 'amount' ? 'match-key' : undefined} />
+        ))}
+      </div>
       <div className="detail-section">Why it was flagged</div>
+      <MatchPairs
+        bank={{ amount: row.amount as Cell, zone: row.zone as Cell,
+                value_date: row.value_date as Cell,
+                zone_check: row.zone_check as Cell, date_check: row.date_check as Cell,
+                date_gap_days: row.date_gap_days as Cell,
+                date_source: row.date_source as Cell }}
+        bill={picked && {
+          net_payable_amount: picked.net_payable_amount as Cell,
+          zone: picked.zone as Cell,
+          payment_advice_date: picked.payment_advice_date as Cell,
+          payment_order_date: picked.payment_order_date as Cell,
+        }}
+      />
       {REVIEW_SIGNALS.map(([k, l]) => (
         <DetailField key={k} row={row} k={k} label={l} />
       ))}
       <div className="detail-section">Candidate bills ({cands.length})</div>
       <div className="candidate-list">
         {cands.map((c, i) => (
-          <CandidateCard key={i} cand={c} />
+          <CandidateCard key={i} cand={c} runId={runId} />
         ))}
       </div>
     </>
@@ -134,7 +210,7 @@ export function ReviewEvidence({ row }: { row: Row }) {
 /** Matched-frame row evidence (HIGH auto-locked matches never enter the
  *  review queue, so no candidate cards exist — show the pairing and the
  *  signal outcome instead). Render inside a `.detail-grid`. */
-export function MatchedEvidence({ row }: { row: Row }) {
+export function MatchedEvidence({ row, runId }: { row: Row; runId?: string | null }) {
   // matched rows don't carry net_payable_amount as a column: the bank
   // `amount` IS the bill's net payable — that equality is the match key
   const netFallback = row.net_payable_amount === undefined
@@ -143,27 +219,47 @@ export function MatchedEvidence({ row }: { row: Row }) {
   return (
     <>
       <div className="detail-section">Bank credit</div>
-      {MATCHED_BANK.map(([k, l]) => (
-        <DetailField key={k} row={row} k={k} label={l} />
-      ))}
+      <div className="side-panel side-bank">
+        <span className="side-tag tag-bank">BANK STATEMENT</span>
+        {MATCHED_BANK.map(([k, l]) => (
+          <DetailField key={k} row={row} k={k} label={l}
+                       valueClass={k === 'amount' ? 'match-key' : undefined} />
+        ))}
+      </div>
       <div className="detail-section">Matched bill</div>
-      {MATCHED_BILL.map(([k, l]) => (
-        <DetailField key={k} row={row} k={k} label={l} />
-      ))}
-      <div className="detail-section">Amounts — gross − deductions = net payable = credit</div>
-      {MATCHED_AMOUNTS.map(([k, l]) => (
-        <DetailField key={k} row={row} k={k} label={l} />
-      ))}
-      <div>
-        <div className="dt-label">Net payable</div>
-        <div className="dt-value">
-          {fmtCell('net_payable_amount', (net ?? null) as Cell)}
-          {netFallback && net !== null && net !== undefined && (
-            <span className="chip-note"> = credit (the match key)</span>
-          )}
+      <div className="side-panel side-bill">
+        <span className="side-tag tag-bill">IREPS BILL</span>
+        {MATCHED_BILL.map(([k, l]) => (
+          <DetailField key={k} row={row} k={k} label={l} />
+        ))}
+        <BillLineage runId={runId} billNumber={row.bill_number} fallbackRow={row} />
+        <div className="detail-section">Amounts — gross − deductions = net payable = credit</div>
+        {MATCHED_AMOUNTS.map(([k, l]) => (
+          <DetailField key={k} row={row} k={k} label={l} />
+        ))}
+        <div>
+          <div className="dt-label">Net payable</div>
+          <div className="dt-value match-key">
+            {fmtCell('net_payable_amount', (net ?? null) as Cell)}
+            {netFallback && net !== null && net !== undefined && (
+              <span className="chip-note"> = credit (the match key)</span>
+            )}
+          </div>
         </div>
       </div>
       <div className="detail-section">Signals</div>
+      <MatchPairs
+        bank={{ amount: row.amount as Cell,
+                zone: row.zone_from_narrative as Cell,
+                value_date: row.value_date as Cell,
+                zone_check: row.zone_check as Cell, date_check: row.date_check as Cell,
+                date_gap_days: row.date_gap_days as Cell,
+                date_source: row.date_source as Cell }}
+        bill={{ net_payable_amount: (net ?? null) as Cell,
+                zone: row.bill_zone as Cell,
+                payment_advice_date: row.payment_advice_date as Cell,
+                payment_order_date: row.payment_order_date as Cell }}
+      />
       {REVIEW_SIGNALS.map(([k, l]) => (
         <DetailField key={k} row={row} k={k} label={l} />
       ))}

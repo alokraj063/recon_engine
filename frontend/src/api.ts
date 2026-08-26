@@ -1,6 +1,7 @@
 import {
   ApiError,
   type AdapterRegistry,
+  type ArView,
   type AuditEventRow,
   type CustomerConfig,
   type CustomerInfo,
@@ -141,6 +142,11 @@ export async function fetchOverview(customerId: string): Promise<Overview> {
 /** The customer's audit_log event stream, newest first. */
 export async function fetchAudit(customerId: string): Promise<AuditEventRow[]> {
   return getJson(`/api/audit?customer_id=${encodeURIComponent(customerId)}`)
+}
+
+/** AR working set: settled / in-review / outstanding bills + aging. */
+export async function fetchAr(customerId: string): Promise<ArView> {
+  return getJson(`/api/ar?customer_id=${encodeURIComponent(customerId)}`)
 }
 
 async function sendJson<T>(method: string, url: string, body?: unknown): Promise<T> {

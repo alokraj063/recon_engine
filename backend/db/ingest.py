@@ -208,7 +208,9 @@ def ingest_gold_frames(session, customer_id: int,
         if rows and len(rows) == len(df):
             ids[frame] = rows
             reused_files.add(frame)
-            stats["files_reused"] += 1
+    # count FILES, not frames — one bills upload yields two gold frames
+    # (bills + recoveries) sharing a bronze file
+    stats["files_reused"] += len({bronze_ids[f] for f in reused_files})
 
     if "bank_txns" in gold_frames and "bank_txns" not in reused_files:
         ids["bank_txns"] = _ingest_keyed(

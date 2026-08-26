@@ -130,6 +130,23 @@ def run_snapshot(session, customer_id: int, statement_bronze_id: int,
     return out, f["bank_ids"], f["bill_ids"]
 
 
+def statement_credits_frame(session, statement_bronze_id: int):
+    """The chosen statement's FULL credits rebuilt from gold — the frame
+    a bank-adapter selfcheck must verify. Incremental runs match on a
+    pool (a designed subset of the statement), so checking the pool
+    against the statement's printed totals would mismatch by design."""
+    txn_rows = list(session.execute(
+        select(GoldBankTxn)
+        .where(GoldBankTxn.bronze_file_id == statement_bronze_id)
+        .order_by(GoldBankTxn.row_seq)).scalars())
+    credit_rows = [r for r in txn_rows if r.used_in_recon]
+    bank_df, _ = frame_from_gold(credit_rows, BANK_MAP, "bank_txns",
+                                 ensure=ensure_schema)
+    if "used_in_recon" in bank_df.columns:
+        bank_df = bank_df.drop(columns=["used_in_recon"])
+    return bank_df
+
+
 # --- gold browse helpers (feed the /api/gold/* endpoints) ---------------
 
 def gold_frame(session, frame: str, customer_id: int,

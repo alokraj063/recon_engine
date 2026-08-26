@@ -3,6 +3,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import type { FrameName, Row } from '../types'
 import { fetchFrame } from '../api'
 import { AMOUNT_COLS, fmtCell } from '../format'
+import { combineFrameRows } from '../combineRuns'
 import { SHARED_PRESETS, type FramePreset } from '../framePresets'
 import { BillTrailDetail } from './BillTrailDetail'
 import { DataTable } from './DataTable'
@@ -40,7 +41,12 @@ function buildColumns(name: FrameName, rows: Row[]): { columns: ColumnDef<Row>[]
   const preset = PRESETS[name]
   const present = new Set(rows.flatMap((r) => Object.keys(r)))
   const curated = preset.curated.filter(([k]) => present.has(k))
-  const rest = [...present].filter((k) => !preset.curated.some(([c]) => c === k)).sort()
+  // multi-run union rows carry an origin label; it leads the table and
+  // its id twin stays out of the column set
+  const hasRun = present.has('Run')
+  const rest = [...present]
+    .filter((k) => k !== 'Run' && k !== 'run_id' && !preset.curated.some(([c]) => c === k))
+    .sort()
 
   const make = (key: string, label: string): ColumnDef<Row> => ({
     id: key,
@@ -71,14 +77,19 @@ function buildColumns(name: FrameName, rows: Row[]): { columns: ColumnDef<Row>[]
   })
 
   return {
-    columns: [...curated.map(([k, l]) => make(k, l)), ...rest.map((k) => make(k, k))],
+    columns: [
+      ...(hasRun ? [make('Run', 'Run')] : []),
+      ...curated.map(([k, l]) => make(k, l)),
+      ...rest.map((k) => make(k, k)),
+    ],
     // enriched frame: hide every non-curated column (the raw RN_/CR_ set is large)
     hidden: name === 'bills_enriched' ? rest : preset.hidden,
   }
 }
 
 interface Props {
-  runId: string
+  /** selected runs, newest first; >1 renders the deduped union */
+  runs: Array<{ runId: string; label: string }>
   name: FrameName
 }
 
@@ -86,35 +97,50 @@ interface Props {
 // naturally misses the cache)
 const frameCache = new Map<string, Row[]>()
 
-export function SourceTable({ runId, name }: Props) {
+async function loadFrame(runId: string, name: FrameName): Promise<Row[]> {
   const cacheKey = `${runId}:${name}`
-  const [rows, setRows] = useState<Row[] | null>(frameCache.get(cacheKey) ?? null)
+  const hit = frameCache.get(cacheKey)
+  if (hit) return hit
+  const d = await fetchFrame(runId, name)
+  // frames are immutable per run, so the cache is always correct;
+  // cap it so browsing many persisted runs can't grow it unbounded
+  if (frameCache.size >= 32) {
+    const oldest = frameCache.keys().next().value
+    if (oldest !== undefined) frameCache.delete(oldest)
+  }
+  frameCache.set(cacheKey, d.rows)
+  return d.rows
+}
+
+export function SourceTable({ runs, name }: Props) {
+  const selKey = `${runs.map((r) => r.runId).join(',')}:${name}`
+  const [rows, setRows] = useState<Row[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (frameCache.has(cacheKey)) {
-      setRows(frameCache.get(cacheKey)!)
-      return
-    }
     let live = true
     setRows(null)
     setError(null)
-    fetchFrame(runId, name)
-      .then((d) => {
-        // frames are immutable per run, so the cache is always correct;
-        // cap it so browsing many persisted runs can't grow it unbounded
-        if (frameCache.size >= 32) {
-          const oldest = frameCache.keys().next().value
-          if (oldest !== undefined) frameCache.delete(oldest)
-        }
-        frameCache.set(cacheKey, d.rows)
-        if (live) setRows(d.rows)
-      })
-      .catch((e) => live && setError(String(e.message ?? e)))
+    Promise.all(
+      runs.map((r) =>
+        loadFrame(r.runId, name)
+          .then((rows) => ({ runId: r.runId, label: r.label, rows }))
+          .catch(() => null)),   // a failed run drops out, not the table
+    ).then((loaded) => {
+      if (!live) return
+      const ok = loaded.filter((x): x is NonNullable<typeof x> => x !== null)
+      if (!ok.length) {
+        setError('could not load run frames')
+        return
+      }
+      setRows(combineFrameRows(ok, name))
+    })
     return () => {
       live = false
     }
-  }, [runId, name, cacheKey])
+    // selKey covers runs + name content
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selKey])
 
   if (error) return <p className="frame-note">could not load: {error}</p>
   if (rows === null)
@@ -145,7 +171,7 @@ export function SourceTable({ runId, name }: Props) {
       initialHidden={hidden}
       renderDetail={
         name === 'bills_enriched'
-          ? (row) => <BillTrailDetail row={row} title={`Bill ${row.bill_number ?? ''} — document history`} />
+          ? (row) => <BillTrailDetail row={row} title={`Bill ${row.bill_number ?? ''} — lineage`} />
           : undefined
       }
     />

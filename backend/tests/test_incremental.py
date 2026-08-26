@@ -207,7 +207,8 @@ def test_incremental_scenario(world):
         {"bills": world["bills_gold"]["bills"],
          "recoveries": world["bills_gold"]["recoveries"]},
         {"bills": bz["bills"], "recoveries": bz["bills"]})
-    assert stats_re["files_reused"] >= 1 and stats_re["rows_inserted"] == 0
+    # one FILE reused (bills + recoveries frames share one bronze file)
+    assert stats_re["files_reused"] == 1 and stats_re["rows_inserted"] == 0
     with SessionLocal() as s:
         after = len(list(s.execute(
             select(GoldBill.id).where(GoldBill.customer_id == cust)).scalars()))
@@ -218,6 +219,15 @@ def test_incremental_scenario(world):
             {"bank_txns": bz["stmt2"]})
     run2, out2, ledger2 = _incremental_run(cust, bz["stmt2"])
     _finish(run2)
+
+    # (f) every ledger match carries a unique durable seq — match_id
+    # (m0, m1, …) restarts per run, seq must not
+    with SessionLocal() as s:
+        seqs = list(s.execute(
+            select(MatchLedger.seq)
+            .where(MatchLedger.customer_id == cust)).scalars())
+    assert all(x is not None for x in seqs)
+    assert len(seqs) == len(set(seqs)), "durable match seq repeated"
 
     # (a) union of ledger matches == one snapshot reconcile over everything
     snapshot = reconcile(

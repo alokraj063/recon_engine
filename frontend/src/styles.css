@@ -20,7 +20,13 @@
   --rule-strong: hsl(220 14% 82%);
   --sienna: hsl(0 72% 48%);         /* danger */
   --gold: hsl(32 90% 34%);          /* warning */
-  --blue: hsl(215 75% 45%);         /* info */
+  --blue: hsl(215 75% 45%);         /* info; doubles as the BANK side hue */
+  /* side-identity hues for match evidence: bank statement = blue,
+     bill / IREPS document = warm amber (muted vs --gold so it reads as
+     identity, never as a warning) */
+  --bill: hsl(28 65% 38%);
+  --bank-wash: hsl(215 75% 45% / 0.06);
+  --bill-wash: hsl(30 65% 45% / 0.07);
   --violet: #5b4a86;
   --success: hsl(142 55% 31%);
   --danger-bg: hsl(0 72% 48% / 0.08);
@@ -90,13 +96,6 @@ html, body {
   font-weight: 400;
 }
 
-.sidebar-head .strapline {
-  margin: 3px 0 0;
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: #bfd2c4;
-}
 
 .sidebar-nav { display: flex; flex-direction: column; padding: 12px 0; }
 
@@ -299,7 +298,37 @@ html, body {
   margin: 0;
 }
 
-.result-head .file-note { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-faint); }
+.result-head .file-note {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;      /* the picker keeps its spot on every view */
+  margin-left: auto;
+}
+
+/* second line under the result head: run-specific file context, never
+   allowed to push the picker around */
+.head-sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  margin: -12px 0 14px;
+}
+
+.head-sub .head-sub-files {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.head-sub .chip { flex-shrink: 0; }
 
 .btn-download {
   font-family: var(--font-body);
@@ -361,6 +390,8 @@ html, body {
 }
 
 .selfcheck-line .tick { font-weight: 700; }
+
+.selfcheck-line.selfcheck-warn { color: var(--gold); }
 
 /* main view card */
 
@@ -573,8 +604,10 @@ table.data tbody tr:hover { background: #f1ead7; }
 
 .candidate-card {
   border: 1px solid var(--rule-strong);
-  background: var(--paper-card);
+  border-left: 3px solid var(--bill);
+  background: var(--bill-wash);
   padding: 12px 14px 14px;
+  border-radius: var(--radius);
 }
 
 .candidate-card.picked {
@@ -582,7 +615,90 @@ table.data tbody tr:hover { background: #f1ead7; }
   box-shadow: 3px 3px 0 rgba(29, 75, 56, 0.12);
 }
 
-.candidate-card .candidate-head { margin-bottom: 10px; }
+.candidate-card .candidate-head {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- side-identity: bank statement (blue) vs bill / IREPS (amber) ---- */
+
+.side-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px 26px;
+  padding: 12px 14px;
+  border-left: 3px solid;
+  border-radius: var(--radius);
+}
+
+.side-panel.side-bank { border-left-color: var(--blue); background: var(--bank-wash); }
+.side-panel.side-bill { border-left-color: var(--bill); background: var(--bill-wash); }
+
+.side-tag {
+  grid-column: 1 / -1;
+  justify-self: start;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 2px 8px;
+  border: 1px solid;
+  border-radius: 999px;
+}
+
+.side-tag.tag-bank { color: var(--blue); border-color: var(--blue); }
+.side-tag.tag-bill { color: var(--bill); border-color: var(--bill); }
+
+/* the join amount, emphasized on both sides */
+.dt-value.match-key {
+  font-weight: 700;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.side-bank .dt-value.match-key, .pair-pill.pill-bank { text-decoration-color: var(--blue); }
+.side-bill .dt-value.match-key,
+.candidate-card .dt-value.match-key { text-decoration-color: var(--bill); }
+
+/* mapping strip: one row per compared signal, bank value ⇄ bill value */
+.pair-rows {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(70px, max-content) minmax(140px, max-content) max-content minmax(140px, max-content) 1fr;
+  gap: 6px 12px;
+  align-items: center;
+}
+
+.pair-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.pair-pill {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  justify-self: start;
+  white-space: nowrap;
+}
+
+.pair-pill.pill-bank { color: var(--blue); border-color: hsl(215 75% 45% / 0.45); background: var(--bank-wash); }
+.pair-pill.pill-bill { color: var(--bill); border-color: hsl(28 65% 38% / 0.45); background: var(--bill-wash); }
+
+.pair-verdict { font-family: var(--font-mono); font-size: 12px; white-space: nowrap; }
+.pair-verdict.ok { color: var(--success); }
+.pair-verdict.bad { color: var(--sienna); }
+.pair-note { font-size: 11px; color: var(--ink-faint); }
+
+/* row-header chips carrying the side identity */
+.chip-bank { color: var(--blue); border-color: hsl(215 75% 45% / 0.45); background: var(--bank-wash); }
+.chip-bill { color: var(--bill); border-color: hsl(28 65% 38% / 0.45); background: var(--bill-wash); }
 
 .settled-cell { display: flex; flex-direction: column; gap: 2px; }
 
@@ -780,12 +896,20 @@ table.data tbody tr:hover { background: #f1ead7; }
 .btn-open:disabled { opacity: 0.5; cursor: default; }
 .btn-accept { border-color: var(--green-bright); color: var(--green-bright); }
 .btn-accept:hover:not(:disabled) { background: var(--green-bright); color: var(--paper); }
-.btn-reject { border-color: var(--sienna); color: var(--sienna); margin-left: 6px; }
+.btn-reject { border-color: var(--sienna); color: var(--sienna); }
 .btn-reject:hover:not(:disabled) { background: var(--sienna); color: var(--paper); }
 .btn-reopen { border-color: var(--violet); color: var(--violet); }
 .btn-reopen:hover:not(:disabled) { background: var(--violet); color: var(--paper); }
 .btn-accept:disabled, .btn-reject:disabled, .btn-reopen:disabled { opacity: 0.5; cursor: default; }
-.decide { white-space: nowrap; margin-left: 8px; }
+/* one wrapper for every actions-cell state (Accept+Reject / Unlock /
+   Reopen) so the buttons form one aligned column across rows */
+.decide {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  margin-left: 8px;
+}
 
 tr.active-run td { background: rgba(44, 115, 80, 0.06); }
 .run-error { font-family: var(--font-mono); font-size: 11px; color: var(--sienna); max-width: 260px; }
@@ -1290,8 +1414,14 @@ table { font-variant-numeric: tabular-nums; }
   padding: 16px 16px 14px;
   border-bottom: 1px solid var(--side-border);
 }
-.logo-img { display: block; width: 100%; max-width: 135px; }
-.sidebar-head .strapline { color: hsl(200 15% 78% / 0.6); margin-top: 8px; }
+.logo-img {
+  display: block;
+  width: 100%;
+  max-width: 135px;
+  /* transparent PNG straight on the dark sidebar: lift the dark-teal
+     WATTS so it stays legible without a white plate behind it */
+  filter: brightness(1.55) saturate(1.1);
+}
 .nav-group-label { color: hsl(200 15% 78% / 0.6); }
 .nav-item {
   color: var(--side-fg);
@@ -1432,20 +1562,43 @@ table.data tbody tr:hover { background: hsl(220 16% 96%); }
 
 .logo-plate {
   display: block;
-  background: #fff;
-  border-radius: 6px;
-  padding: 8px 10px;
   margin-bottom: 10px;
   max-width: 150px;
 }
 .sidebar-head h1 { margin-top: 2px; }
 
-/* Analyst-queue row highlighted when arriving from the Exception queue */
-.focus-row td {
-  background: hsl(175 70% 28% / 0.08);
-  border-left: 2px solid var(--green);
+/* Analyst-queue row highlighted when arriving from the Exception queue:
+   a transient flash (fades to normal) with a green edge on the row's
+   leading cell only — the view remounts on navigation, so a fresh
+   arrival replays the animation */
+.focus-row td { animation: focus-fade 2.5s ease-out forwards; }
+.focus-row td:first-child { border-left: 2px solid var(--green); }
+@keyframes focus-fade {
+  from { background: hsl(175 70% 28% / 0.14); }
+  to   { background: transparent; }
 }
 .decide-link { margin-left: 10px; }
+
+/* Bills cell in the Durable-matches table: chips flow with real gaps
+   instead of fusing edge-to-edge or colliding across wrapped lines */
+.bill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+}
+.ledger-matches td { line-height: 1.7; }
+/* the evidence row's colSpan td is td:nth-child(1), so the When-column
+   nowrap/width rule would otherwise inherit into the whole panel and
+   long values (narrative, flag) paint over their grid neighbours */
+.ledger-matches .xq-detail td { white-space: normal; width: auto; }
+
+/* per-bill document-timeline expander (candidate cards, matched
+   evidence, ledger fallback) — reuses the .timeline/.tl-* styles */
+.lineage-toggle { grid-column: 1 / -1; margin-top: 2px; }
+.lineage-open { grid-column: 1 / -1; }
+.lineage-open .detail-section { margin-bottom: 8px; }
+.lineage-close { float: right; }
 
 /* bill chooser inside an OPEN match's evidence panel */
 .pick-list {
@@ -1456,6 +1609,51 @@ table.data tbody tr:hover { background: hsl(220 16% 96%); }
 }
 .pick-row { display: flex; align-items: center; gap: 10px; }
 .pick-row .btn-accept { margin-left: auto; }
+
+/* --- ar reconciliation -------------------------------------------------- */
+
+.ar-grid {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 18px;
+  align-items: start;
+  margin-top: 16px;
+}
+.ar-side { display: flex; flex-direction: column; gap: 18px; }
+.ar-table-wrap { max-height: 62vh; overflow-y: auto; }
+.ar-row-link { cursor: pointer; }
+.ar-variance { color: var(--gold); }
+.ar-age-hot { color: var(--sienna); font-family: var(--font-mono); }
+.ar-aging-note { display: block; margin-top: 8px; white-space: normal; }
+.ar-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+.ar-status-count { font-family: var(--font-mono); font-size: 12.5px; }
+
+/* AR status pills on the shared stamp base */
+.stamp-ar-SETTLED {
+  color: var(--success); border-color: hsl(142 55% 31% / 0.4);
+  background: hsl(142 55% 31% / 0.08);
+}
+.stamp-ar-IN_REVIEW {
+  color: var(--blue); border-color: hsl(215 75% 45% / 0.4);
+  background: hsl(215 75% 45% / 0.08);
+}
+.stamp-ar-AWAITING {
+  color: var(--gold); border-color: hsl(32 90% 34% / 0.4);
+  background: hsl(32 90% 34% / 0.08);
+}
+.stamp-ar-OVERDUE {
+  color: var(--sienna); border-color: hsl(0 72% 48% / 0.4);
+  background: hsl(0 72% 48% / 0.08);
+}
+
+@media (max-width: 1100px) {
+  .ar-grid { grid-template-columns: 1fr; }
+}
 
 /* --- audit trail -------------------------------------------------------- */
 

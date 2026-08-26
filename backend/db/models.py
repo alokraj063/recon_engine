@@ -338,6 +338,11 @@ class MatchLedger(Base):
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)   # run that created it
     match_id: Mapped[str] = mapped_column(String(16))
+    # durable per-customer match number shown in the UI as "M-{seq}" —
+    # match_id (m0, m1, …) restarts every run, this never repeats.
+    # Assigned in finalize_ledger; single-worker uvicorn makes the
+    # max+1 allocation safe (documented deferral, same as run locking).
+    seq: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     gold_bank_txn_id: Mapped[str] = mapped_column(ForeignKey("gold.bank_txns.id"), index=True)
     confidence: Mapped[str] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(16), default="OPEN")   # OPEN | LOCKED | REJECTED

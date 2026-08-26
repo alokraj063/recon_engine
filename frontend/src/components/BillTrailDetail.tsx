@@ -28,12 +28,15 @@ export const BILL_MONEY: Array<[string, string]> = [
   ['return_reason', 'Reason for return'],
 ]
 
-export function DetailField({ row, k, label }: { row: Row; k: string; label: string }) {
+export function DetailField({ row, k, label, valueClass }:
+    { row: Row; k: string; label: string; valueClass?: string }) {
   const v = fmtCell(k, (row[k] ?? null) as Cell)
   return (
     <div>
       <div className="dt-label">{label}</div>
-      <div className="dt-value">{v === '—' ? <span className="empty-cell">—</span> : v}</div>
+      <div className={`dt-value${valueClass ? ` ${valueClass}` : ''}`}>
+        {v === '—' ? <span className="empty-cell">—</span> : v}
+      </div>
     </div>
   )
 }
@@ -55,7 +58,7 @@ export function BillTrailDetail({ row, title = 'Bill' }: Props) {
       {BILL_MONEY.map(([k, l]) => (
         <DetailField key={k} row={row} k={k} label={l} />
       ))}
-      <div className="detail-section">Document timeline</div>
+      <div className="detail-section">Bill lineage</div>
       <div className="timeline-wrap">
         <LineageTimeline row={row} />
       </div>

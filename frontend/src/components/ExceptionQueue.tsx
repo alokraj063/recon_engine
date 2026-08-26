@@ -35,11 +35,15 @@ const BANK_DETAIL: Array<[string, string]> = [
   ['page', 'Statement page'],
 ]
 
-function Detail({ row, onOpenInQueue }: {
+function Detail({ row, onOpenInQueue, primaryRunId }: {
   row: Row
   onOpenInQueue?: (matchLedgerId: string | null) => void
+  primaryRunId?: string | null
 }) {
   const isBank = row.exception_type === 'BANK_ONLY'
+  // combined multi-run rows carry their creating run; single-run rows
+  // belong to the primary selection
+  const runId = (typeof row.run_id === 'string' ? row.run_id : null) ?? primaryRunId
   if (row.exception_type === 'MATCH_REVIEW') {
     return (
       <div className="detail-grid">
@@ -57,7 +61,7 @@ function Detail({ row, onOpenInQueue }: {
             </span>
           )}
         </div>
-        <ReviewEvidence row={row} />
+        <ReviewEvidence row={row} runId={runId} />
       </div>
     )
   }
@@ -96,9 +100,10 @@ function buildColumns(rows: Row[]): ColumnDef<Row>[] {
   }))
 }
 
-export function ExceptionQueue({ rows, onOpenInQueue }: {
+export function ExceptionQueue({ rows, onOpenInQueue, primaryRunId }: {
   rows: Row[]
   onOpenInQueue?: (matchLedgerId: string | null) => void
+  primaryRunId?: string | null
 }) {
   const [side, setSide] = useState<Side>('ALL')
   const columns = useMemo(() => buildColumns(rows), [rows])
@@ -121,7 +126,9 @@ export function ExceptionQueue({ rows, onOpenInQueue }: {
       columns={columns}
       numericIds={AMOUNT_COLS}
       toolbar={seg}
-      renderDetail={(row) => <Detail row={row} onOpenInQueue={onOpenInQueue} />}
+      renderDetail={(row) => (
+        <Detail row={row} onOpenInQueue={onOpenInQueue} primaryRunId={primaryRunId} />
+      )}
     />
   )
 }
