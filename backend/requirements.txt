@@ -4,3 +4,5 @@ pdfplumber>=0.11
 fastapi>=0.110
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9
+sqlalchemy>=2.0,<2.1
+alembic>=1.13

@@ -31,13 +31,18 @@ from .parsers import (
     load_crn,
     attach_lineage,
 )
+from .pipeline import PipelineSinks, run_pipeline
 from .report import write_workbook
+from .rules import MatchRuleSet
+from .sources import REGISTRY, SelfCheckError, get_adapter
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     "ReconConfig", "reconcile", "exception_queue", "run",
     "MatchResult", "match_bank_to_billstatus", "results_to_frame",
     "parse_hsbc_statement", "bank_selfcheck", "parse_bill_status",
     "load_rnote", "load_crn", "attach_lineage", "write_workbook",
+    "MatchRuleSet", "PipelineSinks", "run_pipeline",
+    "REGISTRY", "SelfCheckError", "get_adapter",
 ]

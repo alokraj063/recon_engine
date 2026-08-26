@@ -17,10 +17,8 @@ import pandas as pd
 
 from .config import ReconConfig
 from .matching import match_bank_to_billstatus, results_to_frame
-from .parsers import (
-    parse_hsbc_statement, bank_selfcheck, parse_bill_status,
-    load_rnote, load_crn, attach_lineage,
-)
+from .matching.scoring import PAID_STATUSES
+from .parsers import attach_lineage
 
 # Provenance chain, in the order the document is actually raised. Each
 # entry is the output column and the RNOTE / CRN columns to coalesce.
@@ -34,20 +32,24 @@ TRAIL = [
     ("Bill_Reg_No", ["RN_BillRegNo", "CR_BillRegNo"]),
 ]
 
+# org_unit deliberately absent: MatchResult already carries it, and under
+# one canonical vocabulary a second copy would collide in _attach_bill_side.
 MATCH_SIDE_COLS = [
-    "BillDate", "ContractDate", "PartyCode", "AccountingUnit", "CO6Date",
-    "BillAmt", "PassedAmt", "DeductedAmt", "Recoveries", "RecoveryCount",
-    "ReasonForReturn", "LineageStatus", "RNOTE_MatchedVia", "CRN_MatchedVia",
+    "bill_date", "contract_date", "vendor_code", "submission_date",
+    "gross_amount", "approved_amount", "deduction_amount", "recoveries",
+    "recovery_count", "return_reason", "LineageStatus", "RNOTE_MatchedVia",
+    "CRN_MatchedVia",
 ]
 
 EXCEPTION_COLS = [
-    "exception_type", "action", "BillNumber", "ContractNo", "Zone",
-    "AccountingUnit", "Status", "ExpectedBasis", "BillDate", "CO6No",
-    "CO6Date", "CO7No", "CO7Date", "PaymentAdviceDateToBank",
-    "BillAmt", "PassedAmt", "DeductedAmt", "NetAmt", "RecoveryCount",
-    "ReasonForReturn", "LineageStatus", "PO", "PO_Date", "Receipt_Doc",
+    "exception_type", "action", "bill_number", "contract_no", "zone",
+    "org_unit", "bill_status", "ExpectedBasis", "bill_date", "submission_ref",
+    "submission_date", "payment_order_ref", "payment_order_date",
+    "payment_advice_date", "gross_amount", "approved_amount",
+    "deduction_amount", "net_payable_amount", "recovery_count",
+    "return_reason", "LineageStatus", "PO", "PO_Date", "Receipt_Doc",
     "Receipt_Date", "Receipt_Qty", "DRR_or_Challan", "Bill_Reg_No",
-    "Sheet", "DataRow",
+    "sheet", "data_row",
 ]
 
 BANK_ACTIONS = {
@@ -72,11 +74,11 @@ REVIEW_ACTIONS = {
         "was arbitrary. Compare the candidate bills listed and confirm "
         "which one this credit settles.",
     "LOW":
-        "Amount matched but only one of zone / date agreed. Check the "
-        "candidate bill's detail before accepting the match.",
+        "One check did not agree — the flag names which check failed. "
+        "Review the candidate bill's detail before accepting the match.",
     "AMOUNT_ONLY":
-        "Amount matched but neither zone nor advice date agreed. Treat as "
-        "a guess; verify against the candidate bill before posting.",
+        "Neither the exact signals nor the date agreed. Treat as a guess; "
+        "verify against the candidate bill before posting.",
     "BATCHED":
         "One credit covers several bills whose Net Amts sum to it. Verify "
         "every covered bill before posting.",
@@ -84,12 +86,13 @@ REVIEW_ACTIONS = {
 
 # Fields shown per candidate bill in a MATCH_REVIEW row, in display order.
 CANDIDATE_FIELDS = [
-    "BillNumber", "ContractNo", "Zone", "Status",
-    "BillAmt", "PassedAmt", "DeductedAmt", "NetAmt",
-    "CO6No", "CO6Date", "CO7No", "CO7Date", "PaymentAdviceDateToBank",
-    "AccountingUnit", "LineageStatus", "PO", "PO_Date", "Receipt_Doc",
-    "Receipt_Date", "DRR_or_Challan", "Bill_Reg_No", "ReasonForReturn",
-    "Sheet", "DataRow",
+    "bill_number", "contract_no", "zone", "bill_status",
+    "gross_amount", "approved_amount", "deduction_amount", "net_payable_amount",
+    "submission_ref", "submission_date", "payment_order_ref",
+    "payment_order_date", "payment_advice_date",
+    "org_unit", "LineageStatus", "PO", "PO_Date", "Receipt_Doc",
+    "Receipt_Date", "DRR_or_Challan", "Bill_Reg_No", "return_reason",
+    "sheet", "data_row",
 ]
 
 BILL_ACTIONS = {
@@ -120,32 +123,37 @@ def build_trail(df):
     return df
 
 
-def _expected_bills(bills, bank_df, window_days, co7_lookback_days):
+def _expected_bills(bills, bank_df, window_days, co7_lookback_days, mapping):
     """
     Which bills could plausibly have been paid in this statement.
 
     Not all of them. Money cannot arrive before the advice goes out, so
     the default window is zero days either side of the statement dates.
     Widen it and you pull in bills that settled earlier and report them
-    as false shortfalls.
+    as false shortfalls. Date/amount/eligibility fields follow the
+    customer's field mapping; ExpectedBasis literals stay historical.
     """
-    stmt_lo = pd.to_datetime(bank_df["value_date"]).min()
-    stmt_hi = pd.to_datetime(bank_df["value_date"]).max()
+    stmt_lo = pd.to_datetime(bank_df[mapping.bank_date_field]).min()
+    stmt_hi = pd.to_datetime(bank_df[mapping.bank_date_field]).max()
     lo = stmt_lo - pd.Timedelta(days=window_days)
     hi = stmt_hi + pd.Timedelta(days=window_days)
 
-    advised = bills["PaymentAdviceDateToBank"].between(lo, hi)
-    co7_due = (
-        (bills["Status"] == "CO7 DONE")
-        & bills["CO7Date"].between(stmt_lo - pd.Timedelta(days=co7_lookback_days), hi)
-    )
+    advised = bills[mapping.bill_date_primary].between(lo, hi)
+    if mapping.bill_date_fallback is not None and mapping.fallback_due_statuses:
+        co7_due = (
+            bills[mapping.eligibility_field].isin(mapping.fallback_due_statuses)
+            & bills[mapping.bill_date_fallback].between(
+                stmt_lo - pd.Timedelta(days=co7_lookback_days), hi)
+        )
+    else:
+        co7_due = pd.Series(False, index=bills.index)
 
     expected = bills[advised | co7_due].copy()
     expected["ExpectedBasis"] = "CO7_ISSUED_NO_ADVICE"
     expected.loc[advised.reindex(expected.index, fill_value=False),
                  "ExpectedBasis"] = "ADVICE_DATE"
     # Nothing payable means its absence is not a shortfall.
-    expected.loc[expected["NetAmt"].fillna(0) == 0,
+    expected.loc[expected[mapping.bill_amount_field].fillna(0) == 0,
                  "ExpectedBasis"] = "ZERO_NET_NOTHING_DUE"
     return expected
 
@@ -165,10 +173,10 @@ def _candidate_details(indices, bills, picked):
 def _candidate_summary(cands):
     """Excel-friendly one-liner; the structured column can't be written."""
     def one(c):
-        adv = c.get("PaymentAdviceDateToBank")
+        adv = c.get("payment_advice_date")
         adv = adv.date().isoformat() if pd.notna(adv) and hasattr(adv, "date") else "no advice"
         mark = "*" if c.get("Picked") else ""
-        return f"{mark}{c.get('BillNumber')} ({c.get('Zone')}, {adv})"
+        return f"{mark}{c.get('bill_number')} ({c.get('zone')}, {adv})"
     return f"{len(cands)} candidate(s): " + " | ".join(one(c) for c in cands)
 
 
@@ -194,8 +202,10 @@ def _match_review(matched, bills):
 # never be merged with each other just because the key is equally empty.
 UNGROUPABLE_KEYS = {"", "-", "----", "nan", "None"}
 
-ATTEMPT_FIELDS = ["Status", "CO6No", "CO6Date", "CO7No", "CO7Date", "NetAmt",
-                  "PaymentAdviceDateToBank", "ReasonForReturn", "Sheet", "DataRow"]
+ATTEMPT_FIELDS = ["bill_status", "submission_ref", "submission_date",
+                  "payment_order_ref", "payment_order_date",
+                  "net_payable_amount", "payment_advice_date",
+                  "return_reason", "sheet", "data_row"]
 
 
 def group_bill_attempts(bills):
@@ -208,13 +218,15 @@ def group_bill_attempts(bills):
     otherwise the chronologically latest; the full journey rides along in
     `Attempts`. Display-only — matching always uses the ungrouped frame.
     """
-    key = bills["BillNumber"].astype(str).str.strip()
-    groupable = ~(key.isin(UNGROUPABLE_KEYS) | bills["BillNumber"].isna())
+    key = bills["bill_number"].astype(str).str.strip()
+    groupable = ~(key.isin(UNGROUPABLE_KEYS) | bills["bill_number"].isna())
 
-    # chronological within a bill: CO6Date ascending (NaT last); in this
-    # export a smaller DataRow is more recent, so it breaks ties descending
-    order = bills.assign(_key=key, _neg_row=-bills["DataRow"]) \
-                 .sort_values(["CO6Date", "_neg_row"], na_position="last")
+    # chronological within a bill: submission_date ascending (NaT last); in
+    # this export a smaller data_row is more recent, so it breaks ties
+    # descending
+    order = bills.assign(_key=key, _neg_row=-bills["data_row"]) \
+                 .sort_values(["submission_date", "_neg_row"], na_position="last")
+    groupable = groupable.reindex(order.index)
 
     rows = []
     for _, grp in order[groupable].groupby("_key", sort=False):
@@ -253,11 +265,15 @@ def _attach_bill_side(matched, bills):
 
 def reconcile(bank_df, bill_df, rnote_df=None, crn_df=None,
               window_days=0, co7_lookback_days=5, date_tolerance_days=2,
-              amount_tolerance=0.0, allow_batched=True, max_batch_size=3):
+              amount_tolerance=0.0, allow_batched=True, max_batch_size=3,
+              paid_statuses=None, weights=None, field_map=None):
     """
     Returns a dict of frames: matched, bank_only, bill_only, summary,
-    bills_enriched.
+    bills_enriched. field_map (recon.rules.FieldMapping) selects which
+    gold columns drive the match signals; None = historical defaults.
     """
+    from .rules import FieldMapping
+    mapping = field_map or FieldMapping()
     bills = build_trail(attach_lineage(bill_df, rnote_df, crn_df))
 
     results, bank_only = match_bank_to_billstatus(
@@ -266,6 +282,10 @@ def reconcile(bank_df, bill_df, rnote_df=None, crn_df=None,
         amount_tolerance=amount_tolerance,
         allow_batched=allow_batched,
         max_batch_size=max_batch_size,
+        paid_statuses=(frozenset(paid_statuses) if paid_statuses
+                       else PAID_STATUSES),
+        weights=weights,
+        mapping=mapping,
     )
     # Stable id per match, and the settlement stamped onto the bills so a
     # bill row can say which credit paid it. All confidences are recorded;
@@ -287,7 +307,8 @@ def reconcile(bank_df, bill_df, rnote_df=None, crn_df=None,
     if not matched.empty:
         matched["match_id"] = [f"m{n}" for n in range(len(results))]
 
-    expected = _expected_bills(bills, bank_df, window_days, co7_lookback_days)
+    expected = _expected_bills(bills, bank_df, window_days, co7_lookback_days,
+                               mapping)
     hit_idx = {i for r in results for i in r.bill_indices}
     bill_only = expected[~expected.index.isin(hit_idx)].copy()
 
@@ -308,16 +329,19 @@ def reconcile(bank_df, bill_df, rnote_df=None, crn_df=None,
         "bill_only": bill_only,
         "match_review": match_review,
         "summary": summarise(bank_df, matched, bank_only, bill_only, expected,
-                             match_review),
+                             match_review, mapping=mapping),
         "bills_enriched": bills,
         "bills_grouped": group_bill_attempts(bills),
     }
 
 
-def summarise(bank_df, matched, bank_only, bill_only, expected, match_review=None):
+def summarise(bank_df, matched, bank_only, bill_only, expected, match_review=None,
+              mapping=None):
+    from .rules import FieldMapping
+    bill_amt = (mapping or FieldMapping()).bill_amount_field
     rows = [
         ("Bank credits in statement", len(bank_df), bank_df["amount"].sum()),
-        ("Bills expected in window", len(expected), expected["NetAmt"].sum()),
+        ("Bills expected in window", len(expected), expected[bill_amt].sum()),
         ("Matched", len(matched), matched["amount"].sum() if not matched.empty else 0),
     ]
     if not matched.empty:
@@ -331,10 +355,10 @@ def summarise(bank_df, matched, bank_only, bill_only, expected, match_review=Non
         for g, grp in bank_only.groupby("gap_type"):
             rows.append((f"  {g}", len(grp), grp["amount"].sum()))
     rows.append(("Exception - bill only", len(bill_only),
-                 bill_only["NetAmt"].sum() if not bill_only.empty else 0))
+                 bill_only[bill_amt].sum() if not bill_only.empty else 0))
     if not bill_only.empty:
         for g, grp in bill_only.groupby("ExpectedBasis"):
-            rows.append((f"  {g}", len(grp), grp["NetAmt"].sum()))
+            rows.append((f"  {g}", len(grp), grp[bill_amt].sum()))
     if match_review is not None:
         rows.append(("Review - weak matches", len(match_review),
                      match_review["amount"].sum() if not match_review.empty else 0))
@@ -352,80 +376,70 @@ def exception_queue(out):
     """
     a = out["bank_only"].copy()
     if not a.empty:
-        a = a.rename(columns={
-            "bank_ref": "Bank_Ref", "narrative": "Bank_Narrative",
-            "amount": "Amount", "value_date": "Value_Date",
-            "zone_guess": "Zone",
-        })
+        a = a.rename(columns={"narrative": "bank_narrative",
+                              "zone_guess": "zone"})
     b = out["bill_only"].copy()
     if not b.empty:
-        b["Amount"] = b["NetAmt"]
-        b["Value_Date"] = b["PaymentAdviceDateToBank"]
+        b["amount"] = b["net_payable_amount"]
+        b["value_date"] = b["payment_advice_date"]
 
     c = out.get("match_review")
     c = c.copy() if c is not None and not c.empty else pd.DataFrame()
     if not c.empty:
-        # accounting_unit stays as-is: the bill-side AccountingUnit column
-        # already exists on these rows and must not be duplicated.
+        # MatchResult bill fields (bill_number, bill_status, contract_no,
+        # payment_order_*, payment_advice_date) already carry the canonical
+        # bill-side names, so only the bank-derived pair needs renaming.
         c = c.drop(columns=["bill_indices", "candidate_indices"], errors="ignore")
-        c = c.rename(columns={
-            "bank_ref": "Bank_Ref", "narrative": "Bank_Narrative",
-            "amount": "Amount", "value_date": "Value_Date",
-            "zone_from_narrative": "Zone", "bill_number": "BillNumber",
-            "status": "Status", "contract_no": "ContractNo",
-            "co7_no": "CO7No", "co7_date": "CO7Date",
-            "advice_date": "PaymentAdviceDateToBank",
-        })
+        c = c.rename(columns={"narrative": "bank_narrative",
+                              "zone_from_narrative": "zone"})
 
     q = pd.concat([a, b, c], ignore_index=True, sort=False)
-    front = ["exception_type", "action", "confidence", "Amount", "Value_Date",
-             "Zone", "Bank_Ref", "Bank_Narrative", "gap_type",
+    front = ["exception_type", "action", "confidence", "amount", "value_date",
+             "zone", "bank_ref", "bank_narrative", "gap_type",
              "CandidateSummary"]
     order = [c for c in front if c in q.columns]
     order += [c for c in EXCEPTION_COLS if c in q.columns and c not in order]
     order += [c for c in q.columns if c not in order]
-    return q[order].sort_values(["exception_type", "Amount"], ascending=[True, False])
+    return q[order].sort_values(["exception_type", "amount"], ascending=[True, False])
 
 
-def run(cfg: ReconConfig, verbose=True):
+def run(cfg: ReconConfig, verbose=True, sinks=None):
     """
-    Parse everything, reconcile, return the frames. Does not write a
-    file; that is report.write_workbook.
+    Parse everything through the source adapters, reconcile, return the
+    frames. Does not write a file; that is report.write_workbook.
+    Thin wrapper over pipeline.run_pipeline with the HSBC/IREPS adapters —
+    kept so `from recon import run` and the CLI behave exactly as before.
     """
+    from .pipeline import run_pipeline      # pipeline imports engine; keep one-way at module level
+    from .rules import MatchRuleSet
+    from .sources import get_adapter
+
     cfg.validate()
 
-    # One parse of the whole statement; the matcher only sees the credits,
-    # but the full table (debits included) is kept for inspection.
-    bank_all = parse_hsbc_statement(cfg.statement_pdf, credits_only=False)
-    bank_all["UsedInRecon"] = bank_all["txn_type"] == "TFR+"
-    bank = (bank_all[bank_all["txn_type"] == "TFR+"]
-            .drop(columns=["UsedInRecon"])
-            .reset_index(drop=True).copy())
-    check = bank_selfcheck(bank, cfg.statement_pdf)
-    if verbose:
-        print("bank self-check:", check)
-    if check and (check["parsed_count"] != check["stated_count"]
-                  or abs(check["parsed_total"] - check["stated_total"]) > 1):
-        raise ValueError(
-            f"statement parse does not tie to the totals HSBC prints: {check}"
-        )
-
-    bills, recoveries = parse_bill_status(cfg.bill_status, return_recoveries=True)
-    rnote = load_rnote(cfg.rnote, cfg.rnote_sheet) if cfg.rnote else None
-    crn = load_crn(cfg.crn, cfg.crn_sheet) if cfg.crn else None
-
-    out = reconcile(
-        bank, bills, rnote, crn,
-        window_days=cfg.window_days,
-        co7_lookback_days=cfg.co7_lookback_days,
+    adapters = {t: get_adapter(t, k) for t, k in (
+        ("bank_statement", "hsbc"),
+        ("bill_status", "ireps"),
+        ("lineage_rnote", "ireps_rnote"),
+        ("lineage_crn", "ireps_crn"),
+    )}
+    inputs = {
+        "bank_statement": cfg.statement_pdf,
+        "bill_status": cfg.bill_status,
+        "lineage_rnote": cfg.rnote,
+        "lineage_crn": cfg.crn,
+    }
+    params = {
+        "lineage_rnote": {"sheet": cfg.rnote_sheet},
+        "lineage_crn": {"sheet": cfg.crn_sheet},
+    }
+    rules = MatchRuleSet(
         date_tolerance_days=cfg.date_tolerance_days,
         amount_tolerance=cfg.amount_tolerance,
+        window_days=cfg.window_days,
+        co7_lookback_days=cfg.co7_lookback_days,
         allow_batched=cfg.allow_batched,
         max_batch_size=cfg.max_batch_size,
+        paid_statuses=frozenset(cfg.paid_statuses),
     )
-    out["bank"] = bank
-    out["bank_all"] = bank_all
-    out["bills"] = bills
-    out["recoveries"] = recoveries
-    out["queue"] = exception_queue(out)
-    return out
+    return run_pipeline(inputs, adapters, params, rules,
+                        sinks=sinks, verbose=verbose)

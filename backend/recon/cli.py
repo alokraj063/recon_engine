@@ -2,6 +2,8 @@
 
 import argparse
 
+from logging_setup import configure_logging
+
 from .config import ReconConfig
 from .engine import run
 from .report import write_workbook
@@ -29,6 +31,7 @@ def build_parser():
 
 
 def main(argv=None):
+    configure_logging()
     a = build_parser().parse_args(argv)
     cfg = ReconConfig(
         statement_pdf=a.statement,

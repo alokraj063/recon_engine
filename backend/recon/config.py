@@ -6,9 +6,8 @@ than hunting through modules.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union
 
-PathLike = Union[str, Path]
+PathLike = str | Path
 
 
 @dataclass
@@ -16,14 +15,14 @@ class ReconConfig:
     # --- inputs -------------------------------------------------------
     statement_pdf: PathLike
     bill_status: PathLike
-    rnote: Optional[PathLike] = None
-    crn: Optional[PathLike] = None
+    rnote: PathLike | None = None
+    crn: PathLike | None = None
     output_xlsx: PathLike = "Recon_Output.xlsx"
 
     # Sheet names inside the RNOTE / CRN exports. IREPS names these
     # unhelpfully (e.g. "report (35)"), so 0 means "first sheet".
-    rnote_sheet: Union[int, str] = 0
-    crn_sheet: Union[int, str] = 0
+    rnote_sheet: int | str = 0
+    crn_sheet: int | str = 0
 
     # --- matching -----------------------------------------------------
     date_tolerance_days: int = 2

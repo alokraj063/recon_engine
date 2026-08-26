@@ -18,3 +18,8 @@ frontend/dist/
 # Real business data — do not publish
 Receipt_reconciliation_and_IDR _ Requested_sample_documents/
 Recon_*.xlsx
+# golden CSVs are derived from the sample documents, so same rule
+backend/tests/golden/
+
+# Managed storage (bronze files, SQLite DB, run artifacts)
+backend/data/

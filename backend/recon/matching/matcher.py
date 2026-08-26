@@ -12,11 +12,12 @@ The three-pass matcher.
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from itertools import combinations
-from typing import Optional
 
 import pandas as pd
 
-from .scoring import PAID_STATUSES, norm_text, pick_bill_date, score_pair, confidence_label
+from ..rules import FieldMapping
+from .scoring import (DEFAULT_MAPPING, PAID_STATUSES, confidence_label,
+                      norm_text, pick_bill_date, score_pair)
 
 
 @dataclass
@@ -27,20 +28,21 @@ class MatchResult:
     bank_ref: str
     narrative: str
     amount: float
-    value_date: Optional[datetime]
-    zone_from_narrative: Optional[str]
-    # from the bill
-    bill_zone: Optional[str]
-    bill_number: Optional[str]
-    contract_no: Optional[str]
-    co7_date: Optional[datetime]
-    co7_no: Optional[str]
-    advice_date: Optional[datetime]
-    accounting_unit: Optional[str]
-    status: Optional[str]
+    value_date: datetime | None
+    zone_from_narrative: str | None
+    # from the bill (canonical gold names; bill_zone stays legacy-named —
+    # it carries the FIRST exact signal's bill-side value)
+    bill_zone: str | None
+    bill_number: str | None
+    contract_no: str | None
+    payment_order_date: datetime | None
+    payment_order_ref: str | None
+    payment_advice_date: datetime | None
+    org_unit: str | None
+    bill_status: str | None
     # from the scorecard
-    date_gap_days: Optional[int]
-    date_source: Optional[str]
+    date_gap_days: int | None
+    date_source: str | None
     amount_check: bool
     zone_check: bool
     date_check: bool
@@ -55,27 +57,30 @@ class MatchResult:
     candidate_indices: list = field(default_factory=list)
 
 
-def _build_amount_index(candidates):
-    """Rounded Net Amt -> list of bill indexes. Rounding because one side
-    was read from a PDF and the other from Excel."""
+def _build_amount_index(candidates, mapping=DEFAULT_MAPPING):
+    """Rounded bill amount -> list of bill indexes. Rounding because one
+    side was read from a PDF and the other from Excel."""
     index = {}
     for idx, row in candidates.iterrows():
-        index.setdefault(round(row["NetAmt"], 2), []).append(idx)
+        index.setdefault(round(row[mapping.bill_amount_field], 2), []).append(idx)
     return index
 
 
-def _eligible_bills(bill_df, paid_statuses=PAID_STATUSES):
-    """Bills that could have produced a credit. Nil-net bills are dropped
-    because no money ever moves for them."""
-    out = bill_df[bill_df["Status"].isin(paid_statuses)].copy()
-    return out[out["NetAmt"].notna() & (out["NetAmt"] != 0)]
+def _eligible_bills(bill_df, paid_statuses=PAID_STATUSES,
+                    mapping=DEFAULT_MAPPING):
+    """Bills that could have produced a credit. Nil-amount bills are
+    dropped because no money ever moves for them."""
+    out = bill_df[bill_df[mapping.eligibility_field].isin(paid_statuses)].copy()
+    return out[out[mapping.bill_amount_field].notna()
+               & (out[mapping.bill_amount_field] != 0)]
 
 
 # --------------------------------------------------------------------- #
 # Pass 1
 # --------------------------------------------------------------------- #
 def _score_all_pairs(bank_df, candidates, amt_index, date_tolerance_days,
-                     amount_tolerance):
+                     amount_tolerance, weights=None,
+                     mapping=DEFAULT_MAPPING):
     """
     Score everything, assign nothing.
 
@@ -94,12 +99,14 @@ def _score_all_pairs(bank_df, candidates, amt_index, date_tolerance_days,
 
     pairs, no_candidate = [], []
     for pos, b in bank_df.iterrows():
-        cand = lookup(round(b["amount"], 2))
+        cand = lookup(round(b[mapping.bank_amount_field], 2))
         if not cand:
             no_candidate.append(pos)
             continue
         for i in cand:
-            s, zc, dc, gap, dsrc = score_pair(b, candidates.loc[i], date_tolerance_days)
+            s, zc, dc, gap, dsrc = score_pair(b, candidates.loc[i],
+                                              date_tolerance_days, weights,
+                                              mapping)
             pairs.append({
                 "bank_pos": pos, "bill_idx": i, "score": s,
                 "zone_check": zc, "date_check": dc,
@@ -133,7 +140,8 @@ def _ceilings(pairs):
 # --------------------------------------------------------------------- #
 # Pass 2
 # --------------------------------------------------------------------- #
-def _assign(bank_df, candidates, pairs, top_score, tied, top_idx):
+def _assign(bank_df, candidates, pairs, top_score, tied, top_idx,
+            mapping=DEFAULT_MAPPING):
     """
     Claim best first. One credit per bill, one bill per credit.
 
@@ -141,6 +149,9 @@ def _assign(bank_df, candidates, pairs, top_score, tied, top_idx):
     to settle for a worse one; it falls through to the exception queue. A
     missing match you can investigate beats a wrong match you cannot see.
     """
+    # the legacy zone_* result columns carry the FIRST exact signal's
+    # values (identical to zone under the default mapping)
+    sig = mapping.exact_signals[0] if mapping.exact_signals else None
     # -score for descending, bank_pos so reruns are identical
     pairs = sorted(pairs, key=lambda p: (-p["score"], p["bank_pos"]))
     used_bills, used_bank, results = set(), set(), []
@@ -163,26 +174,56 @@ def _assign(bank_df, candidates, pairs, top_score, tied, top_idx):
         if n_tied > 1:
             flags.append(
                 f"AMBIGUOUS - {n_tied} bills share this Net Amt and score "
-                f"the same; picked bill {row.get('BillNumber')} arbitrarily"
+                f"the same; picked bill {row.get('bill_number')} arbitrarily"
             )
             conf = "AMBIGUOUS"
         elif conf != "HIGH":
-            flags.append("REVIEW - amount matched but zone/advice date not both confirmed")
+            # name the exact root cause with the CUSTOMER'S field names —
+            # the mapping is in scope, so no abstract "signal(s)" wording
+            def _sig_name(s):
+                return s.key or s.bill_field
+
+            all_sigs = ", ".join(_sig_name(s) for s in mapping.exact_signals) \
+                or "no exact signals configured"
+            # which specific signals failed (norm_text semantics match
+            # score_pair: a missing value counts as not agreed)
+            failed_sigs = ", ".join(
+                _sig_name(s) for s in mapping.exact_signals
+                if norm_text(b.get(s.bank_field)) is None
+                or norm_text(b.get(s.bank_field)) != norm_text(row.get(s.bill_field))
+            ) or all_sigs
+            if p["date_source"] is None or p["date_gap"] is None:
+                date_why = "date unconfirmed (no bill date to compare)"
+            else:
+                date_field = (mapping.bill_date_primary
+                              if p["date_source"] == "advice"
+                              else mapping.bill_date_fallback)
+                date_why = (f"date unconfirmed (gap {p['date_gap']}d vs "
+                            f"{date_field}, over tolerance)")
+            if p["zone_check"] and not p["date_check"]:
+                flags.append(f"REVIEW - amount and {all_sigs} matched; {date_why}")
+            elif p["date_check"] and not p["zone_check"]:
+                flags.append(
+                    f"REVIEW - amount and date matched; {failed_sigs} did not agree")
+            else:
+                flags.append(
+                    f"REVIEW - amount matched only; {failed_sigs} and date "
+                    f"both unconfirmed")
 
         results.append(MatchResult(
             bank_ref=b.get("bank_ref", ""),
             narrative=b["narrative"],
-            amount=b["amount"],
-            value_date=b.get("value_date"),
-            zone_from_narrative=norm_text(b.get("zone_guess")),
-            bill_zone=norm_text(row.get("Zone")),
-            bill_number=row.get("BillNumber"),
-            contract_no=row.get("ContractNo"),
-            co7_date=row.get("CO7Date"),
-            co7_no=row.get("CO7No"),
-            advice_date=row.get("PaymentAdviceDateToBank"),
-            accounting_unit=row.get("AccountingUnit"),
-            status=row.get("Status"),
+            amount=b[mapping.bank_amount_field],
+            value_date=b.get(mapping.bank_date_field),
+            zone_from_narrative=norm_text(b.get(sig.bank_field)) if sig else None,
+            bill_zone=norm_text(row.get(sig.bill_field)) if sig else None,
+            bill_number=row.get("bill_number"),
+            contract_no=row.get("contract_no"),
+            payment_order_date=row.get("payment_order_date"),
+            payment_order_ref=row.get("payment_order_ref"),
+            payment_advice_date=row.get("payment_advice_date"),
+            org_unit=row.get("org_unit"),
+            bill_status=row.get("bill_status"),
             date_gap_days=p["date_gap"],
             date_source=p["date_source"],
             amount_check=True,
@@ -202,50 +243,58 @@ def _assign(bank_df, candidates, pairs, top_score, tied, top_idx):
 # --------------------------------------------------------------------- #
 # Pass 3
 # --------------------------------------------------------------------- #
-def find_batch(bank_row, candidates, free_idx, date_tol, amt_tol, max_size):
+def find_batch(bank_row, candidates, free_idx, date_tol, amt_tol, max_size,
+               mapping=DEFAULT_MAPPING):
     """
-    A set of bills in the same zone whose Net Amts sum to the credit.
+    A set of bills agreeing on every exact signal whose amounts sum to
+    the credit.
 
-    Zone and date filter first, combinations second. The other way round
-    would search millions of subsets and turn up coincidental sums.
+    Signal and date filter first, combinations second. The other way
+    round would search millions of subsets and turn up coincidental sums.
     """
-    zone = norm_text(bank_row.get("zone_guess"))
-    if zone is None or pd.isna(bank_row.get("value_date")):
+    sig_vals = [norm_text(bank_row.get(s.bank_field))
+                for s in mapping.exact_signals]
+    if (not mapping.exact_signals or any(v is None for v in sig_vals)
+            or pd.isna(bank_row.get(mapping.bank_date_field))):
         return None
 
     pool = []
     for i in free_idx:
         row = candidates.loc[i]
-        if norm_text(row.get("Zone")) != zone:
+        if any(norm_text(row.get(s.bill_field)) != v
+               for s, v in zip(mapping.exact_signals, sig_vals)):
             continue
-        bill_date, _ = pick_bill_date(row)
+        bill_date, _ = pick_bill_date(row, mapping)
         if bill_date is None:
             continue
-        if abs((bank_row["value_date"] - bill_date).days) > date_tol:
+        if abs((bank_row[mapping.bank_date_field] - bill_date).days) > date_tol:
             continue
         pool.append(i)
 
     if len(pool) < 2:
         return None
 
-    target = round(bank_row["amount"], 2)
+    target = round(bank_row[mapping.bank_amount_field], 2)
     tol = max(amt_tol, 0.5)
     for size in range(2, min(max_size, len(pool)) + 1):
         for combo in combinations(pool, size):
-            total = round(sum(candidates.loc[i, "NetAmt"] for i in combo), 2)
+            total = round(sum(candidates.loc[i, mapping.bill_amount_field]
+                              for i in combo), 2)
             if abs(total - target) <= tol:
                 return list(combo)
     return None
 
 
 def _batched_pass(bank_df, candidates, leftover, used_bills, date_tol, amt_tol,
-                  max_size):
+                  max_size, mapping=DEFAULT_MAPPING):
+    sig = mapping.exact_signals[0] if mapping.exact_signals else None
     results, still_open = [], []
     free = [i for i in candidates.index if i not in used_bills]
 
     for bp in leftover:
         b = bank_df.loc[bp]
-        idxs = find_batch(b, candidates, free, date_tol, amt_tol, max_size)
+        idxs = find_batch(b, candidates, free, date_tol, amt_tol, max_size,
+                          mapping)
         if idxs is None:
             still_open.append(bp)
             continue
@@ -256,17 +305,17 @@ def _batched_pass(bank_df, candidates, leftover, used_bills, date_tol, amt_tol,
         results.append(MatchResult(
             bank_ref=b.get("bank_ref", ""),
             narrative=b["narrative"],
-            amount=b["amount"],
-            value_date=b.get("value_date"),
-            zone_from_narrative=norm_text(b.get("zone_guess")),
-            bill_zone=norm_text(rows["Zone"].iloc[0]),
-            bill_number=", ".join(str(x) for x in rows["BillNumber"]),
-            contract_no=", ".join(str(x) for x in rows["ContractNo"]),
-            co7_date=rows["CO7Date"].max(),
-            co7_no=", ".join(str(x) for x in rows["CO7No"]),
-            advice_date=rows["PaymentAdviceDateToBank"].max(),
-            accounting_unit=rows["AccountingUnit"].iloc[0],
-            status=", ".join(sorted(set(rows["Status"]))),
+            amount=b[mapping.bank_amount_field],
+            value_date=b.get(mapping.bank_date_field),
+            zone_from_narrative=norm_text(b.get(sig.bank_field)) if sig else None,
+            bill_zone=norm_text(rows[sig.bill_field].iloc[0]) if sig else None,
+            bill_number=", ".join(str(x) for x in rows["bill_number"]),
+            contract_no=", ".join(str(x) for x in rows["contract_no"]),
+            payment_order_date=rows["payment_order_date"].max(),
+            payment_order_ref=", ".join(str(x) for x in rows["payment_order_ref"]),
+            payment_advice_date=rows["payment_advice_date"].max(),
+            org_unit=rows["org_unit"].iloc[0],
+            bill_status=", ".join(sorted(set(rows["bill_status"]))),
             date_gap_days=None,
             date_source="advice",
             amount_check=True,
@@ -293,6 +342,8 @@ def match_bank_to_billstatus(
     allow_batched=True,
     max_batch_size=3,
     paid_statuses=PAID_STATUSES,
+    weights=None,
+    mapping=None,
 ):
     """
     Returns (results, unmatched_bank).
@@ -300,28 +351,36 @@ def match_bank_to_billstatus(
     results is a list of MatchResult. unmatched_bank is a DataFrame of
     credits with no match, tagged with gap_type.
     """
-    candidates = _eligible_bills(bill_df, paid_statuses)
-    amt_index = _build_amount_index(candidates)
+    mapping = mapping or FieldMapping()
+    candidates = _eligible_bills(bill_df, paid_statuses, mapping)
+    amt_index = _build_amount_index(candidates, mapping)
 
     pairs, no_candidate = _score_all_pairs(
-        bank_df, candidates, amt_index, date_tolerance_days, amount_tolerance)
+        bank_df, candidates, amt_index, date_tolerance_days, amount_tolerance,
+        weights, mapping)
     top_score, tied, top_idx = _ceilings(pairs)
     results, used_bills, used_bank = _assign(
-        bank_df, candidates, pairs, top_score, tied, top_idx)
+        bank_df, candidates, pairs, top_score, tied, top_idx, mapping)
 
     leftover = [i for i in bank_df.index if i not in used_bank and i not in no_candidate]
     if allow_batched:
         batched, leftover = _batched_pass(
             bank_df, candidates, leftover, used_bills,
-            date_tolerance_days, amount_tolerance, max_batch_size)
+            date_tolerance_days, amount_tolerance, max_batch_size, mapping)
         results.extend(batched)
 
     unmatched = bank_df.loc[sorted(set(leftover) | set(no_candidate))].copy()
     if not unmatched.empty:
-        unmatched["gap_type"] = unmatched["zone_guess"].apply(
-            lambda z: "ZONE_BILL_NOT_FOUND" if norm_text(z)
-            else "NON_IREPS_OR_UNRECOGNISED"
-        )
+        # gap literals stay historical; presence of the FIRST exact
+        # signal's bank field decides which one
+        sig = mapping.exact_signals[0] if mapping.exact_signals else None
+        if sig is None:
+            unmatched["gap_type"] = "NON_IREPS_OR_UNRECOGNISED"
+        else:
+            unmatched["gap_type"] = unmatched[sig.bank_field].apply(
+                lambda z: "ZONE_BILL_NOT_FOUND" if norm_text(z)
+                else "NON_IREPS_OR_UNRECOGNISED"
+            )
     return results, unmatched
 
 

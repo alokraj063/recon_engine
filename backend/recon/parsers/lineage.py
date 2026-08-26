@@ -105,10 +105,12 @@ def attach_lineage(bills, rnote=None, crn=None):
     A bill can legitimately appear in neither report, in which case the
     lineage columns stay blank and LineageStatus says so.
     """
+    # bills side is canonical gold; the lineage frames keep their
+    # engine-internal InvoiceNo/CO6No/CO7No join keys
     out = bills.copy()
-    out["_inv"] = _key(out["BillNumber"])
-    out["_co6"] = _key(out["CO6No"])
-    out["_co7"] = _key(out["CO7No"])
+    out["_inv"] = _key(out["bill_number"])
+    out["_co6"] = _key(out["submission_ref"])
+    out["_co7"] = _key(out["payment_order_ref"])
 
     for src, cols in (("RNOTE", rnote), ("CRN", crn)):
         if cols is None or cols.empty:
