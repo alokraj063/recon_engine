@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronRight, History, RotateCw } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronRight, Filter, History, RotateCw } from 'lucide-react'
 import {
   acceptMatch, fetchLedger, fetchRun, rejectMatch, reopenMatch, unlockMatch,
 } from '../api'
@@ -7,7 +7,7 @@ import {
   ApiError,
   type LedgerException, type LedgerMatch, type LedgerViewData, type Row,
 } from '../types'
-import { fmtWhen, inr } from '../format'
+import { fmtWhen, inr, parseUtc } from '../format'
 import { BillLineage } from './BillLineage'
 import { ConfidenceBadge } from './ConfidenceBadge'
 import { MatchedEvidence, ReviewEvidence } from './ReviewEvidence'
@@ -16,6 +16,51 @@ import { RunsView } from './RunsView'
 type Evidence = Row | 'loading' | 'missing'
 
 type ExcFilter = 'OPEN' | 'RESOLVED' | 'ALL'
+type MatchStatusFilter = 'ALL' | 'OPEN' | 'LOCKED' | 'REJECTED'
+
+const CONFIDENCE_ORDER = ['HIGH', 'AMBIGUOUS', 'LOW', 'AMOUNT_ONLY', 'BATCHED']
+
+/** Local calendar date (yyyy-mm-dd) of a naive-UTC timestamp — the same
+ *  day the WHEN column displays, so date filters match what users see. */
+function localDay(iso: string): string {
+  const d = parseUtc(iso)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+/** In-header filter control: a funnel icon that opens a small popover.
+ *  Invisible chrome until used — the funnel turns accent-colored while
+ *  a filter is active. Closes on outside mousedown (RunPicker pattern). */
+function HeaderFilter({ active, children }: { active: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const wrap = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent) => {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+  return (
+    <span className={`th-filter${active ? ' active' : ''}`} ref={wrap}
+          onClick={(e) => e.stopPropagation()}>
+      <button className="th-filter-btn" onClick={() => setOpen((o) => !o)}
+              title="filter">
+        <Filter size={11} strokeWidth={2} />
+      </button>
+      {open && (
+        <span className="th-pop"
+              onClick={(e) => {
+                // picking an option closes; interacting with date inputs doesn't
+                if ((e.target as HTMLElement).closest('.th-opt')) setOpen(false)
+              }}>
+          {children}
+        </span>
+      )}
+    </span>
+  )
+}
 
 interface Props {
   customerId: string
@@ -55,6 +100,11 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [excFilter, setExcFilter] = useState<ExcFilter>('OPEN')
+  const [confFilter, setConfFilter] = useState<string>('ALL')
+  const [matchStatusFilter, setMatchStatusFilter] = useState<MatchStatusFilter>('ALL')
+  const [sortAsc, setSortAsc] = useState(false)
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const scrolled = useRef<string | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [evidence, setEvidence] = useState<Record<string, Evidence>>({})
@@ -136,6 +186,28 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
     (e) => excFilter === 'ALL' || e.status === excFilter,
   )
 
+  const confidences = useMemo(() => {
+    const present = new Set((data?.matches ?? []).map((m) => m.confidence))
+    return CONFIDENCE_ORDER.filter((c) => present.has(c))
+      .concat([...present].filter((c) => !CONFIDENCE_ORDER.includes(c)).sort())
+  }, [data])
+
+  const visibleMatches = useMemo(() => {
+    const rows = (data?.matches ?? []).filter((m) => {
+      if (confFilter !== 'ALL' && m.confidence !== confFilter) return false
+      if (matchStatusFilter !== 'ALL' && m.status !== matchStatusFilter) return false
+      if (dateFrom || dateTo) {
+        const day = localDay(m.created_at)
+        if (dateFrom && day < dateFrom) return false
+        if (dateTo && day > dateTo) return false
+      }
+      return true
+    })
+    return rows.sort((a, b) => sortAsc
+      ? a.created_at.localeCompare(b.created_at)
+      : b.created_at.localeCompare(a.created_at))
+  }, [data, confFilter, matchStatusFilter, dateFrom, dateTo, sortAsc])
+
   return (
     <>
       <div className="result-head">
@@ -170,15 +242,58 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
 
         {data && data.matches.length > 0 && (
           <>
-            <h3 className="ledger-h">Durable matches</h3>
+            {(confFilter !== 'ALL' || matchStatusFilter !== 'ALL' || dateFrom || dateTo) && (
+              <p className="ledger-count-note">
+                {visibleMatches.length} of {data.matches.length} matches
+              </p>
+            )}
             <div className="ledger-wrap">
             <table className="ledger ledger-matches">
               <thead>
                 <tr>
-                  <th>When</th>
+                  <th className="th-sort" onClick={() => setSortAsc((v) => !v)}>
+                    When {sortAsc ? '▲' : '▼'}
+                    <HeaderFilter active={!!(dateFrom || dateTo)}>
+                      <span className="th-pop-dates">
+                        <input type="date" value={dateFrom} aria-label="from date"
+                               onChange={(e) => setDateFrom(e.target.value)} />
+                        <span className="chip-note">to</span>
+                        <input type="date" value={dateTo} aria-label="to date"
+                               onChange={(e) => setDateTo(e.target.value)} />
+                        {(dateFrom || dateTo) && (
+                          <button className="th-opt"
+                                  onClick={() => { setDateFrom(''); setDateTo('') }}>
+                            clear dates
+                          </button>
+                        )}
+                      </span>
+                    </HeaderFilter>
+                  </th>
                   <th>Match</th>
-                  <th>Confidence</th>
-                  <th>Status</th>
+                  <th>
+                    Confidence{confFilter !== 'ALL' && ` · ${confFilter}`}
+                    <HeaderFilter active={confFilter !== 'ALL'}>
+                      {(['ALL', ...confidences]).map((c) => (
+                        <button key={c}
+                                className={`th-opt${confFilter === c ? ' on' : ''}`}
+                                onClick={() => setConfFilter(c)}>
+                          {c === 'ALL' ? 'All' : c}
+                        </button>
+                      ))}
+                    </HeaderFilter>
+                  </th>
+                  <th>
+                    Status{matchStatusFilter !== 'ALL' && ` · ${matchStatusFilter}`}
+                    <HeaderFilter active={matchStatusFilter !== 'ALL'}>
+                      {(['ALL', 'OPEN', 'LOCKED', 'REJECTED'] as MatchStatusFilter[]).map((s) => (
+                        <button key={s}
+                                className={`th-opt${matchStatusFilter === s ? ' on' : ''}`}
+                                onClick={() => setMatchStatusFilter(s)}>
+                          {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
+                        </button>
+                      ))}
+                    </HeaderFilter>
+                  </th>
                   <th>Locked by</th>
                   <th>Credit</th>
                   <th>Bills</th>
@@ -186,7 +301,14 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
                 </tr>
               </thead>
               <tbody>
-                {data.matches.map((m) => {
+                {visibleMatches.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="frame-note">
+                      No matches for these filters.
+                    </td>
+                  </tr>
+                )}
+                {visibleMatches.map((m) => {
                   const picked = m.bills.filter((b) => b.role === 'picked')
                   const candidates = m.bills.length - picked.length
                   const ev = evidence[m.id]
@@ -300,7 +422,11 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
                             </div>
                           ) : (
                             <div className="detail-grid">
-                              {m.status === 'OPEN' && m.bills.length > 0 && (
+                              {/* MatchedEvidence has no candidate cards to carry
+                                  per-bill accept buttons — keep the pick-list
+                                  for that path only */}
+                              {m.status === 'OPEN' && m.bills.length > 0
+                                && ev.exception_type !== 'MATCH_REVIEW' && (
                                 <>
                                   <div className="detail-section">
                                     Pick the settling bill — accepting locks the credit
@@ -327,7 +453,15 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
                                 </>
                               )}
                               {ev.exception_type === 'MATCH_REVIEW'
-                                ? <ReviewEvidence row={ev} runId={m.run_id} />
+                                ? <ReviewEvidence row={ev} runId={m.run_id}
+                                    busy={!!busy[m.id]}
+                                    onAcceptBill={m.status === 'OPEN'
+                                      ? (no) => {
+                                          const b = m.bills.find(
+                                            (x) => String(x.bill_number) === String(no))
+                                          if (b) decide(m.id, 'accept', b.gold_bill_id)
+                                        }
+                                      : undefined} />
                                 : <MatchedEvidence row={ev} runId={m.run_id} />}
                             </div>
                           )}

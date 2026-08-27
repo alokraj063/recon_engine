@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { fetchCustomers, fetchRun, fetchRuns, reconcileFromGold } from './api'
+import { Download } from 'lucide-react'
+import { fetchCustomers, fetchRun, fetchRuns, reconcileFromGold, workbookUrl } from './api'
 import {
   ApiError,
   type CustomerInfo, type FrameName, type GoldFrameName, type IngestResponse,
@@ -318,6 +319,10 @@ export default function App() {
             customerId={customerId}
             onCustomerChange={setCustomerId}
             refreshKey={ingestEpoch + (selectedRuns?.length ?? 0)}
+            onOpenMatch={(id) => {
+              setLedgerFocus(id)
+              setView('ledger')
+            }}
           />
         )}
 
@@ -339,6 +344,15 @@ export default function App() {
             <div className="result-head">
               <h2>{VIEW_TITLES[view as keyof typeof VIEW_TITLES]}</h2>
               <span className="file-note">
+                {FILTERED_VIEWS.has(view) && (
+                  <a className="btn-download btn-ic"
+                     href={workbookUrl(primary.run_id)} download
+                     title={'Full workbook for this run — Summary, Matched, '
+                       + 'Exception Queue, Recovery Detail'
+                       + (multi ? ' (primary run of the selection)' : '')}>
+                    <Download size={13} strokeWidth={1.75} /> Export (.xlsx)
+                  </a>
+                )}
                 {primary.meta.mode && !multi && (
                   <span className="stamp head-stamp">{primary.meta.mode}</span>
                 )}

@@ -9,6 +9,8 @@ interface Props {
   customerId: string
   onCustomerChange: (key: string) => void
   refreshKey: number
+  /** deep link: open a match_ledger row focused in the Analyst queue */
+  onOpenMatch?: (matchLedgerId: string) => void
 }
 
 type Category = 'ingest' | 'conflict' | 'run' | 'ledger' | 'decision' | 'config' | 'other'
@@ -59,6 +61,7 @@ function within(w: Window, iso: string): boolean {
 }
 
 function recordKey(e: AuditEventRow): string {
+  if (e.entity_label) return e.entity_label
   if (e.entity_type && e.entity_id) return `${e.entity_type} ${e.entity_id}`
   if (e.run_id) return `run ${e.run_id.slice(0, 8)}`
   return 'system'
@@ -75,14 +78,16 @@ function CategoryChip({ c }: { c: Category }) {
   return <span className={`stamp ${CATEGORY_STAMP[c]}`}>{CATEGORY_LABEL[c]}</span>
 }
 
-export function AuditTrailView({ customers, customerId, onCustomerChange, refreshKey }: Props) {
+export function AuditTrailView({ customers, customerId, onCustomerChange,
+                                 refreshKey, onOpenMatch }: Props) {
   const [events, setEvents] = useState<AuditEventRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [actor, setActor] = useState<Actor>('all')
   const [win, setWin] = useState<Window>('all')
   const [tab, setTab] = useState<Tab>('feed')
-  const [active, setActive] = useState<Set<Category>>(new Set(CATEGORIES))
+  // single-select focus filter, consistent with Actor/Window
+  const [cat, setCat] = useState<Category | 'all'>('all')
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
 
   const load = useCallback(() => {
@@ -115,17 +120,18 @@ export function AuditTrailView({ customers, customerId, onCustomerChange, refres
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return enriched.filter((e) => {
-      if (!active.has(e.cat)) return false
+      if (cat !== 'all' && e.cat !== cat) return false
       if (actor !== 'all' && actorOf(e.cat) !== actor) return false
       if (!within(win, e.created_at)) return false
       if (q) {
         const blob = `${e.event_type} ${e.entity_type ?? ''} ${e.entity_id ?? ''} `
+          + `${e.entity_label ?? ''} ${detailsText(e.context ?? null)} `
           + `${e.run_id ?? ''} ${detailsText(e.details)}`
         if (!blob.toLowerCase().includes(q)) return false
       }
       return true
     })
-  }, [enriched, active, actor, win, query])
+  }, [enriched, cat, actor, win, query])
 
   const grouped = useMemo(() => {
     const groups = new Map<string, typeof filtered>()
@@ -139,14 +145,6 @@ export function AuditTrailView({ customers, customerId, onCustomerChange, refres
     return [...groups.entries()].sort((a, b) =>
       b[1][b[1].length - 1].created_at.localeCompare(a[1][a[1].length - 1].created_at))
   }, [filtered])
-
-  const toggleCat = (c: Category) =>
-    setActive((prev) => {
-      const next = new Set(prev)
-      if (next.has(c)) next.delete(c)
-      else next.add(c)
-      return next
-    })
 
   return (
     <section className="intake">
@@ -235,10 +233,14 @@ export function AuditTrailView({ customers, customerId, onCustomerChange, refres
             </div>
             <div className="audit-cats">
               <span className="slot-label">Categories</span>
-              {CATEGORIES.map((c) => (
+              <button className={`audit-cat${cat === 'all' ? ' on' : ''}`}
+                      onClick={() => setCat('all')}>
+                All <span className="audit-cat-n">{enriched.length}</span>
+              </button>
+              {CATEGORIES.filter((c) => counts[c] > 0).map((c) => (
                 <button key={c}
-                        className={`audit-cat${active.has(c) ? ' on' : ''}`}
-                        onClick={() => toggleCat(c)}>
+                        className={`audit-cat${cat === c ? ' on' : ''}`}
+                        onClick={() => setCat(cat === c ? 'all' : c)}>
                   {CATEGORY_LABEL[c]} <span className="audit-cat-n">{counts[c]}</span>
                 </button>
               ))}
@@ -275,7 +277,11 @@ export function AuditTrailView({ customers, customerId, onCustomerChange, refres
                         <td><CategoryChip c={e.cat} /></td>
                         <td className="mono-cell">{e.event_type}</td>
                         <td className="mono-cell">
-                          {e.entity_type ? `${e.entity_type} ${(e.entity_id ?? '').slice(0, 12)}` : '—'}
+                          {e.entity_label
+                            ? <span className="audit-entity">{e.entity_label}</span>
+                            : e.entity_type
+                              ? `${e.entity_type} ${(e.entity_id ?? '').slice(0, 12)}`
+                              : '—'}
                         </td>
                         <td className="mono-cell">{e.run_id ? e.run_id.slice(0, 8) : '—'}</td>
                         <td>{e.severity === 'INFO' ? '—'
@@ -285,6 +291,20 @@ export function AuditTrailView({ customers, customerId, onCustomerChange, refres
                         <tr className="xq-detail">
                           <td colSpan={6}>
                             <div className="detail-grid">
+                              {e.context && Object.entries(e.context)
+                                .filter(([, v]) => v !== null && v !== undefined)
+                                .map(([k, v]) => (
+                                <div key={`ctx-${k}`}>
+                                  <div className="dt-label">{k.replace(/_/g, ' ')}</div>
+                                  <div className="dt-value">{String(v)}</div>
+                                </div>
+                              ))}
+                              {e.entity_label && e.entity_type && (
+                                <div>
+                                  <div className="dt-label">record</div>
+                                  <div className="dt-value">{e.entity_type} {e.entity_id}</div>
+                                </div>
+                              )}
                               {e.details && Object.entries(e.details).map(([k, v]) => (
                                 <div key={k}>
                                   <div className="dt-label">{k}</div>
@@ -293,7 +313,17 @@ export function AuditTrailView({ customers, customerId, onCustomerChange, refres
                                   </div>
                                 </div>
                               ))}
-                              {!e.details && <p className="frame-note">no detail payload</p>}
+                              {!e.details && !e.context && (
+                                <p className="frame-note">no detail payload</p>
+                              )}
+                              {onOpenMatch && e.entity_type === 'match_ledger' && e.entity_id && (
+                                <div>
+                                  <button className="btn-open"
+                                          onClick={(ev) => { ev.stopPropagation(); onOpenMatch(e.entity_id!) }}>
+                                    open in Analyst queue →
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>

@@ -88,12 +88,24 @@ const MATCHED_AMOUNTS: Array<[string, string]> = [
   ['recovery_count', 'Recovery lines'],
 ]
 
-export function CandidateCard({ cand, runId }: { cand: Candidate; runId?: string | null }) {
+export function CandidateCard({ cand, runId, onAccept, busy, neutralPick }: {
+  cand: Candidate; runId?: string | null
+  onAccept?: () => void; busy?: boolean
+  /** AMBIGUOUS matches: the engine's pick was arbitrary, so no card may
+   *  look endorsed — every candidate renders neutrally */
+  neutralPick?: boolean
+}) {
+  const showPicked = cand.Picked && !neutralPick
   return (
-    <div className={`candidate-card${cand.Picked ? ' picked' : ''}`}>
+    <div className={`candidate-card${showPicked ? ' picked' : ''}`}>
       <div className="candidate-head">
-        {cand.Picked ? <span className="chip chip-picked">PICKED</span> : <span className="chip">candidate</span>}
+        {showPicked ? <span className="chip chip-picked">PICKED</span> : <span className="chip">candidate</span>}
         <span className="side-tag tag-bill">IREPS BILL</span>
+        {onAccept && (
+          <button className="btn-accept" disabled={busy} onClick={onAccept}>
+            Accept this bill
+          </button>
+        )}
       </div>
       <div className="detail-grid">
         {CANDIDATE_LABELS.map(([k, l]) => {
@@ -168,9 +180,18 @@ function MatchPairs({ bank, bill }: {
 /** Review-queue row evidence: bank side, why-flagged signals, candidate
  *  cards. Render inside a `.detail-grid`. `runId` (the creating run)
  *  lets each candidate card pull its full lineage timeline. */
-export function ReviewEvidence({ row, runId }: { row: Row; runId?: string | null }) {
+export function ReviewEvidence({ row, runId, onAcceptBill, busy }: {
+  row: Row; runId?: string | null
+  /** present only where a decision can be made (Analyst queue, OPEN
+   *  match): renders an accept button on each candidate card */
+  onAcceptBill?: (billNumber: Cell) => void
+  busy?: boolean
+}) {
   const cands = Array.isArray(row.Candidates) ? (row.Candidates as Candidate[]) : []
   const picked = cands.find((c) => c.Picked) ?? cands[0] ?? null
+  // an AMBIGUOUS pick was arbitrary — showing it as PICKED would read as
+  // a recommendation the engine explicitly is not making
+  const arbitrary = typeof row.flag === 'string' && row.flag.startsWith('AMBIGUOUS')
   return (
     <>
       <div className="side-panel side-bank">
@@ -197,10 +218,17 @@ export function ReviewEvidence({ row, runId }: { row: Row; runId?: string | null
       {REVIEW_SIGNALS.map(([k, l]) => (
         <DetailField key={k} row={row} k={k} label={l} />
       ))}
-      <div className="detail-section">Candidate bills ({cands.length})</div>
+      <div className="detail-section">
+        Candidate bills ({cands.length})
+        {onAcceptBill && ' — accepting locks the credit to YOUR choice'}
+      </div>
       <div className="candidate-list">
         {cands.map((c, i) => (
-          <CandidateCard key={i} cand={c} runId={runId} />
+          <CandidateCard key={i} cand={c} runId={runId} busy={busy}
+                         neutralPick={arbitrary}
+                         onAccept={onAcceptBill
+                           ? () => onAcceptBill(c.bill_number as Cell)
+                           : undefined} />
         ))}
       </div>
     </>

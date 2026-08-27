@@ -296,6 +296,10 @@ export interface AuditEventRow {
   severity: string
   entity_type: string | null
   entity_id: string | null
+  /** human-facing name resolved at read time: "M-28", a filename, … */
+  entity_label?: string | null
+  /** display context joined at read time (ids only, never amounts) */
+  context?: Record<string, unknown> | null
   run_id: string | null
   details: Record<string, unknown> | null
   created_at: string

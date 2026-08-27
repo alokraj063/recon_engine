@@ -622,6 +622,8 @@ table.data tbody tr:hover { background: #f1ead7; }
   gap: 8px;
 }
 
+.candidate-head .btn-accept { margin-left: auto; }
+
 /* ---- side-identity: bank statement (blue) vs bill / IREPS (amber) ---- */
 
 .side-panel {
@@ -695,6 +697,87 @@ table.data tbody tr:hover { background: #f1ead7; }
 .pair-verdict.ok { color: var(--success); }
 .pair-verdict.bad { color: var(--sienna); }
 .pair-note { font-size: 11px; color: var(--ink-faint); }
+
+/* Analyst-queue in-header filters: a funnel per filterable column */
+th.th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+
+.th-filter { position: relative; display: inline-flex; margin-left: 6px; vertical-align: middle; }
+
+.th-filter-btn {
+  border: none;
+  background: none;
+  padding: 1px 2px;
+  cursor: pointer;
+  color: var(--ink-faint);
+  display: inline-flex;
+  align-items: center;
+}
+
+.th-filter.active .th-filter-btn { color: var(--green); }
+.th-filter-btn:hover { color: var(--ink); }
+
+.th-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--paper-card);
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px hsl(222 30% 14% / 0.14);
+  /* th typography must not leak into the panel */
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
+  cursor: default;
+}
+
+.th-pop .th-opt {
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.th-pop .th-opt:hover { background: var(--paper-deep); }
+.th-pop .th-opt.on { background: var(--ink); color: var(--paper); }
+
+.th-pop-dates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px;
+}
+
+.th-pop-dates input[type='date'] {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+  background: var(--paper-card);
+  color: var(--ink);
+}
+
+.ledger-count-note {
+  text-align: right;
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
 
 /* row-header chips carrying the side identity */
 .chip-bank { color: var(--blue); border-color: hsl(215 75% 45% / 0.45); background: var(--bank-wash); }
@@ -1702,6 +1785,9 @@ table.data tbody tr:hover { background: hsl(220 16% 96%); }
   color: var(--green);
 }
 .audit-cat-n { opacity: 0.7; }
+
+/* read-time-resolved entity name in the audit feed (M-28, a filename) */
+.audit-entity { font-weight: 700; }
 .audit-tabs { margin-bottom: 12px; }
 .audit-groups { display: flex; flex-direction: column; gap: 12px; }
 .audit-group .ledger-h { margin: 0; }

@@ -13,25 +13,81 @@ from .models import (AuditLog, BronzeFile, ExceptionLedger, GoldBankTxn,
                      MatchLedgerBill, Run)
 
 
+def _audit_entity_context(session, rows) -> dict:
+    """Read-time display enrichment for audit entities, batched per type
+    (never N+1). Storage stays minimal per the logging taxonomy; joining
+    the human-facing identifiers (M-{seq}, filenames — ids, no amounts)
+    for DISPLAY is the same contract /api/ledger already serves."""
+    by_type: dict = {}
+    for r in rows:
+        if r.entity_type and r.entity_id is not None:
+            by_type.setdefault(r.entity_type, set()).add(str(r.entity_id))
+    out: dict = {}
+
+    match_ids = by_type.get("match_ledger", set())
+    if match_ids:
+        matches = session.execute(
+            select(MatchLedger).where(MatchLedger.id.in_(match_ids))).scalars()
+        picked = dict(session.execute(
+            select(MatchLedgerBill.match_ledger_id, GoldBill.bill_number)
+            .join(GoldBill, GoldBill.id == MatchLedgerBill.gold_bill_id)
+            .where(MatchLedgerBill.match_ledger_id.in_(match_ids),
+                   MatchLedgerBill.role == "picked")).all())
+        for m in matches:
+            label = f"M-{m.seq}" if m.seq is not None else m.id[:8]
+            out[("match_ledger", m.id)] = {
+                "label": label,
+                "context": {"match": label, "status": m.status,
+                            "confidence": m.confidence,
+                            "bill_number": picked.get(m.id)},
+            }
+
+    file_ids = by_type.get("bronze_file", set())
+    if file_ids:
+        ids = [int(i) for i in file_ids if str(i).isdigit()]
+        for b in session.execute(
+                select(BronzeFile).where(BronzeFile.id.in_(ids))).scalars():
+            out[("bronze_file", str(b.id))] = {
+                "label": b.original_name,
+                "context": {"file": b.original_name,
+                            "source_type": b.source_type},
+            }
+
+    for rid in by_type.get("match_rule_set", set()):
+        out[("match_rule_set", rid)] = {
+            "label": f"rule set #{rid}", "context": None,
+        }
+    return out
+
+
 def audit_events(session, customer_pk: int, limit: int = 500) -> list:
     """Newest-first audit_log rows for one customer — the Audit trail
     view's feed. details are safe to serve verbatim: the logging taxonomy
-    keeps them to counts/ids/field NAMES, never row content."""
-    rows = session.execute(
+    keeps them to counts/ids/field NAMES, never row content. Each event
+    additionally carries a display `entity_label`/`context` resolved at
+    read time (see _audit_entity_context)."""
+    rows = list(session.execute(
         select(AuditLog)
         .where(AuditLog.customer_id == customer_pk)
         .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
-        .limit(limit)).scalars()
-    return [{
-        "id": r.id,
-        "event_type": r.event_type,
-        "severity": r.severity,
-        "entity_type": r.entity_type,
-        "entity_id": r.entity_id,
-        "run_id": r.run_id,
-        "details": r.details,
-        "created_at": r.created_at.isoformat(),
-    } for r in rows]
+        .limit(limit)).scalars())
+    enrich = _audit_entity_context(session, rows)
+    out = []
+    for r in rows:
+        e = enrich.get((r.entity_type, str(r.entity_id))) if r.entity_type else None
+        out.append({
+            "id": r.id,
+            "event_type": r.event_type,
+            "severity": r.severity,
+            "entity_type": r.entity_type,
+            "entity_id": r.entity_id,
+            "entity_label": e["label"] if e else None,
+            "context": e["context"] if e else None,
+            "run_id": r.run_id,
+            "details": r.details,
+            "created_at": r.created_at.isoformat(),
+        })
+    return out
 
 
 def _count(session, model, *where) -> int:
