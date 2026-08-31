@@ -338,18 +338,27 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
                           <div className="chip-note">{fmtWhen(m.locked_at)}</div>
                         )}
                       </td>
-                      <td><span className="chip chip-bank">{txnLine(m)}</span></td>
                       <td>
-                        <span className="bill-chips">
-                          {picked.map((b) => (
-                            <span key={b.gold_bill_id} className="chip chip-bill">
-                              {b.bill_number ?? b.gold_bill_id.slice(0, 8)} · {inr(b.net_payable_amount)}
+                        {m.txn ? (
+                          <div className="party-cell">
+                            <span className="party-amt">{inr(m.txn.amount)}</span>
+                            <span className="party-ref">{m.txn.bank_ref}</span>
+                            <span className="party-meta">
+                              {[m.txn.value_date, m.txn.zone].filter(Boolean).join(' · ')}
                             </span>
-                          ))}
-                          {candidates > 0 && (
-                            <span className="chip-note">+{candidates} candidate{candidates === 1 ? '' : 's'}</span>
-                          )}
-                        </span>
+                          </div>
+                        ) : '—'}
+                      </td>
+                      <td>
+                        {picked.map((b) => (
+                          <div key={b.gold_bill_id} className="party-cell party-bill">
+                            <span className="party-amt">{inr(b.net_payable_amount)}</span>
+                            <span className="party-ref">{b.bill_number ?? b.gold_bill_id.slice(0, 8)}</span>
+                          </div>
+                        ))}
+                        {candidates > 0 && (
+                          <span className="chip-note">+{candidates} candidate{candidates === 1 ? '' : 's'}</span>
+                        )}
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
                         {m.status === 'OPEN' && (
@@ -508,7 +517,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
                     <tr key={e.id}>
                       <td><span className={`stamp stamp-${e.exception_type}`}>{e.exception_type.replace('_', ' ')}</span></td>
                       <td><span className={`stamp stamp-${e.status}`}>{e.status}</span></td>
-                      <td>{excLine(e)}</td>
+                      <td className="oneline">{excLine(e)}</td>
                       <td>{e.first_seen_run_id.slice(0, 8)}</td>
                       <td>{e.resolved_by_run_id ? e.resolved_by_run_id.slice(0, 8) : '—'}</td>
                     </tr>

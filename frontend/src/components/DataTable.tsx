@@ -11,6 +11,7 @@ import {
   type VisibilityState,
 } from '@tanstack/react-table'
 import type { Row } from '../types'
+import { DATE_HINT } from '../format'
 
 interface Props {
   rows: Row[]
@@ -116,7 +117,9 @@ export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, r
                     </td>
                   )}
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className={numericIds?.has(cell.column.id) ? 'num' : ''}>
+                    <td key={cell.id}
+                        className={numericIds?.has(cell.column.id) ? 'num'
+                          : DATE_HINT.test(cell.column.id) ? 'date' : ''}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}

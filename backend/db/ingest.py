@@ -25,7 +25,7 @@ from sqlalchemy import select
 from logging_setup import get_logger
 
 from .audit import record_event
-from .gold import (BANK_MAP, BILLS_MAP, CRN_MAP, RECOVERIES_MAP, RNOTE_MAP,
+from .gold import (BANK_MAP, BILLS_MAP, LINEAGE_MAP, RECOVERIES_MAP,
                    _coerce, _is_na, _json_clean, _persist_frame)
 from .models import (GoldBankTxn, GoldBill, GoldLineageDoc, GoldRecovery,
                      IngestConflict, MatchLedger, MatchLedgerBill)
@@ -114,17 +114,24 @@ def _ingest_keyed(session, model, df, colmap, base, key_cols_db,
     return ids
 
 
-def _ingest_bills(session, df, base, stats) -> Tuple[Dict[int, str], set]:
-    """Bill upsert by (bill_number, submission_ref); LOCKED bills never
-    mutate. Returns ({row_seq: gold_bill_id}, set of newly inserted ids)."""
+DEFAULT_BILL_KEY = ("bill_number", "submission_ref")
+DEFAULT_BANK_KEY = ("bank_ref", "value_date", "amount")
+
+
+def _ingest_bills(session, df, base, stats,
+                  key_cols=DEFAULT_BILL_KEY) -> Tuple[Dict[int, str], set]:
+    """Bill upsert by the customer's entity key (default (bill_number,
+    submission_ref) — an ERP without a CO6-like ref configures its own
+    via source_configs.params["entity_key"]); LOCKED bills never mutate.
+    Returns ({row_seq: gold_bill_id}, set of newly inserted ids)."""
     customer_id = base["customer_id"]
     locked = _consumed_bill_ids(session, customer_id, ("LOCKED",))
     existing = {}
     for row in session.execute(
             select(GoldBill).where(GoldBill.customer_id == customer_id)
     ).scalars():
-        key = (_norm_key(row.bill_number), _norm_key(row.submission_ref))
-        if key[0] is not None and key[1] is not None:
+        key = tuple(_norm_key(getattr(row, c)) for c in key_cols)
+        if all(k is not None for k in key):
             existing.setdefault(key, row)
 
     columns = GoldBill.__table__.columns
@@ -136,8 +143,8 @@ def _ingest_bills(session, df, base, stats) -> Tuple[Dict[int, str], set]:
         # frame side of the entity identity — MUST track the canonical gold
         # names; a stale name here silently re-inserts every bill on every
         # ingest (rec.get returns None, no error)
-        key = (_norm_key(rec.get("bill_number")), _norm_key(rec.get("submission_ref")))
-        row = existing.get(key) if key[0] is not None and key[1] is not None else None
+        key = tuple(_norm_key(rec.get(c)) for c in key_cols)
+        row = existing.get(key) if all(k is not None for k in key) else None
         if row is None:
             to_insert.append(rec)
             continue
@@ -186,19 +193,27 @@ def _ingest_bills(session, df, base, stats) -> Tuple[Dict[int, str], set]:
 def ingest_gold_frames(session, customer_id: int,
                        gold_frames: Dict[str, pd.DataFrame],
                        bronze_ids: Dict[str, int],
-                       run_id: Optional[str] = None
+                       run_id: Optional[str] = None,
+                       entity_keys: Optional[Dict[str, list]] = None
                        ) -> Tuple[Dict[str, Dict[int, str]], dict]:
     """Ingest every gold frame idempotently. Returns
-    ({frame: {row_seq: gold id}}, stats)."""
+    ({frame: {row_seq: gold id}}, stats). entity_keys overrides the
+    natural keys per frame ({"bills": [...], "bank_txns": [...]}) — from
+    the customer's source_configs params; None = the defaults."""
     stats = new_stats()
+    entity_keys = entity_keys or {}
+    bill_key = tuple(entity_keys.get("bills") or DEFAULT_BILL_KEY)
+    bank_key = tuple(entity_keys.get("bank_txns") or DEFAULT_BANK_KEY)
 
     def base(frame):
         return {"customer_id": customer_id, "run_id": run_id,
                 "bronze_file_id": bronze_ids[frame]}
 
-    models = {"bank_txns": GoldBankTxn, "bills": GoldBill,
-              "recoveries": GoldRecovery, "lineage_rnote": GoldLineageDoc,
-              "lineage_crn": GoldLineageDoc}
+    fixed_models = {"bank_txns": GoldBankTxn, "bills": GoldBill,
+                    "recoveries": GoldRecovery}
+    # any other frame is a lineage slot (canonical unified shape)
+    models = {frame: fixed_models.get(frame, GoldLineageDoc)
+              for frame in gold_frames}
     ids: Dict[str, Dict[int, str]] = {}
     reused_files = set()
 
@@ -216,14 +231,16 @@ def ingest_gold_frames(session, customer_id: int,
         ids["bank_txns"] = _ingest_keyed(
             session, GoldBankTxn, gold_frames["bank_txns"], BANK_MAP,
             base("bank_txns"),
-            key_cols_db=("bank_ref", "value_date", "amount"),
-            key_cols_frame=("bank_ref", "value_date", "amount"),
+            # frame names -> DB names (only "timestamp" differs)
+            key_cols_db=tuple(BANK_MAP.get(c, c) for c in bank_key),
+            key_cols_frame=bank_key,
             stats=stats)
 
     inserted_bill_ids: set = set()
     if "bills" in gold_frames and "bills" not in reused_files:
         ids["bills"], inserted_bill_ids = _ingest_bills(
-            session, gold_frames["bills"], base("bills"), stats)
+            session, gold_frames["bills"], base("bills"), stats,
+            key_cols=bill_key)
 
     if "recoveries" in gold_frames and "recoveries" not in reused_files:
         bill_ids = ids.get("bills", {})
@@ -249,36 +266,35 @@ def ingest_gold_frames(session, customer_id: int,
         else:
             ids.setdefault("recoveries", {})
 
-    for frame, colmap, doc_type in (("lineage_rnote", RNOTE_MAP, "RNOTE"),
-                                    ("lineage_crn", CRN_MAP, "CRN")):
-        if frame in gold_frames and frame not in reused_files:
-            src_doc_col = next(s for s, d in colmap.items() if d == "doc_no")
+    for frame in gold_frames:
+        if frame.startswith("lineage") and frame not in reused_files:
             ids[frame] = _ingest_lineage(
-                session, gold_frames[frame], colmap,
-                {**base(frame), "doc_type": doc_type}, src_doc_col, stats)
+                session, gold_frames[frame], LINEAGE_MAP, base(frame), stats)
     record_event(session, logger, event_type="gold.ingest_completed",
                  customer_id=customer_id, run_id=run_id,
                  details={**stats, "frames": list(gold_frames.keys())})
     return ids, stats
 
 
-def _ingest_lineage(session, df, colmap, base, doc_col, stats) -> Dict[int, str]:
-    """Lineage docs are append-only, keyed by (doc_type, doc_no)."""
+def _ingest_lineage(session, df, colmap, base, stats) -> Dict[int, str]:
+    """Lineage docs are append-only, keyed by (doc_type, doc_no) — the
+    doc_type now rides in the frame itself (canonical unified shape), so
+    one code path serves every lineage slot."""
     existing = {}
-    for rid, doc_no in session.execute(
-            select(GoldLineageDoc.id, GoldLineageDoc.doc_no)
-            .where(GoldLineageDoc.customer_id == base["customer_id"],
-                   GoldLineageDoc.doc_type == base["doc_type"])):
-        key = _norm_key(doc_no)
-        if key is not None:
+    for rid, doc_type, doc_no in session.execute(
+            select(GoldLineageDoc.id, GoldLineageDoc.doc_type,
+                   GoldLineageDoc.doc_no)
+            .where(GoldLineageDoc.customer_id == base["customer_id"])):
+        key = (_norm_key(doc_type), _norm_key(doc_no))
+        if key[0] is not None and key[1] is not None:
             existing.setdefault(key, rid)
 
     ids: Dict[int, str] = {}
     to_insert = []
     for rec in df.to_dict(orient="records"):
         seq = int(rec["row_seq"])
-        key = _norm_key(rec.get(doc_col))
-        if key is not None and key in existing:
+        key = (_norm_key(rec.get("doc_type")), _norm_key(rec.get("doc_no")))
+        if key[0] is not None and key[1] is not None and key in existing:
             ids[seq] = existing[key]
             stats["rows_reused"] += 1
         else:

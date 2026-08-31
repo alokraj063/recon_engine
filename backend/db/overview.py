@@ -229,11 +229,13 @@ def _due_date(bill: GoldBill):
             or bill.submission_date)
 
 
-def ar_view(session, customer_pk: int) -> dict:
+def ar_view(session, customer_pk: int,
+            overdue_days: int = OVERDUE_DAYS) -> dict:
     """Bill-centric receivables working set: every bill that is settled
     by the ledger, under review, or still owed (open BILL_ONLY) — plus
     KPIs and an aging analysis. Historic bills outside the recon working
-    set are deliberately excluded; every row here is actionable."""
+    set are deliberately excluded; every row here is actionable.
+    overdue_days is per-customer config (MatchRuleSet.ar_overdue_days)."""
     today = date.today()
     rows: list = []
 
@@ -296,7 +298,7 @@ def ar_view(session, customer_pk: int) -> dict:
             "net_payable_amount": bill.net_payable_amount,
             "due_date": due.isoformat() if due else None,
             "age_days": age,
-            "status": ("OVERDUE" if age is not None and age > OVERDUE_DAYS
+            "status": ("OVERDUE" if age is not None and age > overdue_days
                        else "AWAITING"),
             "pay": None,
             "variance": (-bill.net_payable_amount

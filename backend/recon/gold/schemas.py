@@ -16,15 +16,17 @@ payment_advice_date, payment_order_date, zone / zone_guess, bill_status.
 
 Scope: canonicalization covers these SOURCE frames and columns derived
 from them. Engine-derived run-artifact vocabulary is not gold schema and
-deliberately keeps its names: TRAIL (PO, Receipt_Doc, ...), LineageStatus,
-ExpectedBasis, SettledInStatement/Settled_*, Attempts/AttemptCount,
-Candidates, exception_type, gap_type, and the RN_*/CR_* lineage frame
-shapes (engine-internal; the DB stores lineage in one unified table).
+deliberately keeps its names: the trail columns (PO, Receipt_Doc, ...),
+LineageStatus, ExpectedBasis, SettledInStatement/Settled_*,
+Attempts/AttemptCount, Candidates, exception_type, gap_type. Lineage is
+canonical end-to-end since the Phase-2 canonicalization: adapters emit
+the unified lineage_docs shape directly and RN_*/CR_* names survive only
+in SILVER (parser output) and as extras keys on old gold rows.
 
 Reserved for future sources — documented, NOT created (adding one later
 is a one-line model change + migration): tds_amount, gst_tds_amount,
 tax_amount, taxable_amount, retention_amount, penalty_amount, utr_ref,
-paid_amount, payment_date, due_date, invoice_number, invoice_date.
+paid_amount, payment_date, due_date, invoice_number.
 """
 
 import pandas as pd
@@ -52,21 +54,14 @@ GOLD_COLUMNS = {
         "bill_index", "bill_number", "submission_ref", "sheet",
         "recovery_head", "recovery_amt", "recovery_text",
     ],
-    # upstream lineage documents, canonical renamed columns per doc type
-    "lineage_rnote": [
-        "RN_Zone", "RN_PONo", "RN_PODate", "RN_POSr", "RNoteNo", "RNoteDate",
-        "RNoteQty", "RN_RONo", "RN_RODate", "RN_DRRNo", "RN_BillClaim",
-        "RN_BillRegNo", "RN_BillRegDate", "InvoiceNo", "RN_InvoiceDate",
-        "CO6No", "RN_CO6Date", "CO7No", "RN_CO7Date", "RN_ClaimAmt",
-        "RN_PassedAmt", "RN_PayReturnDate", "RN_ReturnReason", "LineageSource",
-    ],
-    "lineage_crn": [
-        "CR_PONo", "CR_PODate", "CR_ChallanNo", "CR_ChallanDate",
-        "CR_TypeClaim", "CR_Zone", "CR_POSr", "CRNNo", "CRNDate",
-        "CR_ApprovalDate", "CR_Qty", "CR_BillClaim", "CR_BillRegNo",
-        "CR_BillRegDate", "InvoiceNo", "CR_InvoiceDate", "CO6No", "CR_CO6Date",
-        "CO7No", "CR_CO7Date", "CR_ClaimAmt", "CR_PassedAmt",
-        "CR_PayReturnDate", "CR_ReturnReason", "LineageSource",
+    # upstream lineage documents: ONE canonical unified shape whatever
+    # the source — doc_type discriminates (RNOTE / CRN / a future ERP's
+    # own document kinds). Matches gold.lineage_docs' typed columns; any
+    # source-specific extra column rides through to `extras`.
+    "lineage_docs": [
+        "doc_type", "doc_no", "doc_date", "invoice_no", "submission_ref",
+        "payment_order_ref", "po_no", "po_date", "receipt_qty",
+        "drr_or_challan_no", "bill_reg_no", "invoice_date", "bill_reg_date",
     ],
 }
 

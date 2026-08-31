@@ -31,8 +31,11 @@ from db.storage import file_sha256
 from logging_setup import customer_id_var, get_logger
 from recon import (REGISTRY, MatchRuleSet, PipelineSinks, SelfCheckError,
                    get_adapter, run_pipeline, write_workbook)
+from recon.engine import DEFAULT_COPY, resolve_copy
+from recon.pipeline import check_signal_coverage
 from recon.gold import GOLD_COLUMNS
-from recon.rules import FieldMapping
+from recon.rules import COPY_SECTIONS, FieldMapping
+from recon.sources import resolve_adapter, role_of
 
 from . import runs
 from .serialize import clean, df_to_records, summary_records
@@ -40,7 +43,9 @@ from .serialize import clean, df_to_records, summary_records
 router = APIRouter(prefix="/api")
 logger = get_logger(__name__)
 
-# upload field -> source_type used by adapters / bronze registry
+# legacy upload field -> slot source_type. Slots beyond these four (extra
+# lineage slots) use their slot key (source_type) as the field name
+# directly — see _slot_source_type.
 SOURCE_TYPES = {
     "statement": "bank_statement",
     "bills": "bill_status",
@@ -48,10 +53,15 @@ SOURCE_TYPES = {
     "crn": "lineage_crn",
 }
 
-# gold frame name -> upload field that produced it
-FRAME_TO_FIELD = {"bank_txns": "statement", "bills": "bills",
-                  "recoveries": "bills", "lineage_rnote": "rnote",
-                  "lineage_crn": "crn"}
+_FIELD_OF_SLOT = {st: f for f, st in SOURCE_TYPES.items()}
+
+LINEAGE_SLOT_RE = re.compile(r"^lineage_[a-z0-9_-]{1,24}$")
+
+
+def _slot_source_type(field: str) -> str:
+    """Upload field -> slot key: the four legacy names map, anything else
+    (an extra lineage slot) IS its slot key."""
+    return SOURCE_TYPES.get(field, field)
 
 # Sample documents shipped in the repo, used as defaults when a field has
 # no upload. The UI shows them pre-filled; any of them can be replaced.
@@ -69,7 +79,8 @@ DEFAULT_PATTERNS = {
 def _default_file(field):
     if not SAMPLE_DIR.is_dir():
         return None
-    for pattern in DEFAULT_PATTERNS[field]:
+    # extra lineage slots have no repo sample
+    for pattern in DEFAULT_PATTERNS.get(field, ()):
         for p in sorted(SAMPLE_DIR.glob(pattern)):
             if not p.name.startswith("~$"):   # Excel lock files
                 return p
@@ -81,16 +92,16 @@ def _fail(status, code, detail):
 
 
 def _allowed_exts(field: str) -> tuple:
-    """Extensions any REGISTERED adapter for this slot's source_type
-    declares (adapter.file_kinds is the single authority — the API keeps
-    no literal list). Union across adapters: the check is a coarse UX
-    guard, per-customer precision lives in the UI's accept attribute and
-    a wrong file past this gate fails loudly in the adapter's own parse.
-    Empty union means no restriction."""
-    source_type = SOURCE_TYPES[field]
+    """Extensions any REGISTERED adapter for this slot's ROLE declares
+    (adapter.file_kinds is the single authority — the API keeps no
+    literal list). Union across the role's adapters: the check is a
+    coarse UX guard, per-customer precision lives in the UI's accept
+    attribute and a wrong file past this gate fails loudly in the
+    adapter's own parse. Empty union means no restriction."""
+    role = role_of(_slot_source_type(field))
     exts: set = set()
     for (st, _key), adapter in REGISTRY.items():
-        if st == source_type:
+        if role_of(st) == role:
             exts.update(adapter.file_kinds)
     return tuple(sorted(exts))
 
@@ -198,10 +209,10 @@ def _register_inputs(session, customer, paths, names, source_configs):
     bronze_ids = {}
     for field, path in paths.items():
         if path is not None:
-            sc = source_configs.get(SOURCE_TYPES[field])
+            slot = _slot_source_type(field)
+            sc = source_configs.get(slot)
             bronze_ids[field] = register_file(
-                session, customer, SOURCE_TYPES[field], Path(path),
-                names[field],
+                session, customer, slot, Path(path), names[field],
                 adapter_key=sc.adapter_key if sc else None).id
     return bronze_ids
 
@@ -212,14 +223,17 @@ def _build_adapters(source_configs, paths, customer_key):
     for field, path in paths.items():
         if path is None:
             continue
-        source_type = SOURCE_TYPES[field]
+        source_type = _slot_source_type(field)
         sc = source_configs.get(source_type)
         if sc is None:
             _fail(400, "INVALID_INPUT",
                   f"customer '{customer_key}' has no source configured "
                   f"for {source_type}")
         try:
-            adapters[source_type] = get_adapter(source_type, sc.adapter_key)
+            # role-aware: an extra lineage slot may use any lineage
+            # adapter regardless of the adapter's own source_type
+            adapters[source_type] = resolve_adapter(source_type,
+                                                    sc.adapter_key)
         except KeyError as e:
             _fail(400, "INVALID_INPUT", str(e))
         inputs[source_type] = path
@@ -242,12 +256,22 @@ def _effective_rules(rule_row, form_config):
             "paid_statuses": rule_row.paid_statuses or None,
             "weights": rule_row.weights or None,
             "field_map": rule_row.field_map or None,
+            "copy_overrides": rule_row.copy_overrides or None,
+            # NULL scalar -> None -> merged() ignores -> dataclass default
+            "batch_amount_slack": rule_row.batch_amount_slack,
+            "amount_decimals": rule_row.amount_decimals,
+            "ar_overdue_days": rule_row.ar_overdue_days,
         }
     return MatchRuleSet().merged(db_overrides).merged(form_config)
 
 
 def _build_payload(out, form_config, selfcheck, names, customer_key,
                    mode, extra_meta=None, rules=None):
+    # WARN-grade config guard, computed uniformly for every run path
+    # (the gold-sourced paths bypass run_pipeline's own check)
+    signal_coverage = (check_signal_coverage(out["bank"], out["bills"],
+                                             rules.field_map)
+                       if rules is not None else None)
     payload = {
         "summary": summary_records(out["summary"]),
         "matched": df_to_records(out["matched"]),
@@ -265,6 +289,7 @@ def _build_payload(out, form_config, selfcheck, names, customer_key,
                 "recoveries": len(out["recoveries"]),
             },
             "selfcheck": selfcheck,
+            "signal_coverage": signal_coverage,
             "config": form_config,
             "filenames": names,
             "customer": customer_key,
@@ -281,6 +306,9 @@ def _build_payload(out, form_config, selfcheck, names, customer_key,
             "field_map": rules.field_map.to_dict(),
             "paid_statuses": sorted(rules.paid_statuses),
             "weights": rules.weights,
+            "copy_overridden": bool(rules.copy_overrides),
+            "batch_amount_slack": rules.batch_amount_slack,
+            "amount_decimals": rules.amount_decimals,
         }
     return payload
 
@@ -296,28 +324,45 @@ def _frame_records(out):
     }
 
 
+def _entity_keys(source_configs):
+    """Per-frame natural-key overrides from the customer's slot params
+    (source_configs.params["entity_key"]); None = defaults."""
+    out = {}
+    for slot, frame in (("bill_status", "bills"),
+                        ("bank_statement", "bank_txns")):
+        sc = source_configs.get(slot)
+        if sc is not None and (sc.params or {}).get("entity_key"):
+            out[frame] = sc.params["entity_key"]
+    return out or None
+
+
 def _persist_side_effects(customer_pk, bronze_ids, capture, run_id=None,
-                          ingestion_event=None):
+                          ingestion_event=None, entity_keys=None):
     """Silver rows + ingestion-owned gold, one transaction. Returns
     ({frame: {row_seq: gold id}}, ingest stats). When ingestion_event is
     given (the standalone /api/ingest path), an ingestion.completed audit
     event rides the same commit — transactionally coupled to the gold
     writes it describes."""
     gold_frames, gold_bronze_ids = {}, {}
-    for source_type, gold in capture.gold.items():
+    for slot, gold in capture.gold.items():
+        field = _FIELD_OF_SLOT.get(slot, slot)
         for name, df in gold.items():
-            gold_frames[name] = df
-            gold_bronze_ids[name] = bronze_ids[FRAME_TO_FIELD[name]]
+            # lineage frames key by SLOT (two slots may share an adapter
+            # and its frame name); the fixed frames keep their names
+            frame_key = slot if name.startswith("lineage") else name
+            gold_frames[frame_key] = df
+            gold_bronze_ids[frame_key] = bronze_ids[field]
     with SessionLocal() as session:
-        for field, source_type in SOURCE_TYPES.items():
-            silver = capture.silver.get(source_type)
+        for slot, silver in capture.silver.items():
+            field = _FIELD_OF_SLOT.get(slot, slot)
             if silver is not None and field in bronze_ids:
                 persist_silver(session, customer_pk, bronze_ids[field], {
                     name: df_to_records(df)
                     for name, df in silver.frames.items()
                 })
         ids, stats = ingest_gold_frames(session, customer_pk, gold_frames,
-                                        gold_bronze_ids, run_id=run_id)
+                                        gold_bronze_ids, run_id=run_id,
+                                        entity_keys=entity_keys)
         if ingestion_event is not None:
             record_event(session, logger, event_type="ingestion.completed",
                          customer_id=customer_pk,
@@ -413,7 +458,8 @@ async def create_run(
                       rule_set_id=rule_set_id, form_config=form_config,
                       rules=rules, inputs=inputs, adapters=adapters,
                       adapter_params=adapter_params, bronze_ids=bronze_ids,
-                      names=names, tmpdir=tmpdir, stmt_path=stmt_path)
+                      names=names, tmpdir=tmpdir, stmt_path=stmt_path,
+                      entity_keys=_entity_keys(source_configs))
         if mode == "incremental":
             return await _run_incremental(**common)
         return await _run_snapshot(**common)
@@ -423,7 +469,7 @@ async def create_run(
 
 async def _run_snapshot(customer_pk, customer_key, rule_set_id, form_config,
                         rules, inputs, adapters, adapter_params, bronze_ids,
-                        names, tmpdir, stmt_path):
+                        names, tmpdir, stmt_path, entity_keys=None):
     capture = CaptureSinks()
     try:
         out = await run_in_threadpool(
@@ -453,7 +499,8 @@ async def _run_snapshot(customer_pk, customer_key, rule_set_id, form_config,
     await run_in_threadpool(write_workbook, out, workbook_path)
 
     ids, ingest_stats = await run_in_threadpool(
-        _persist_side_effects, customer_pk, bronze_ids, capture)
+        _persist_side_effects, customer_pk, bronze_ids, capture,
+        None, None, entity_keys)
 
     # the adapter's own parse-time check (captured via sinks) — routes
     # never re-check with a source-specific function
@@ -471,7 +518,7 @@ async def _run_snapshot(customer_pk, customer_key, rule_set_id, form_config,
 async def _run_incremental(customer_pk, customer_key, rule_set_id,
                            form_config, rules, inputs, adapters,
                            adapter_params, bronze_ids, names, tmpdir,
-                           stmt_path):
+                           stmt_path, entity_keys=None):
     try:
         # start_run binds run_id_var itself, as soon as the id exists —
         # it's called directly (not via run_in_threadpool), so the set
@@ -496,7 +543,8 @@ async def _run_incremental(customer_pk, customer_key, rule_set_id,
 
         await run_in_threadpool(parse_all)
         _ids, ingest_stats = await run_in_threadpool(
-            _persist_side_effects, customer_pk, bronze_ids, capture, run_id)
+            _persist_side_effects, customer_pk, bronze_ids, capture, run_id,
+            None, entity_keys)
 
         def match_and_ledger():
             with SessionLocal() as session:
@@ -678,8 +726,11 @@ def ar_reconciliation(customer_id: str = "default"):
     settling credit, variance, due-date age, KPIs and aging buckets —
     the AR Reconciliation view. Read-only."""
     with SessionLocal() as session:
-        customer_pk = _get_customer(session, customer_id).id
-        return db_overview.ar_view(session, customer_pk)
+        customer, _sources, rule_row = _load_customer_context(session,
+                                                              customer_id)
+        rules = _effective_rules(rule_row, None)
+        return db_overview.ar_view(session, customer.id,
+                                   overdue_days=rules.ar_overdue_days)
 
 
 @router.get("/audit")
@@ -754,6 +805,19 @@ async def ingest(
     try:
         uploads = {"statement": statement, "bills": bills,
                    "rnote": rnote, "crn": crn}
+        # extra lineage slots upload under their slot key (source_type);
+        # discover them from the customer's configured sources
+        with SessionLocal() as session:
+            _c, pre_source_configs, _r = _load_customer_context(session,
+                                                                customer_id)
+        extra_slots = [st for st in pre_source_configs
+                       if st not in SOURCE_TYPES.values()
+                       and role_of(st) == "lineage"]
+        if extra_slots:
+            form = await request.form()
+            for st in extra_slots:
+                up = form.get(st)
+                uploads[st] = up if hasattr(up, "filename") else None
         enabled = {f for f, u in uploads.items() if u is not None and u.filename}
         if slots is not None:
             requested = {s.strip() for s in slots.split(",") if s.strip()}
@@ -765,7 +829,7 @@ async def ingest(
         if not enabled:
             _fail(400, "INVALID_INPUT",
                   "no slots enabled: upload a file or enable at least one "
-                  "of statement/bills/rnote/crn")
+                  f"of {'/'.join(sorted(uploads))}")
 
         paths, names = {}, {}
         samples_ok = customer_id == "default"
@@ -804,7 +868,7 @@ async def ingest(
 
         files_resp = [{
             "field": field,
-            "source_type": SOURCE_TYPES[field],
+            "source_type": _slot_source_type(field),
             "original_name": names[field],
             "bronze_file_id": bronze_ids[field],
             "outcome": outcomes[field],
@@ -857,7 +921,7 @@ async def ingest(
         }
         _ids, stats = await run_in_threadpool(
             _persist_side_effects, customer_pk, bronze_ids, capture,
-            None, ingestion_event)
+            None, ingestion_event, _entity_keys(source_configs))
         return {"customer": customer_id, "files": files_resp,
                 "stats": stats, "selfcheck": selfcheck}
     finally:
@@ -1178,7 +1242,9 @@ async def _reconcile_incremental_from_gold(customer_pk, customer_key,
 
 @router.get("/adapters")
 def list_adapters():
-    """Adapter registry for the ingest-slot dropdowns."""
+    """Adapter registry for the ingest-slot dropdowns. Keyed by the
+    adapter's own source_type (legacy shape); `role` groups adapters for
+    slot assignment — any `lineage`-role adapter fits any lineage slot."""
     out: dict = {}
     for (source_type, key), adapter in sorted(REGISTRY.items()):
         out.setdefault(source_type, []).append({
@@ -1186,6 +1252,7 @@ def list_adapters():
             "label": adapter.label or key.replace("_", " ").upper(),
             "system": adapter.system or "",
             "file_kinds": list(adapter.file_kinds),
+            "role": adapter.role,
         })
     return out
 
@@ -1218,6 +1285,13 @@ class RulesBody(BaseModel):
     paid_statuses: list[str]
     weights: dict[str, int]
     field_map: FieldMapBody
+    # advisory-text overrides: {section: {frozen code: text}}; None/{} =
+    # the historical defaults. Sections/codes validated against
+    # recon.engine.DEFAULT_COPY (+ "labels" for display renames).
+    copy_overrides: dict[str, dict[str, str]] | None = None
+    batch_amount_slack: float = 0.5
+    amount_decimals: int = 2
+    ar_overdue_days: int = 30
 
 
 def _validate_rules(body: RulesBody):
@@ -1251,6 +1325,30 @@ def _validate_rules(body: RulesBody):
         _fail(400, "INVALID_INPUT", "max_batch_size must be >= 2")
     if not body.paid_statuses:
         _fail(400, "INVALID_INPUT", "paid_statuses must not be empty")
+    if body.batch_amount_slack < 0:
+        _fail(400, "INVALID_INPUT", "batch_amount_slack must be >= 0")
+    if not 0 <= body.amount_decimals <= 6:
+        _fail(400, "INVALID_INPUT", "amount_decimals must be 0..6")
+    if body.ar_overdue_days < 0:
+        _fail(400, "INVALID_INPUT", "ar_overdue_days must be >= 0")
+    if body.copy_overrides:
+        known_codes = {code for section in DEFAULT_COPY.values()
+                       for code in section}
+        for section, entries in body.copy_overrides.items():
+            if section not in COPY_SECTIONS:
+                _fail(400, "INVALID_INPUT",
+                      f"unknown copy section '{section}'; "
+                      f"have: {sorted(COPY_SECTIONS)}")
+            pool = (known_codes if section == "labels"
+                    else set(DEFAULT_COPY[section]))
+            for code, text in entries.items():
+                if code not in pool:
+                    _fail(400, "INVALID_INPUT",
+                          f"unknown {section} code '{code}'")
+                if not isinstance(text, str) or not text.strip():
+                    _fail(400, "INVALID_INPUT",
+                          f"copy text for {section}.{code} must be a "
+                          "non-empty string")
 
 
 def _rules_to_dict(rules: MatchRuleSet) -> dict:
@@ -1264,6 +1362,13 @@ def _rules_to_dict(rules: MatchRuleSet) -> dict:
         "paid_statuses": sorted(rules.paid_statuses),
         "weights": rules.weights,
         "field_map": rules.field_map.to_dict(),
+        # raw overrides (what PUT stores) + the fully-resolved text the
+        # UI shows in its editors
+        "copy_overrides": rules.copy_overrides or {},
+        "copy_effective": resolve_copy(rules.copy_overrides),
+        "batch_amount_slack": rules.batch_amount_slack,
+        "amount_decimals": rules.amount_decimals,
+        "ar_overdue_days": rules.ar_overdue_days,
     }
 
 
@@ -1307,45 +1412,130 @@ def put_customer_config(customer_key: str, body: RulesBody):
         rule_row.paid_statuses = body.paid_statuses
         rule_row.weights = body.weights
         rule_row.field_map = field_map
+        # store only sections/codes that DIFFER from the defaults, so a
+        # UI that round-trips the effective text never freezes defaults
+        # into the row (and future default-copy edits reach the tenant)
+        sparse = {}
+        for section, entries in (body.copy_overrides or {}).items():
+            defaults = DEFAULT_COPY.get(section, {})
+            kept = {code: text for code, text in entries.items()
+                    if text != defaults.get(code)}
+            if kept:
+                sparse[section] = kept
+        rule_row.copy_overrides = sparse or None
+        rule_row.batch_amount_slack = body.batch_amount_slack
+        rule_row.amount_decimals = body.amount_decimals
+        rule_row.ar_overdue_days = body.ar_overdue_days
         session.flush()
         record_event(session, logger, event_type="config.rules_updated",
                      customer_id=customer.id, entity_type="match_rule_set",
                      entity_id=rule_row.id,
-                     details={"signals": len(body.field_map.exact_signals)})
+                     details={"signals": len(body.field_map.exact_signals),
+                              "copy_overridden": bool(sparse)})
         session.commit()
     return get_customer_config(customer_key)
 
 
 class SourcesBody(BaseModel):
-    sources: dict[str, str]
+    # slot key -> adapter key; None REMOVES a lineage slot (deactivates).
+    # New lineage slots are added by naming them (lineage_<key>).
+    sources: dict[str, str | None]
+    # optional per-slot params (e.g. {"sheet": 0}, or "entity_key" for
+    # the natural-key config); only slots named here are touched
+    params: dict[str, dict] | None = None
+
+
+def _validate_slot(source_type: str, adapter_key: str | None):
+    fixed = set(SOURCE_TYPES.values())
+    if source_type not in fixed and not LINEAGE_SLOT_RE.fullmatch(source_type):
+        _fail(400, "INVALID_INPUT",
+              f"invalid slot '{source_type}': fixed slots are "
+              f"{sorted(fixed)}; extra lineage slots must match "
+              "lineage_<key> (a-z 0-9 _ -)")
+    if adapter_key is None:
+        if role_of(source_type) != "lineage":
+            _fail(400, "INVALID_INPUT",
+                  f"slot '{source_type}' cannot be removed — only lineage "
+                  "slots are optional")
+        return
+    try:
+        resolve_adapter(source_type, adapter_key)
+    except KeyError as e:
+        _fail(400, "INVALID_INPUT", str(e))
+
+
+def _validate_slot_params(source_type: str, params: dict):
+    entity_key = params.get("entity_key")
+    if entity_key is not None:
+        frame = {"bill_status": "bills",
+                 "bank_statement": "bank_txns"}.get(role_of(source_type))
+        if frame is None:
+            _fail(400, "INVALID_INPUT",
+                  f"entity_key is not configurable for slot '{source_type}'")
+        pool = set(GOLD_COLUMNS[frame])
+        if (not isinstance(entity_key, list) or not entity_key
+                or not all(isinstance(c, str) and c in pool
+                           for c in entity_key)):
+            _fail(400, "INVALID_INPUT",
+                  f"entity_key for '{source_type}' must be a non-empty "
+                  f"list of {frame} gold columns")
 
 
 @router.put("/customers/{customer_key}/sources")
 def put_customer_sources(customer_key: str, body: SourcesBody):
-    """Persist adapter choice per source_type (partial map allowed)."""
+    """Persist adapter choice per slot (partial map allowed). Lineage
+    slots are 0..N: name a new lineage_<key> slot to add it, send null
+    to remove one. Optional per-slot params ride alongside."""
     for source_type, adapter_key in body.sources.items():
-        if (source_type, adapter_key) not in REGISTRY:
-            _fail(400, "INVALID_INPUT",
-                  f"no adapter '{adapter_key}' for source_type "
-                  f"'{source_type}'")
+        _validate_slot(source_type, adapter_key)
+    for source_type, params in (body.params or {}).items():
+        _validate_slot_params(source_type, params)
     with SessionLocal() as session:
         customer, source_configs, _rule_row = _load_customer_context(
             session, customer_key)
         customer_id_var.set(customer_key)
         for source_type, adapter_key in body.sources.items():
             sc = source_configs.get(source_type)
+            if adapter_key is None:
+                if sc is not None:
+                    sc.is_active = False
+                continue
+            if sc is None:
+                # a previously removed slot may exist inactive — revive it
+                sc = session.execute(
+                    select(SourceConfig)
+                    .where(SourceConfig.customer_id == customer.id,
+                           SourceConfig.source_type == source_type)
+                ).scalar_one_or_none()
             if sc is None:
                 session.add(SourceConfig(customer_id=customer.id,
                                          source_type=source_type,
+                                         role=role_of(source_type),
                                          adapter_key=adapter_key, params={}))
-            elif sc.adapter_key != adapter_key:
-                # adapter changed: params are adapter-specific, reset them;
-                # a no-op save keeps them (the seeded {"sheet": 0} survives)
-                sc.adapter_key = adapter_key
-                sc.params = {}
+            else:
+                sc.is_active = True
+                sc.role = role_of(source_type)
+                if sc.adapter_key != adapter_key:
+                    # adapter changed: params are adapter-specific, reset
+                    # them; a no-op save keeps them (seeded {"sheet": 0}
+                    # survives)
+                    sc.adapter_key = adapter_key
+                    sc.params = {}
+        if body.params:
+            session.flush()
+            rows = {sc.source_type: sc for sc in session.execute(
+                select(SourceConfig)
+                .where(SourceConfig.customer_id == customer.id)).scalars()}
+            for source_type, params in body.params.items():
+                sc = rows.get(source_type)
+                if sc is None:
+                    _fail(400, "INVALID_INPUT",
+                          f"no slot '{source_type}' to set params on")
+                sc.params = {**(sc.params or {}), **params}
         record_event(session, logger, event_type="config.sources_updated",
                      customer_id=customer.id,
-                     details={"sources": body.sources})
+                     details={"sources": body.sources,
+                              "params_slots": sorted(body.params or {})})
         session.commit()
         updated = {sc.source_type: sc.adapter_key for sc in session.execute(
             select(SourceConfig)
@@ -1379,9 +1569,9 @@ def create_customer(body: CustomerBody):
         customer = Customer(key=body.key, name=body.name.strip())
         session.add(customer)
         session.flush()
-        for source_type, adapter_key, params in DEFAULT_SOURCES:
+        for source_type, role, adapter_key, params in DEFAULT_SOURCES:
             session.add(SourceConfig(customer_id=customer.id,
-                                     source_type=source_type,
+                                     source_type=source_type, role=role,
                                      adapter_key=adapter_key, params=params))
         session.add(MatchRuleSetRow(
             customer_id=customer.id, name="default", is_default=True,
@@ -1394,5 +1584,5 @@ def create_customer(body: CustomerBody):
         return {
             "key": customer.key,
             "name": customer.name,
-            "sources": {st: key for st, key, _p in DEFAULT_SOURCES},
+            "sources": {st: key for st, _role, key, _p in DEFAULT_SOURCES},
         }

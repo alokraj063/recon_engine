@@ -97,51 +97,122 @@ def load_crn(path, sheet=0):
     return _tidy_ids(df, ["CR_BillRegNo", "CR_ChallanNo", "CR_PONo"])
 
 
-def attach_lineage(bills, rnote=None, crn=None):
-    """
-    Add RNOTE and CRN columns to a bill frame.
+# Coalesce priority when several doc types attach to one bill: earlier
+# wins per column. Doc types not listed follow in order of first
+# appearance in the lineage frame.
+LINEAGE_DOC_PRIORITY = ("RNOTE", "CRN")
 
-    Tries Invoice No first (that is the bill number), then CO6, then CO7.
-    A bill can legitimately appear in neither report, in which case the
-    lineage columns stay blank and LineageStatus says so.
+# Canonical lineage value column -> the trail column it feeds on
+# bills_enriched. Trail names (PO, Receipt_Doc, ...) are frozen
+# run-artifact vocabulary.
+TRAIL_MAP = [
+    ("PO", "po_no"),
+    ("PO_Date", "po_date"),
+    ("Receipt_Doc", "doc_no"),
+    ("Receipt_Date", "doc_date"),
+    ("Receipt_Qty", "receipt_qty"),
+    ("DRR_or_Challan", "drr_or_challan_no"),
+    ("Bill_Reg_No", "bill_reg_no"),
+    ("Invoice_Date", "invoice_date"),
+    ("Bill_Reg_Date", "bill_reg_date"),
+]
+TRAIL_COLS = [t[0] for t in TRAIL_MAP]
+
+# The bill->lineage join, in fallback order. The MatchedVia labels are
+# FROZEN legacy literals (golden CSVs, persisted payloads, frontend):
+# they mean "matched via bill number / submission ref / payment order
+# ref" whatever the source system calls those documents.
+_JOIN_KEYS = [
+    ("bill_number", "invoice_no", "InvoiceNo"),
+    ("submission_ref", "submission_ref", "CO6No"),
+    ("payment_order_ref", "payment_order_ref", "CO7No"),
+]
+
+
+def _doc_type_order(lineage):
+    seen = list(dict.fromkeys(t for t in lineage["doc_type"].tolist()
+                              if t is not None and not pd.isna(t)))
+    ordered = [t for t in LINEAGE_DOC_PRIORITY if t in seen]
+    return ordered + [t for t in seen if t not in ordered]
+
+
+def attach_lineage(bills, lineage=None):
     """
-    # bills side is canonical gold; the lineage frames keep their
-    # engine-internal InvoiceNo/CO6No/CO7No join keys
+    Join upstream lineage documents (the canonical unified frame — one
+    row per doc, `doc_type` discriminating RNOTE / CRN / any future
+    source's documents) onto a bill frame, producing the trail columns
+    (TRAIL_MAP), one `{doc_type}_MatchedVia` column per attached type,
+    and `LineageStatus`.
+
+    Tries the bill number first (that is the invoice number upstream),
+    then the submission ref, then the payment order ref. A bill can
+    legitimately appear in no document, in which case the trail stays
+    blank and LineageStatus says so.
+    """
     out = bills.copy()
-    out["_inv"] = _key(out["bill_number"])
-    out["_co6"] = _key(out["submission_ref"])
-    out["_co7"] = _key(out["payment_order_ref"])
+    bill_keys = {lineage_col: _key(out[bill_col])
+                 for bill_col, lineage_col, _label in _JOIN_KEYS}
 
-    for src, cols in (("RNOTE", rnote), ("CRN", crn)):
-        if cols is None or cols.empty:
-            continue
-        pick = [c for c in cols.columns
-                if c.startswith(("RN_", "CR_")) or c in
-                ("RNoteNo", "RNoteDate", "RNoteQty", "CRNNo", "CRNDate")]
-        lut = cols.drop_duplicates("InvoiceNo").set_index("InvoiceNo")[pick]
-        lut6 = cols.dropna(subset=["CO6No"]).drop_duplicates("CO6No").set_index("CO6No")[pick]
-        lut7 = cols.dropna(subset=["CO7No"]).drop_duplicates("CO7No").set_index("CO7No")[pick]
+    value_cols = [src for _, src in TRAIL_MAP]
+    trail = {dst: pd.Series(pd.NA, index=out.index, dtype="object")
+             for dst, _src in TRAIL_MAP}
+    has = {}
 
-        joined = out["_inv"].map(lambda k: k).to_frame("k").join(lut, on="k")[pick]
-        via = pd.Series(pd.NA, index=out.index, dtype="object")
-        via[joined.notna().any(axis=1)] = "InvoiceNo"
+    if lineage is not None and not lineage.empty:
+        for doc_type in _doc_type_order(lineage):
+            sub = lineage[lineage["doc_type"] == doc_type]
+            pick = [c for c in value_cols if c in sub.columns]
+            if not pick:
+                continue
+            base = sub[pick]
 
-        for keycol, table, label in (("_co6", lut6, "CO6No"), ("_co7", lut7, "CO7No")):
-            miss = joined.isna().all(axis=1)
-            if not miss.any():
-                break
-            alt = out.loc[miss, keycol].to_frame("k").join(table, on="k")[pick]
-            joined.loc[miss] = alt
-            via.loc[miss & joined.notna().any(axis=1)] = label
+            # legacy parity: the FIRST key's lut keeps NA-keyed rows
+            # (historical behaviour), the fallback keys drop them
+            luts = []
+            for i, (_bill_col, lin_col, label) in enumerate(_JOIN_KEYS):
+                if lin_col not in sub.columns:
+                    continue
+                keyed = base.assign(_k=_key(sub[lin_col]))
+                if i > 0:
+                    keyed = keyed.dropna(subset=["_k"])
+                keyed = keyed.drop_duplicates("_k")
+                luts.append((lin_col, keyed.set_index("_k")[pick], label))
+            if not luts:
+                continue
 
-        out = out.join(joined)
-        out[f"{src}_MatchedVia"] = via
+            first_col, first_lut, first_label = luts[0]
+            joined = (bill_keys[first_col].to_frame("k")
+                      .join(first_lut, on="k")[pick])
+            via = pd.Series(pd.NA, index=out.index, dtype="object")
+            via[joined.notna().any(axis=1)] = first_label
 
-    has_rn = out.get("RNoteNo", pd.Series(pd.NA, index=out.index)).notna()
-    has_cr = out.get("CRNNo", pd.Series(pd.NA, index=out.index)).notna()
-    out["LineageStatus"] = "NO_UPSTREAM_DOC"
-    out.loc[has_cr, "LineageStatus"] = "CRN"
-    out.loc[has_rn, "LineageStatus"] = "RNOTE"
-    out.loc[has_rn & has_cr, "LineageStatus"] = "RNOTE+CRN"
+            for lin_col, lut, label in luts[1:]:
+                miss = joined.isna().all(axis=1)
+                if not miss.any():
+                    break
+                alt = (bill_keys[lin_col].loc[miss].to_frame("k")
+                       .join(lut, on="k")[pick])
+                joined.loc[miss] = alt
+                via.loc[miss & joined.notna().any(axis=1)] = label
 
-    return out.drop(columns=["_inv", "_co6", "_co7"])
+            out[f"{doc_type}_MatchedVia"] = via
+            has[doc_type] = (joined["doc_no"].notna()
+                             if "doc_no" in joined.columns
+                             else pd.Series(False, index=out.index))
+            for dst, src in TRAIL_MAP:
+                if src in joined.columns:
+                    trail[dst] = trail[dst].fillna(joined[src])
+
+    for dst in TRAIL_COLS:
+        out[dst] = trail[dst]
+
+    if has:
+        ordered = [t for t in _doc_type_order(lineage) if t in has]
+        flags = pd.DataFrame({t: has[t] for t in ordered}, index=out.index)
+        out["LineageStatus"] = flags.apply(
+            lambda row: "+".join(t for t in ordered if row[t])
+            or "NO_UPSTREAM_DOC", axis=1)
+    else:
+        out["LineageStatus"] = "NO_UPSTREAM_DOC"
+
+    return out

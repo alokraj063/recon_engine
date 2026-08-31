@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type {
-  CustomerConfig, CustomerRules, ExactSignal, FieldMap, GoldSchema,
+  CopyText, CustomerConfig, CustomerRules, ExactSignal, FieldMap, GoldSchema,
 } from '../types'
 import { ApiError } from '../types'
 import { fetchCustomerConfig, fetchGoldSchema, saveCustomerConfig } from '../api'
@@ -32,7 +32,22 @@ const DEFAULT_RULES: CustomerRules = {
   paid_statuses: ['CO7 DONE', 'PAYMENT MADE'],
   weights: { advice_date: 4, zone: 2, co7_date: 1 },
   field_map: DEFAULT_FIELD_MAP,
+  copy_overrides: {},
+  batch_amount_slack: 0.5,
+  amount_decimals: 2,
+  ar_overdue_days: 30,
 }
+
+/** Terminology sections in display order: section key + heading + what
+ *  the codes mean. Codes themselves come from copy_effective (server). */
+const COPY_SECTIONS: Array<{ section: string; title: string; note: string }> = [
+  { section: 'gap_type', title: 'Bank-only exceptions',
+    note: 'guidance shown per gap type when a credit has no bill' },
+  { section: 'expected_basis', title: 'Bill-only exceptions',
+    note: 'guidance shown per expected-basis when a bill has no credit' },
+  { section: 'review', title: 'Match review',
+    note: 'guidance shown per review confidence on weak matches' },
+]
 
 /** Editable list of short string tokens (statuses). */
 function ChipEditor({ values, onChange, disabled }: {
@@ -121,6 +136,19 @@ export function MatchingConfigPanel({ customerId }: Props) {
   const patchMap = (m: Partial<FieldMap>) => patch({ field_map: { ...fm, ...m } })
   const patchWeight = (key: string, w: number) =>
     patch({ weights: { ...rules.weights, [key]: w } })
+
+  // edits accumulate in copy_overrides; the backend stores only entries
+  // that differ from its defaults (sparse), so round-trips stay clean
+  const copyValue = (section: string, code: string): string =>
+    rules.copy_overrides?.[section]?.[code]
+    ?? rules.copy_effective?.[section]?.[code] ?? ''
+  const patchCopy = (section: string, code: string, text: string) => {
+    const next: CopyText = {
+      ...(rules.copy_overrides ?? {}),
+      [section]: { ...(rules.copy_overrides?.[section] ?? {}), [code]: text },
+    }
+    patch({ copy_overrides: next })
+  }
 
   const setSignal = (i: number, s: Partial<ExactSignal>) => {
     const next = fm.exact_signals.map((sig, j) => (j === i ? { ...sig, ...s } : sig))
@@ -312,7 +340,52 @@ export function MatchingConfigPanel({ customerId }: Props) {
             <input type="number" min={2} value={rules.max_batch_size}
                    onChange={(e) => patch({ max_batch_size: Number(e.target.value) })} />
           </label>
+          <label className="ctx-field">
+            <span className="slot-label">Batch amount slack</span>
+            <input type="number" min={0} step={0.05} value={rules.batch_amount_slack}
+                   onChange={(e) => patch({ batch_amount_slack: Number(e.target.value) })} />
+          </label>
+          <label className="ctx-field">
+            <span className="slot-label">Amount decimals</span>
+            <input type="number" min={0} max={6} value={rules.amount_decimals}
+                   onChange={(e) => patch({ amount_decimals: Number(e.target.value) })} />
+          </label>
+          <label className="ctx-field">
+            <span className="slot-label">AR overdue after (days)</span>
+            <input type="number" min={0} value={rules.ar_overdue_days}
+                   onChange={(e) => patch({ ar_overdue_days: Number(e.target.value) })} />
+          </label>
         </div>
+        <p className="explain">
+          Batch slack is the amount gap a batched (one-credit-covers-several-bills)
+          match may leave unexplained; amount decimals is the rounding precision of
+          the amount join.
+        </p>
+      </div>
+
+      <div className="config-section">
+        <h3 className="ledger-h">Terminology &amp; guidance</h3>
+        <p className="explain">
+          The advisory text stamped into exception rows, editable per customer —
+          the underlying codes never change. Edits apply to future runs.
+        </p>
+        {COPY_SECTIONS.map(({ section, title, note }) => {
+          const codes = Object.keys(rules.copy_effective?.[section] ?? {})
+          if (codes.length === 0) return null
+          return (
+            <div key={section} className="copy-section">
+              <h4 className="ingest-section-h">{title}</h4>
+              <p className="explain">{note}</p>
+              {codes.map((code) => (
+                <label key={code} className="ctx-field copy-row">
+                  <span className="slot-label"><code>{code}</code></span>
+                  <textarea rows={2} value={copyValue(section, code)}
+                            onChange={(e) => patchCopy(section, code, e.target.value)} />
+                </label>
+              ))}
+            </div>
+          )
+        })}
       </div>
 
       {error && <ErrorBanner error={error} />}
@@ -322,7 +395,14 @@ export function MatchingConfigPanel({ customerId }: Props) {
           {saving ? 'Saving…' : 'Save configuration'}
         </button>
         <button className="btn-refresh" disabled={saving}
-                onClick={() => { setRules(DEFAULT_RULES); setDirty(true); setSaved(false) }}>
+                onClick={() => {
+                  // keep copy_effective so the terminology editors stay
+                  // rendered; empty overrides restore default text on save
+                  setRules({ ...DEFAULT_RULES,
+                             copy_effective: rules.copy_effective })
+                  setDirty(true)
+                  setSaved(false)
+                }}>
           Reset to defaults
         </button>
         {saved && <span className="chip chip-settled">saved</span>}

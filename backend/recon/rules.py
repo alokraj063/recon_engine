@@ -20,6 +20,12 @@ from typing import Dict, FrozenSet, Optional, Tuple
 DEFAULT_PAID_STATUSES = frozenset({"PAYMENT MADE", "CO7 DONE"})
 DEFAULT_WEIGHTS = {"advice_date": 4, "zone": 2, "co7_date": 1}
 
+# Sections a copy_overrides dict may carry. The CODES (gap_type,
+# ExpectedBasis, review confidences) are frozen machine values — only the
+# human-facing text keyed by them is configurable. `labels` optionally
+# renames a code for display (UI-only; stored values never change).
+COPY_SECTIONS = ("gap_type", "expected_basis", "review", "labels")
+
 
 @dataclass(frozen=True)
 class ExactSignal:
@@ -112,6 +118,18 @@ class MatchRuleSet:
     paid_statuses: FrozenSet[str] = DEFAULT_PAID_STATUSES
     weights: Dict[str, int] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     field_map: FieldMapping = FieldMapping()
+    # Per-customer advisory text overrides, keyed by COPY_SECTIONS then by
+    # the frozen codes ({"gap_type": {"ZONE_BILL_NOT_FOUND": "..."}}).
+    # None/{} = the historical defaults (engine.DEFAULT_COPY). Partial
+    # dicts merge over defaults at use time (engine.resolve_copy).
+    copy_overrides: Optional[dict] = None
+    # Subset-sum batching slack in currency units (legacy hardcoded 0.5 —
+    # 50 paise); effective slack = max(amount_tolerance, batch_amount_slack)
+    batch_amount_slack: float = 0.5
+    # Decimal places amounts are rounded to for the amount join
+    amount_decimals: int = 2
+    # AR view: days past the due date before an open bill shows OVERDUE
+    ar_overdue_days: int = 30
 
     def merged(self, overrides: Optional[dict]) -> "MatchRuleSet":
         """A copy with any non-None overrides applied. Unknown keys are

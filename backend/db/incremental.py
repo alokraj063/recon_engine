@@ -32,9 +32,9 @@ from recon.rules import MatchRuleSet
 
 from .audit import record_event
 from .base import SessionLocal
-from .gold import (BANK_MAP, BILLS_MAP, CRN_MAP, RECOVERIES_MAP, RNOTE_MAP,
-                   frame_from_gold)
-from .models import (ExceptionLedger, GoldBankTxn, GoldBill, GoldLineageDoc,
+from .gold import (BANK_MAP, BILLS_MAP, RECOVERIES_MAP, frame_from_gold,
+                   lineage_frame)
+from .models import (ExceptionLedger, GoldBankTxn, GoldBill,
                      GoldRecovery, MatchLedger, MatchLedgerBill, Run)
 
 logger = get_logger(__name__)
@@ -141,18 +141,7 @@ def build_pool(session, customer_id: int, statement_bronze_id: int) -> dict:
     bills_df, bill_ids = frame_from_gold(bill_rows, BILLS_MAP, "bills",
                                          ensure=ensure_schema)
 
-    def lineage(doc_type, colmap, frame_name):
-        rows = list(session.execute(
-            select(GoldLineageDoc)
-            .where(GoldLineageDoc.customer_id == customer_id,
-                   GoldLineageDoc.doc_type == doc_type)).scalars())
-        if not rows:
-            return None
-        df, _ = frame_from_gold(rows, colmap, frame_name)
-        return df
-
-    rnote_df = lineage("RNOTE", RNOTE_MAP, "lineage_rnote")
-    crn_df = lineage("CRN", CRN_MAP, "lineage_crn")
+    lineage_df = lineage_frame(session, customer_id)
 
     pool_bill_ids = set(bill_ids)
     rec_rows = [r for r in session.execute(
@@ -164,8 +153,7 @@ def build_pool(session, customer_id: int, statement_bronze_id: int) -> dict:
 
     return {"bank_df": bank_df, "bank_ids": bank_ids,
             "bills_df": bills_df, "bill_ids": bill_ids,
-            "rnote_df": rnote_df, "crn_df": crn_df,
-            "recoveries_df": recoveries_df}
+            "lineage_df": lineage_df, "recoveries_df": recoveries_df}
 
 
 def run_matching(session, customer_id: int, statement_bronze_id: int,
@@ -175,7 +163,7 @@ def run_matching(session, customer_id: int, statement_bronze_id: int,
     matcher's indices."""
     pool = build_pool(session, customer_id, statement_bronze_id)
     out = reconcile(
-        pool["bank_df"], pool["bills_df"], pool["rnote_df"], pool["crn_df"],
+        pool["bank_df"], pool["bills_df"], pool["lineage_df"],
         window_days=WIDE_OPEN_DAYS,          # pool replaces the window
         co7_lookback_days=WIDE_OPEN_DAYS,
         date_tolerance_days=rules.date_tolerance_days,
@@ -185,8 +173,12 @@ def run_matching(session, customer_id: int, statement_bronze_id: int,
         paid_statuses=rules.paid_statuses,
         weights=rules.weights,
         # CRITICAL: this call site bypasses run_pipeline — the golden
-        # gate cannot catch a missing field_map here (two-step UI path)
+        # gate cannot catch a missing rule knob here (two-step UI path);
+        # mirror any new knob in db/reconcile_gold.py too
         field_map=rules.field_map,
+        copy_overrides=rules.copy_overrides,
+        batch_amount_slack=rules.batch_amount_slack,
+        amount_decimals=rules.amount_decimals,
     )
     out["bank"] = pool["bank_df"]
     out["bank_all"] = pool["bank_df"]

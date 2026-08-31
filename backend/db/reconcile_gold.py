@@ -23,26 +23,20 @@ from recon.engine import exception_queue, reconcile
 from recon.gold import ensure_schema
 from recon.rules import MatchRuleSet
 
-from .gold import (BANK_MAP, BILLS_MAP, CRN_MAP, RECOVERIES_MAP, RNOTE_MAP,
-                   frame_from_gold)
+from .gold import (BANK_MAP, BILLS_MAP, LINEAGE_MAP, RECOVERIES_MAP,
+                   frame_from_gold, lineage_frame)
 from .models import (AuditLog, BronzeFile, GoldBankTxn, GoldBill,
                      GoldLineageDoc, GoldRecovery)
 
 logger = get_logger(__name__)
 
-# Browse view of gold.lineage_docs in its canonical unified shape — no
-# RN_*/CR_* reversal; those shapes stay engine-internal.
-LINEAGE_VIEW_MAP = {c: c for c in (
-    "doc_type", "doc_no", "doc_date", "invoice_no", "submission_ref",
-    "payment_order_ref",
-    "po_no", "po_date", "receipt_qty", "drr_or_challan_no", "bill_reg_no")}
-
 # browse frame name -> (model, colmap, frame_from_gold frame_name, ensure)
+# lineage browses in the same canonical unified shape the engine consumes
 BROWSE_FRAMES = {
     "bank": (GoldBankTxn, BANK_MAP, "bank_txns", True),
     "bills": (GoldBill, BILLS_MAP, "bills", True),
     "recoveries": (GoldRecovery, RECOVERIES_MAP, "recoveries", True),
-    "lineage": (GoldLineageDoc, LINEAGE_VIEW_MAP, "lineage_view", False),
+    "lineage": (GoldLineageDoc, LINEAGE_MAP, "lineage_docs", False),
 }
 
 GOLD_FRAME_CAP = 20_000
@@ -73,20 +67,7 @@ def build_snapshot_frames(session, customer_id: int,
     bills_df, bill_ids = frame_from_gold(bill_rows, BILLS_MAP, "bills",
                                          ensure=ensure_schema)
 
-    def lineage(doc_type, colmap, frame_name):
-        rows = list(session.execute(
-            select(GoldLineageDoc)
-            .where(GoldLineageDoc.customer_id == customer_id,
-                   GoldLineageDoc.doc_type == doc_type)
-            .order_by(GoldLineageDoc.bronze_file_id,
-                      GoldLineageDoc.row_seq)).scalars())
-        if not rows:
-            return None
-        df, _ = frame_from_gold(rows, colmap, frame_name)
-        return df
-
-    rnote_df = lineage("RNOTE", RNOTE_MAP, "lineage_rnote")
-    crn_df = lineage("CRN", CRN_MAP, "lineage_crn")
+    lineage_df = lineage_frame(session, customer_id)
 
     pool_bill_ids = set(bill_ids)
     rec_rows = [r for r in session.execute(
@@ -98,8 +79,7 @@ def build_snapshot_frames(session, customer_id: int,
 
     return {"bank_all_df": bank_all_df, "bank_df": bank_df,
             "bank_ids": bank_ids, "bills_df": bills_df, "bill_ids": bill_ids,
-            "rnote_df": rnote_df, "crn_df": crn_df,
-            "recoveries_df": recoveries_df}
+            "lineage_df": lineage_df, "recoveries_df": recoveries_df}
 
 
 def run_snapshot(session, customer_id: int, statement_bronze_id: int,
@@ -109,7 +89,7 @@ def run_snapshot(session, customer_id: int, statement_bronze_id: int,
     reads or writes; the user's REAL window_days applies."""
     f = build_snapshot_frames(session, customer_id, statement_bronze_id)
     out = reconcile(
-        f["bank_df"], f["bills_df"], f["rnote_df"], f["crn_df"],
+        f["bank_df"], f["bills_df"], f["lineage_df"],
         window_days=rules.window_days,
         co7_lookback_days=rules.co7_lookback_days,
         date_tolerance_days=rules.date_tolerance_days,
@@ -119,8 +99,14 @@ def run_snapshot(session, customer_id: int, statement_bronze_id: int,
         paid_statuses=rules.paid_statuses,
         weights=rules.weights,
         # CRITICAL: this call site bypasses run_pipeline — the golden
-        # gate cannot catch a missing field_map here (two-step UI path)
+        # gate cannot catch a missing rule knob here (two-step UI path);
+        # every MatchRuleSet field the engine reads must be threaded by
+        # hand, mirrored in db/incremental.py (meta.rules_effective is
+        # the E2E proof)
         field_map=rules.field_map,
+        copy_overrides=rules.copy_overrides,
+        batch_amount_slack=rules.batch_amount_slack,
+        amount_decimals=rules.amount_decimals,
     )
     out["bank"] = f["bank_df"]
     out["bank_all"] = f["bank_all_df"]

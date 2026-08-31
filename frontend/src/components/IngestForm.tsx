@@ -70,6 +70,12 @@ export function IngestForm({
   const [newName, setNewName] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const [historyEpoch, setHistoryEpoch] = useState(0)
+  // extra lineage slots (beyond the ERP's own documents): uploads keyed
+  // by slot source_type, plus the add-slot mini-form
+  const [extraFiles, setExtraFiles] = useState<Record<string, File | null>>({})
+  const [addingSlot, setAddingSlot] = useState(false)
+  const [newSlotKey, setNewSlotKey] = useState('')
+  const [newSlotAdapter, setNewSlotAdapter] = useState('')
 
   useEffect(() => {
     fetchAdapters().then(setAdapters).catch(() => setAdapters({}))
@@ -118,6 +124,18 @@ export function IngestForm({
   })
   const activeSlots: SlotSpec[] = [BANK_SLOT, ...erpDocs.map((d) => d.slot)]
 
+  // customer's extra lineage slots (0..N; any lineage-role adapter fits)
+  const FIXED_SOURCE_TYPES = new Set(
+    [BANK_SLOT, ...ERP_SLOTS].map((s) => s.sourceType))
+  const extraSlots = Object.keys(sources)
+    .filter((st) => st.startsWith('lineage_') && !FIXED_SOURCE_TYPES.has(st))
+    .sort()
+  const lineageAdapters = [...new Map(
+    Object.values(adapters).flat()
+      .filter((o) => o.role === 'lineage')
+      .map((o) => [o.key, o]),
+  ).values()]
+
   const onBankFormat = async (key: string) => {
     setSources((prev) => ({ ...prev, bank_statement: key }))
     try {
@@ -155,16 +173,21 @@ export function IngestForm({
     setFiles((prev) => ({ ...prev, [field]: null }))
   }
 
-  const slots = activeSlots.filter((s) => enabled[s.field]).map((s) => s.field)
-  const anyInput = activeSlots.some(
-    (s) => enabled[s.field] && (files[s.field] || defaults[s.field]))
+  const extraEnabled = (st: string) => enabled[st] ?? true
+  const slots = [
+    ...activeSlots.filter((s) => enabled[s.field]).map((s) => s.field as string),
+    ...extraSlots.filter((st) => extraEnabled(st) && extraFiles[st]),
+  ]
+  const anyInput =
+    activeSlots.some((s) => enabled[s.field] && (files[s.field] || defaults[s.field]))
+    || extraSlots.some((st) => extraEnabled(st) && extraFiles[st])
 
   const onIngest = async () => {
     setRunning(true)
     setError(null)
     setResult(null)
     try {
-      const res = await ingestFiles(files, customerId, slots)
+      const res = await ingestFiles(files, customerId, slots, extraFiles)
       setResult(res)
       setHistoryEpoch((n) => n + 1)
       onIngested(res)
@@ -173,6 +196,38 @@ export function IngestForm({
     } finally {
       setRunning(false)
     }
+  }
+
+  const fail = (e: unknown) =>
+    setError(e instanceof ApiError ? e : new ApiError('UNKNOWN', String(e)))
+
+  const onAddSlot = async () => {
+    const key = newSlotKey.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
+    const adapter = newSlotAdapter || lineageAdapters[0]?.key
+    if (!key || !adapter) return
+    try {
+      const res = await saveCustomerSources(customerId, { [`lineage_${key}`]: adapter })
+      setSources(res.sources)
+      setAddingSlot(false)
+      setNewSlotKey('')
+      setNewSlotAdapter('')
+    } catch (e) { fail(e) }
+  }
+
+  const onRemoveSlot = async (slot: string) => {
+    try {
+      const res = await saveCustomerSources(customerId, { [slot]: null })
+      setSources(res.sources)
+      setExtraFiles((prev) => ({ ...prev, [slot]: null }))
+    } catch (e) { fail(e) }
+  }
+
+  const onExtraAdapter = async (slot: string, adapterKey: string) => {
+    setSources((prev) => ({ ...prev, [slot]: adapterKey }))
+    try {
+      await saveCustomerSources(customerId, { [slot]: adapterKey })
+      flashSaved('erp')
+    } catch (e) { fail(e) }
   }
 
   const onCreateCustomer = async () => {
@@ -343,6 +398,89 @@ export function IngestForm({
           })}
         </div>
       </div>
+
+      {(extraSlots.length > 0 || addingSlot || lineageAdapters.length > 0) && (
+        <div className="ingest-section">
+          <h3 className="ingest-section-h">Additional lineage documents</h3>
+          <div className="slot-stack">
+            {extraSlots.map((st) => {
+              const on = extraEnabled(st)
+              const opt = lineageAdapters.find((o) => o.key === sources[st])
+              const own = extraFiles[st] ?? null
+              return (
+                <div key={st}
+                     className={`slot-row${on ? '' : ' slot-off'}${on && own ? ' filled' : ''}`}>
+                  <input type="checkbox" className="slot-toggle" checked={on}
+                         title={on ? 'skip this document' : 'include this document'}
+                         disabled={running}
+                         onChange={(e) =>
+                           setEnabled((prev) => ({ ...prev, [st]: e.target.checked }))} />
+                  <span className="slot-doc">{st.replace(/^lineage_/, '')}</span>
+                  <label className="slot-format">
+                    <span className="slot-format-label">File format</span>
+                    <select value={sources[st] ?? ''} disabled={running || !on}
+                            onChange={(e) => onExtraAdapter(st, e.target.value)}>
+                      {lineageAdapters.map((o) => (
+                        <option key={o.key} value={o.key}>{o.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="slot-file-area">
+                    {!on ? (
+                      <span className="slot-file slot-empty">skipped</span>
+                    ) : own ? (
+                      <span className="slot-file">{own.name}</span>
+                    ) : (
+                      <span className="slot-file slot-empty">click to select the report</span>
+                    )}
+                    <input type="file" accept={acceptOf(opt)}
+                           onChange={(e) => {
+                             const f = e.target.files?.[0] ?? null
+                             setExtraFiles((prev) => ({ ...prev, [st]: f }))
+                           }}
+                           disabled={running || !on} />
+                  </label>
+                  <button className="btn-reject" title="remove this slot"
+                          disabled={running} onClick={() => onRemoveSlot(st)}>
+                    remove
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+          {!addingSlot ? (
+            <button className="btn-refresh" disabled={running || !lineageAdapters.length}
+                    onClick={() => setAddingSlot(true)}>
+              + add lineage source
+            </button>
+          ) : (
+            <span className="new-customer-form">
+              <label className="ctx-field">
+                <span className="slot-label">Slot key</span>
+                <input placeholder="e.g. grn" value={newSlotKey}
+                       onChange={(e) => setNewSlotKey(e.target.value)} />
+              </label>
+              <label className="ctx-field">
+                <span className="slot-label">File format</span>
+                <select value={newSlotAdapter || lineageAdapters[0]?.key || ''}
+                        onChange={(e) => setNewSlotAdapter(e.target.value)}>
+                  {lineageAdapters.map((o) => (
+                    <option key={o.key} value={o.key}>{o.label}</option>
+                  ))}
+                </select>
+              </label>
+              <button className="btn-accept" disabled={!newSlotKey.trim()}
+                      onClick={onAddSlot}>Add</button>
+              <button className="btn-reject" onClick={() => setAddingSlot(false)}>Cancel</button>
+            </span>
+          )}
+          <p className="explain">
+            Extra upstream document kinds beyond the ERP's own reports — each slot
+            parses with the chosen lineage adapter and joins into the same document
+            trail. No repo samples back these slots.
+          </p>
+        </div>
+      )}
 
       <div className="run-row">
         <button className="btn-run" disabled={!anyInput || !registryReady || running}

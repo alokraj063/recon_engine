@@ -48,42 +48,86 @@ Layered, with one-way dependencies — parsers know nothing about matching, matc
 backend/recon/   the engine package (pure, DB-free; runs with backend/ as cwd)
   config.py    ReconConfig — CLI-facing config; builds a MatchRuleSet internally
   rules.py     MatchRuleSet — the "delta layer": tolerances, paid statuses, signal
-               weights, and FieldMapping (which GOLD fields drive matching: amount
+               weights, FieldMapping (which GOLD fields drive matching: amount
                pair, date primary/fallback pair, exact-signal pairs with weights,
-               eligibility field + fallback-due statuses). Resolution: dataclass
+               eligibility field + fallback-due statuses), copy_overrides
+               (per-customer advisory TEXT keyed by the frozen codes — see
+               engine.DEFAULT_COPY/resolve_copy; COPY_SECTIONS lists the valid
+               sections), batch_amount_slack (the once-hardcoded 0.5 batching
+               slack), amount_decimals (amount-join rounding, was round(,2)) and
+               ar_overdue_days (AR view aging threshold). Resolution: dataclass
                defaults <- customer DB rule set <- API tunables IF the caller
                sends them (explicit values win; the web UI deliberately sends
                NONE — /api/reconcile tunables are Optional and the saved
                matching config is the single source of truth for UI runs;
-               field_map is customer-level ONLY, never a per-run override)
+               field_map/copy are customer-level ONLY, never per-run overrides).
+               EVERY MatchRuleSet field the engine reads must be hand-threaded
+               through reconcile() at ALL THREE call sites (pipeline,
+               db/reconcile_gold.py, db/incremental.py) — the golden gate covers
+               only the first; meta.rules_effective is the E2E proof.
   parsers/     source document -> plain DataFrame (bank_hsbc, bill_status, lineage).
-               Parser output keeps SOURCE-NATIVE names (IREPS PascalCase) — that is
-               the silver vocabulary, persisted as-is to silver.records.
-  sources/     adapter layer: (source_type, adapter_key) registry. Each adapter:
+               Parser output keeps SOURCE-NATIVE names (IREPS PascalCase /
+               RN_*/CR_*) — that is the silver vocabulary, persisted as-is to
+               silver.records. lineage.py also owns attach_lineage: a generic
+               role-aligned join of the CANONICAL unified lineage frame onto
+               bills (bill_number->invoice_no, then submission_ref, then
+               payment_order_ref), building the trail columns (TRAIL_MAP: PO,
+               Receipt_Doc, ..., Invoice_Date, Bill_Reg_Date — frozen artifact
+               names), one {doc_type}_MatchedVia column per attached type
+               (values InvoiceNo/CO6No/CO7No are FROZEN literals meaning
+               "matched via bill number / submission ref / payment order ref")
+               and LineageStatus ("+"-joined doc types in LINEAGE_DOC_PRIORITY
+               order — RNOTE, CRN, then first-appearance for new types).
+  sources/     adapter layer: (source_type, adapter_key) registry + BY_KEY.
+               Slots resolve adapters by ROLE (base.role_of: bank_statement |
+               bill_status | lineage — any lineage-role adapter fits any
+               lineage_* slot, via resolve_adapter). Each adapter:
                parse() -> silver, to_gold() -> gold frames (+row_seq, ensure_schema),
                optional selfcheck() raising SelfCheckError (fail-loud control totals).
                to_gold() owns the silver->canonical rename map (ireps_bills.py
-               BILLS_TO_GOLD/RECOVERIES_TO_GOLD) — THE seam a new bank/ERP source
-               plugs into: one ~40-line adapter + its map onto the same canonical
-               columns + a source_configs row. tests/test_adapters.py guards
-               map<->schema drift (ensure_schema would otherwise silently add
-               all-NA columns while unrenamed ones leak into extras).
+               BILLS_TO_GOLD/RECOVERIES_TO_GOLD; ireps_rnote/ireps_crn.py
+               RNOTE_TO_GOLD/CRN_TO_GOLD + their doc_type value) — THE seam a
+               new bank/ERP source plugs into: one ~40-line adapter + its map
+               onto the same canonical columns + a source_configs row.
+               tests/test_adapters.py guards map<->schema drift;
+               tests/test_synthetic_source.py is the definition-of-done proof
+               (synthetic bank + ERP + a NOVEL "GRN" lineage doc type run
+               snapshot AND incremental with ZERO engine edits) — keep it
+               green forever.
   gold/        schemas.py — ONE canonical source-agnostic snake_case schema per
                input kind, used END-TO-END: engine frames, DB columns, API
                payloads, frontend, workbook. IREPS's CO6 -> submission_ref/date
-               (also the bill entity-upsert identity), CO7 -> payment_order_ref/
-               date (the fallback due-date signal), amounts are gross/approved/
-               deduction/net_payable_amount. The docstring lists reserved future
-               columns (tds/gst/utr/...) and the scope line: engine-DERIVED
-               run-artifact names (TRAIL, LineageStatus, ExpectedBasis,
-               Settled_*, Attempts, Candidates, gap_type, RN_*/CR_* internals)
-               are NOT gold schema and keep their names.
+               (also the DEFAULT bill entity-upsert identity), CO7 ->
+               payment_order_ref/date (the fallback due-date signal), amounts
+               are gross/approved/deduction/net_payable_amount. Lineage is ONE
+               unified lineage_docs schema (doc_type discriminator) — canonical
+               end-to-end since the 2026-08-31 canonicalization; RN_*/CR_*
+               names survive only in silver and as extras keys on old gold
+               rows. The docstring lists reserved future columns (tds/gst/
+               utr/...) and the scope line: engine-DERIVED run-artifact names
+               (trail columns, LineageStatus, ExpectedBasis, Settled_*,
+               Attempts, Candidates, gap_type) are NOT gold schema and keep
+               their names.
   matching/    scoring.py (per-pair signals, weights overridable), matcher.py
-               (three-pass loop — score all pairs, assign best-first, subset-sum batch)
-  engine.py    reconcile() (two-sided exceptions), exception_queue(),
-               run(cfg) = thin wrapper over pipeline with the HSBC/IREPS adapters
+               (three-pass loop — score all pairs, assign best-first, subset-sum
+               batch; amount rounding follows amount_decimals, the batch pass's
+               slack is max(amount_tolerance, batch_amount_slack); NOTE the
+               batch pass only sees credits that HAD an amount candidate but
+               lost it — a credit with no single-amount candidate goes straight
+               to BANK_ONLY, historical behaviour)
+  engine.py    reconcile(bank, bills, lineage_df, ...) (two-sided exceptions;
+               advisory `action` text from resolve_copy(copy_overrides) over
+               DEFAULT_COPY — codes frozen, text per-customer),
+               exception_queue(), run(cfg) = thin wrapper over pipeline with
+               the HSBC/IREPS adapters
   pipeline.py  run_pipeline(inputs, adapters, params, rules, sinks): adapters ->
-               gold -> engine, gold flows in memory, persistence via optional sinks
+               gold -> engine, gold flows in memory, persistence via optional
+               sinks. Slots process in _slot_order (bank, bills, then lineage
+               slots by name); lineage frames key by SLOT and concat into one
+               frame for the engine. check_signal_coverage() WARNs (log +
+               on_selfcheck sink + meta.signal_coverage in run payloads) when a
+               mapped exact-signal column is missing/all-NA — the silent
+               LOW/AMOUNT_ONLY degradation a misconfigured new adapter causes
   report.py    write_workbook — formatting only, decides nothing
 backend/db/      persistence — imports recon, never the reverse. Real per-layer schema
                separation, not a naming convention: every model declares
@@ -103,7 +147,15 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
   base.py      DATABASE_URL + session factory + register_sqlite_attach();
                init_db() = alembic upgrade head + seed
   models.py    all tables, snake_case, customer_id everywhere: customers,
-               source_configs, match_rule_sets, bronze.files, silver.records,
+               source_configs (source_type doubles as the SLOT KEY, unique per
+               customer; `role` = bank_statement | bill_status | lineage —
+               lineage slots are 0..N per customer, named lineage_<key>, the
+               seeded pair keeps lineage_rnote/lineage_crn; params carries
+               per-slot config incl. the optional "entity_key" natural-key
+               override), match_rule_sets (+ field_map, copy_overrides,
+               batch_amount_slack, amount_decimals, ar_overdue_days — the
+               nullable columns mean "dataclass default"), bronze.files,
+               silver.records,
                gold.bank_txns/bills/recoveries/lineage_docs, runs, run_frames,
                run_match_bills, match_ledger(+bills — `seq` is the durable
                per-customer match number, UI "M-{n}"; the engine's match_id
@@ -121,21 +173,31 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
   bronze.py    register_file — dedup by (customer, sha256)
   silver.py    one JSON row per parsed source row, deduped per bronze file
   gold.py      persist + frame_from_gold (rebuild engine frames for the pool).
-               Since the gold canonicalization the frame<->DB maps are IDENTITY
+               Since the gold + lineage canonicalizations EVERY frame<->DB map
+               is IDENTITY — BANK_MAP/BILLS_MAP/RECOVERIES_MAP/LINEAGE_MAP
                (kept as dicts: they decide which columns are typed DB columns vs
-               extras JSON); only RNOTE_MAP/CRN_MAP still rename (engine-internal
-               RN_*/CR_* -> unified lineage_docs). FRAME_DATE_COLS must track any
+               extras JSON). lineage_frame(session, customer) rebuilds the ONE
+               unified lineage frame in attach-priority order (RNOTE, CRN,
+               others; (bronze_file_id, row_seq) within a type) — used by both
+               reconcile_gold and incremental. FRAME_DATE_COLS must track any
                column rename in lockstep or rebuilt dates silently come back as
                datetime.date, breaking matcher arithmetic.
   ingest.py    idempotent gold ingestion: file-level dedup + entity-level upsert
-               (bills by (bill_number, co6_no) — daily IREPS exports are different
-               FILES with the same BILLS); LOCKED bills never mutate -> ingest_conflicts
+               (bills by (bill_number, submission_ref) BY DEFAULT — daily IREPS
+               exports are different FILES with the same BILLS; the key is
+               per-customer config via source_configs.params["entity_key"],
+               threaded as ingest_gold_frames(entity_keys=...) for an ERP with
+               no CO6-like ref; bank txns likewise). Lineage ingest is one
+               generic path for ANY lineage frame (doc_type rides in the data,
+               append-only keyed (doc_type, doc_no)); LOCKED bills never
+               mutate -> ingest_conflicts
   incremental.py  Phase-6 runs: pool = new credits + open exceptions vs all
                unconsumed bills; UNCHANGED matcher; match_ledger (HIGH auto-LOCKs),
                exception lifecycle OPEN -> RESOLVED; one running run per customer
                (partial unique index -> 409 RUN_IN_PROGRESS)
   runs_store.py  persisted runs (payload/frames/workbook survive restarts)
-  seeds.py     idempotent default customer wired to hsbc/ireps adapters
+  seeds.py     idempotent default customer wired to hsbc/ireps adapters;
+               DEFAULT_SOURCES rows are (source_type, role, adapter_key, params)
 backend/alembic/ migrations; env.py reads DATABASE_URL, render_as_batch=True.
                ALWAYS review autogenerate output (it has produced bad imports, wrong
                column types, and — against SQLite specifically — spurious "add
@@ -168,8 +230,8 @@ backend/db/reconcile_gold.py  two-step workflow: snapshot-from-gold (sibling of
                window_days; verified to reproduce the legacy snapshot's exact
                counts, see tests/test_reconcile_gold.py) + the gold browse
                helpers (gold_frame/gold_files/list_ingestions/
-               get_statement_bronze) and LINEAGE_VIEW_MAP (canonical unified
-               lineage browse — RN_*/CR_* shapes stay engine-internal)
+               get_statement_bronze); the lineage browse serves the same
+               canonical unified shape the engine consumes (LINEAGE_MAP)
 backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/ingest
                (multipart, each slot optional, ≥1 required; bronze -> silver ->
                gold standalone; writes one ingestion.completed audit event in
@@ -207,20 +269,33 @@ backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/inge
                file_kinds (union per source_type over the registry — no
                hardcoded ALLOWED list; empty file_kinds = unrestricted).
                Configuration endpoints: GET /api/adapters (registry with
-               labels, system, file_kinds — the UI's accept attrs follow the
-               selected adapter's file_kinds),
-               GET /api/gold/schema (field/date/numeric lists feeding the config
-               UI dropdowns — declared BEFORE /api/gold/{frame}, route order
-               matters), GET/PUT /api/customers/{key}/config (effective merged
-               rules incl. field_map; PUT validates fields against GOLD_COLUMNS
-               -> 400, normalizes via FieldMapping.from_dict, audits
-               config.rules_updated), PUT /api/customers/{key}/sources (adapter
-               per slot; params kept when adapter unchanged, reset when changed;
-               audits config.sources_updated), POST /api/customers (key
+               labels, system, file_kinds, role — the UI's accept attrs follow
+               the selected adapter's file_kinds; lineage-role adapters fit any
+               lineage slot), GET /api/gold/schema (field/date/numeric lists
+               feeding the config UI dropdowns — declared BEFORE
+               /api/gold/{frame}, route order matters),
+               GET/PUT /api/customers/{key}/config (effective merged rules incl.
+               field_map + copy: GET returns copy_overrides (sparse, what's
+               stored) AND copy_effective (fully resolved text); PUT validates
+               fields against GOLD_COLUMNS and copy sections/codes against
+               COPY_SECTIONS/DEFAULT_COPY -> 400, stores copy SPARSELY — only
+               entries differing from defaults — normalizes field_map via
+               FieldMapping.from_dict, audits config.rules_updated),
+               PUT /api/customers/{key}/sources (adapter per slot; lineage
+               slots are 0..N — name a new lineage_<key> slot to ADD it, null
+               to REMOVE (deactivate; singletons refuse); optional per-slot
+               `params` validated (entity_key ⊆ gold columns); params kept when
+               adapter unchanged, reset when changed; audits
+               config.sources_updated), POST /api/customers (key
                ^[a-z0-9_-]{1,64}$, 409 CUSTOMER_EXISTS, clones default sources +
-               rule set, audits customer.created). Every run payload echoes
-               meta.rules_effective (field_map/paid_statuses/weights) — the E2E
-               proof a run used the customer's mapping.
+               rule set, audits customer.created). /api/ingest accepts extra
+               lineage slots as form fields named by slot key (discovered from
+               the customer's source_configs). Every run payload echoes
+               meta.rules_effective (field_map/paid_statuses/weights/
+               copy_overridden/batch_amount_slack/amount_decimals) — the E2E
+               proof a run used the customer's config — plus
+               meta.signal_coverage (WARN when a mapped signal column is
+               missing/all-NA; null = healthy).
                Shared helpers (_load_customer_context/_register_inputs/
                _build_adapters/_effective_rules/_persist_side_effects) are used
                by BOTH the legacy and two-step paths — behavior changes there
@@ -261,14 +336,20 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                KPIs/donut/pipeline from GET /api/overview, top exceptions
                click through to Analyst queue) -> Ingest files (IngestForm:
                per-slot include toggles + File-format dropdowns that PUT
-               /sources, "+ new customer" and "⧉ All ingestions" both top
+               /sources, an "Additional lineage documents" section for the
+               customer's extra lineage_* slots — add ("+ add lineage
+               source"), remove (null adapter), upload under the slot key —
+               "+ new customer" and "⧉ All ingestions" both top
                right — IngestionsView renders inline) -> Reconcile
                (ReconcileForm: statement picker from gold/files + mode;
                MatchingConfigPanel opens inline from the "⚙ Matching config"
                button top right — edits the customer's full rule set incl.
-               field_map via GET/PUT /config, dropdowns fed by
-               /api/gold/schema; there is NO per-run tunables panel — the UI
-               sends no tunables so the saved config governs) -> results.
+               field_map, the new scalar knobs and the "Terminology &
+               guidance" copy editors (edits accumulate in copy_overrides;
+               the server stores only diffs from defaults) via GET/PUT
+               /config, dropdowns fed by /api/gold/schema; there is NO
+               per-run tunables panel — the UI sends no tunables so the
+               saved config governs) -> results.
                "Workspace": Analyst queue (LedgerView renamed in UI
                ONLY — /api/ledger and DB names unchanged; RunsView opens
                inline from its "⧉ Runs" button top right) + AR Reconciliation
@@ -298,7 +379,7 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
 
 ## Domain logic that isn't obvious from any single file
 
-- **The golden master is the refactor gate.** `tests/test_golden.py` diffs the engine's output on the sample documents byte-for-byte against committed CSVs. Any engine/parser/adapter change must keep it green, or regenerate the snapshots explicitly and say why.
+- **The golden master is the refactor gate.** `tests/test_golden.py` diffs the engine's output on the sample documents byte-for-byte against committed CSVs. Any engine/parser/adapter change must keep it green, or regenerate the snapshots explicitly and say why. (Regenerated once on 2026-08-31 for the lineage canonicalization: `bills_enriched`/`queue` dropped the raw RN_*/CR_* columns, `matched`/`queue`/`bills_enriched` gained `Invoice_Date`/`Bill_Reg_Date`, and CRN integer quantities lost a spurious float artifact — verified as a pure drop/add with `scripts/verify_lineage_canonicalization.py`.)
 - **Both sides are sources of truth**, so exceptions run in both directions: `BANK_ONLY` (credit with no bill) and `BILL_ONLY` (advised bill with no credit). The queue deliberately mixes both; bank rows lack bill fields and vice versa by design.
 - **Snapshot vs incremental runs.** Snapshot (default) reconciles one statement against one export, results per run. Incremental accumulates: gold rows are **ingestion-owned** (written once per file, entity-upserted across files), the pool carries open exceptions forward, and matches are durable in `match_ledger` — HIGH confidence auto-LOCKs, review confidences stay OPEN until a user accepts/rejects. A LOCKED match's credit and bills never re-enter any pool; rejecting releases both sides. The wide-open expected-window in incremental mode intentionally reports the whole open-bill backlog once — rows persist as OPEN exceptions, not duplicated per run.
 - **Amount is a filter, not a signal.** Pairs are only scored if amounts already agree (indexed on `round(net_payable_amount, 2)`); zone and date break ties. Confidence labels are derived from the raw signals, not by reversing the score. Signal weights are per-customer config, but labels stay signal-derived.
@@ -309,6 +390,8 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
 - **`window_days` (default 0)** bounds which bills are "expected" in a snapshot statement; money cannot arrive before IREPS advises the bank. Incremental mode ignores it (the open pool replaces the window).
 - **`paid_statuses`** default `{"PAYMENT MADE", "CO7 DONE"}` — CO7 DONE counts because the payment order goes out before the export refreshes. Now a real config: `MatchRuleSet.paid_statuses`, per-customer row in `match_rule_sets`, threaded through `reconcile()` to the matcher.
 - **Matching fields are per-customer config** (`FieldMapping` in `rules.py`, stored as JSON in `match_rule_sets.field_map`, edited in the UI's Matching config view). Only *signals* are configurable — display columns, gap_type literals, and the legacy-named MatchResult columns (`zone_from_narrative`/`bill_zone`/`zone_check` carry the FIRST exact signal's values; `date_source` stays `"advice"`/`"co7"` meaning primary/fallback) are gold-canonical and hardcoded. Two traps: (1) `engine.reconcile()` is called directly by `db/reconcile_gold.py` and `db/incremental.py` — the golden gate does NOT cover those two call sites, so any new rule knob must be threaded there by hand (`meta.rules_effective` is the guard); (2) with zero exact signals `all([])` is vacuously True — `exact_ok = bool(mapping.exact_signals) and all(checks)` guards it (regression-tested in `tests/test_field_mapping.py`). A NULL/`{}` `field_map` row means defaults; the default mapping is byte-identical to the historical hardcoded behavior under the golden gate.
+- **Advisory copy is per-customer config, codes are not.** `MatchRuleSet.copy_overrides` swaps the human text mapped onto `gap_type`/`ExpectedBasis`/review-confidence codes (`engine.DEFAULT_COPY` + `resolve_copy`); the codes themselves (`NON_IREPS_OR_UNRECOGNISED`, `CO7_ISSUED_NO_ADVICE`, `"advice"`/`"co7"`, `LineageStatus` values, MatchedVia literals) are FROZEN — they live in golden CSVs, persisted payloads, ledger rows and the frontend. Never rename a code; change its display text (or add a `labels` entry) instead.
+- **Display paths read canonical ROLES, not the field_map — by design.** `exception_queue` (`amount`=net_payable_amount, `value_date`=payment_advice_date), `summarise`'s bank-side `amount`, and the AR view's advice→order→submission aging chain are deliberately hardcoded to the canonical columns. A custom `field_map` may only point at columns that still MEAN the canonical role; a new source's adapter must map onto the roles, not around them.
 - **IREPS data is dirty in specific ways** the code already handles — don't regress: four spellings of "nothing here" (`None`, `nan`, `"nan"`, `"----"`) via `scoring.norm_text`; int/str ID drift via `lineage._key`; quantities like `"3 Set"` (why `gold_lineage_docs.receipt_qty` is a String); recovery amounts packed several to a cell (summed); Net Amt rounded to whole rupees (₹1 slack).
 - **Bill Status is a block-format sheet, not a table** — label-driven header parsing; unknown labels land in `UnparsedHeader` (stored in gold `extras`, never dropped).
 - **Zone extraction** tests longer railway zone codes first so `NER` isn't read as `ER` (`bank_hsbc.ZONE_CODES` order matters).

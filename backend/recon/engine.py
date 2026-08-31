@@ -19,26 +19,16 @@ from .config import ReconConfig
 from .matching import match_bank_to_billstatus, results_to_frame
 from .matching.scoring import PAID_STATUSES
 from .parsers import attach_lineage
-
-# Provenance chain, in the order the document is actually raised. Each
-# entry is the output column and the RNOTE / CRN columns to coalesce.
-TRAIL = [
-    ("PO", ["RN_PONo", "CR_PONo"]),
-    ("PO_Date", ["RN_PODate", "CR_PODate"]),
-    ("Receipt_Doc", ["RNoteNo", "CRNNo"]),
-    ("Receipt_Date", ["RNoteDate", "CRNDate"]),
-    ("Receipt_Qty", ["RNoteQty", "CR_Qty"]),
-    ("DRR_or_Challan", ["RN_DRRNo", "CR_ChallanNo"]),
-    ("Bill_Reg_No", ["RN_BillRegNo", "CR_BillRegNo"]),
-]
+from .parsers.lineage import TRAIL_COLS
 
 # org_unit deliberately absent: MatchResult already carries it, and under
 # one canonical vocabulary a second copy would collide in _attach_bill_side.
+# The per-doc-type {doc_type}_MatchedVia columns are appended dynamically
+# in _attach_bill_side (RNOTE_MatchedVia / CRN_MatchedVia historically).
 MATCH_SIDE_COLS = [
     "bill_date", "contract_date", "vendor_code", "submission_date",
     "gross_amount", "approved_amount", "deduction_amount", "recoveries",
-    "recovery_count", "return_reason", "LineageStatus", "RNOTE_MatchedVia",
-    "CRN_MatchedVia",
+    "recovery_count", "return_reason", "LineageStatus",
 ]
 
 EXCEPTION_COLS = [
@@ -107,20 +97,26 @@ BILL_ACTIONS = {
         "without action.",
 }
 
+# The default advisory copy, keyed by section then by the frozen codes.
+# Per-customer overrides (MatchRuleSet.copy_overrides) merge over these —
+# codes stay stable, only the human-facing sentences vary by tenant.
+DEFAULT_COPY = {
+    "gap_type": BANK_ACTIONS,
+    "expected_basis": BILL_ACTIONS,
+    "review": REVIEW_ACTIONS,
+}
 
-def _coalesce(df, cols):
-    out = pd.Series(pd.NA, index=df.index, dtype="object")
-    for c in cols:
-        if c in df.columns:
-            out = out.fillna(df[c])
+
+def resolve_copy(copy_overrides=None):
+    """Full per-section text dicts: defaults with any overrides applied.
+    Unknown sections/codes in the overrides are ignored here (the API
+    validates them loudly); a partial dict overrides only what it names."""
+    out = {}
+    for section, defaults in DEFAULT_COPY.items():
+        over = (copy_overrides or {}).get(section) or {}
+        out[section] = {code: over.get(code, text)
+                        for code, text in defaults.items()}
     return out
-
-
-def build_trail(df):
-    """Flatten the RNOTE and CRN columns into one document chain."""
-    for name, srcs in TRAIL:
-        df[name] = _coalesce(df, srcs)
-    return df
 
 
 def _expected_bills(bills, bank_df, window_days, co7_lookback_days, mapping):
@@ -180,7 +176,7 @@ def _candidate_summary(cands):
     return f"{len(cands)} candidate(s): " + " | ".join(one(c) for c in cands)
 
 
-def _match_review(matched, bills):
+def _match_review(matched, bills, review_actions=REVIEW_ACTIONS):
     """The weak matches, as exception rows carrying their evidence."""
     if matched.empty:
         return matched.iloc[0:0].copy()
@@ -188,7 +184,7 @@ def _match_review(matched, bills):
     if review.empty:
         return review
     review["exception_type"] = "MATCH_REVIEW"
-    review["action"] = review["confidence"].map(REVIEW_ACTIONS)
+    review["action"] = review["confidence"].map(review_actions)
     review["Candidates"] = [
         _candidate_details(r.candidate_indices, bills,
                            r.bill_indices[0] if r.bill_indices else None)
@@ -258,23 +254,38 @@ def _attach_bill_side(matched, bills):
     if matched.empty:
         return matched
     first = matched["bill_indices"].apply(lambda x: x[0] if x else None)
-    cols = [c for c in MATCH_SIDE_COLS + [t[0] for t in TRAIL] if c in bills.columns]
+    # {doc_type}_MatchedVia columns in bills-frame order (RNOTE before
+    # CRN historically — attach_lineage adds them in priority order)
+    via_cols = [c for c in bills.columns if c.endswith("_MatchedVia")]
+    cols = [c for c in MATCH_SIDE_COLS + via_cols + TRAIL_COLS
+            if c in bills.columns]
     side = bills.loc[first.dropna().astype(int), cols].reset_index(drop=True)
     return pd.concat([matched.reset_index(drop=True), side], axis=1)
 
 
-def reconcile(bank_df, bill_df, rnote_df=None, crn_df=None,
+def reconcile(bank_df, bill_df, lineage_df=None, extra_lineage_df=None,
               window_days=0, co7_lookback_days=5, date_tolerance_days=2,
               amount_tolerance=0.0, allow_batched=True, max_batch_size=3,
-              paid_statuses=None, weights=None, field_map=None):
+              paid_statuses=None, weights=None, field_map=None,
+              copy_overrides=None, batch_amount_slack=0.5, amount_decimals=2):
     """
     Returns a dict of frames: matched, bank_only, bill_only, summary,
-    bills_enriched. field_map (recon.rules.FieldMapping) selects which
-    gold columns drive the match signals; None = historical defaults.
+    bills_enriched. lineage_df is the canonical unified lineage frame
+    (gold lineage_docs shape, doc_type discriminating); extra_lineage_df
+    is a second such frame kept for the historical (rnote, crn) call
+    shape — both are concatenated. field_map (recon.rules.FieldMapping)
+    selects which gold columns drive the match signals; None = defaults.
+    copy_overrides (MatchRuleSet.copy_overrides) swaps the advisory text
+    stamped into `action`; codes and structure never change.
     """
     from .rules import FieldMapping
     mapping = field_map or FieldMapping()
-    bills = build_trail(attach_lineage(bill_df, rnote_df, crn_df))
+    copy_text = resolve_copy(copy_overrides)
+    lineage_frames = [f for f in (lineage_df, extra_lineage_df)
+                      if f is not None and not f.empty]
+    lineage = (pd.concat(lineage_frames, ignore_index=True)
+               if lineage_frames else None)
+    bills = attach_lineage(bill_df, lineage)
 
     results, bank_only = match_bank_to_billstatus(
         bank_df, bills,
@@ -286,6 +297,8 @@ def reconcile(bank_df, bill_df, rnote_df=None, crn_df=None,
                        else PAID_STATUSES),
         weights=weights,
         mapping=mapping,
+        batch_amount_slack=batch_amount_slack,
+        amount_decimals=amount_decimals,
     )
     # Stable id per match, and the settlement stamped onto the bills so a
     # bill row can say which credit paid it. All confidences are recorded;
@@ -315,13 +328,14 @@ def reconcile(bank_df, bill_df, rnote_df=None, crn_df=None,
     if not bank_only.empty:
         bank_only = bank_only.copy()
         bank_only["exception_type"] = "BANK_ONLY"
-        bank_only["action"] = bank_only["gap_type"].map(BANK_ACTIONS)
+        bank_only["action"] = bank_only["gap_type"].map(copy_text["gap_type"])
 
     if not bill_only.empty:
         bill_only["exception_type"] = "BILL_ONLY"
-        bill_only["action"] = bill_only["ExpectedBasis"].map(BILL_ACTIONS)
+        bill_only["action"] = \
+            bill_only["ExpectedBasis"].map(copy_text["expected_basis"])
 
-    match_review = _match_review(matched, bills)
+    match_review = _match_review(matched, bills, copy_text["review"])
 
     return {
         "matched": matched,

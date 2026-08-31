@@ -34,13 +34,26 @@ class SilverResult:
         self.meta = meta or {}
 
 
+def role_of(source_type: str) -> str:
+    """Slot ROLE from a source_type / slot key: the two singleton roles
+    are their own names; every lineage_* slot shares the `lineage` role
+    (0..N slots per customer). Adapter choice is validated per role, not
+    per exact source_type, so any lineage adapter can serve any lineage
+    slot."""
+    return "lineage" if source_type.startswith("lineage") else source_type
+
+
 class SourceAdapter(ABC):
-    source_type: str        # bank_statement | bill_status | lineage_rnote | lineage_crn
+    source_type: str        # bank_statement | bill_status | lineage_<kind>
     adapter_key: str        # e.g. hsbc, ireps
     label: str = ""         # human name for UI dropdowns (falls back to key)
     system: str = ""        # source family, e.g. "HSBC", "IREPS" — the UI
                             # groups an ERP's documents by this
     file_kinds: Tuple[str, ...] = ()
+
+    @property
+    def role(self) -> str:
+        return role_of(self.source_type)
 
     @abstractmethod
     def parse(self, path, params: dict) -> SilverResult:

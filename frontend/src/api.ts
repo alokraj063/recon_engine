@@ -79,11 +79,16 @@ export async function ingestFiles(
   files: UploadFiles,
   customerId: string,
   slots: string[],
+  extraFiles?: Record<string, File | null>,
 ): Promise<IngestResponse> {
   const form = new FormData()
   for (const field of ['statement', 'bills', 'rnote', 'crn'] as const) {
     const f = files[field]
     if (f && slots.includes(field)) form.append(field, f)
+  }
+  // extra lineage slots upload under their slot key (source_type)
+  for (const [slot, f] of Object.entries(extraFiles ?? {})) {
+    if (f && slots.includes(slot)) form.append(slot, f)
   }
   form.append('customer_id', customerId)
   form.append('slots', slots.join(','))
@@ -184,9 +189,11 @@ export async function saveCustomerConfig(key: string, rules: CustomerRules): Pro
   return sendJson('PUT', `/api/customers/${encodeURIComponent(key)}/config`, rules)
 }
 
+/** Adapter per slot; a null value REMOVES a lineage slot, a new
+ *  lineage_<key> name adds one. */
 export async function saveCustomerSources(
   key: string,
-  sources: Record<string, string>,
+  sources: Record<string, string | null>,
 ): Promise<{ key: string; sources: Record<string, string> }> {
   return sendJson('PUT', `/api/customers/${encodeURIComponent(key)}/sources`, { sources })
 }

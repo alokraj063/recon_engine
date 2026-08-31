@@ -179,7 +179,7 @@ export function CommandCenter({
                           {e.exception_type.replace('_', ' ')}</span></td>
                         <td className="mono-cell">{e.ref ?? '—'}</td>
                         <td>{e.zone ?? '—'}</td>
-                        <td>{e.date || '—'}</td>
+                        <td className="date">{e.date || '—'}</td>
                         <td className="num">{inr(e.amount)}</td>
                       </tr>
                     ))}

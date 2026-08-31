@@ -23,7 +23,6 @@ const SPINE: Array<[string, string]> = [
   ['bill_status', 'Status'],
   ['ExpectedBasis', 'Basis'],
   ['gap_type', 'Gap'],
-  ['action', 'What to do'],
 ]
 
 const BANK_DETAIL: Array<[string, string]> = [
@@ -44,9 +43,14 @@ function Detail({ row, onOpenInQueue, primaryRunId }: {
   // combined multi-run rows carry their creating run; single-run rows
   // belong to the primary selection
   const runId = (typeof row.run_id === 'string' ? row.run_id : null) ?? primaryRunId
+  // "What to do" lives here rather than as a table column: the prose is too
+  // long for the row spine and was collapsing into ~300px-tall cells
+  const advice = typeof row.action === 'string' && row.action
+    ? <div className="detail-advice">{row.action}</div> : null
   if (row.exception_type === 'MATCH_REVIEW') {
     return (
       <div className="detail-grid">
+        {advice}
         <div className="detail-section">
           Weak match — stands in the Matched tab until decided{' '}
           {typeof row.confidence === 'string' && <ConfidenceBadge label={row.confidence} />}
@@ -68,6 +72,7 @@ function Detail({ row, onOpenInQueue, primaryRunId }: {
   if (isBank) {
     return (
       <div className="detail-grid">
+        {advice}
         <div className="detail-section">Bank credit — no bill behind it</div>
         {BANK_DETAIL.map(([k, l]) => (
           <DetailField key={k} row={row} k={k} label={l} />
@@ -75,7 +80,12 @@ function Detail({ row, onOpenInQueue, primaryRunId }: {
       </div>
     )
   }
-  return <BillTrailDetail row={row} title="Bill — advised but no credit landed" />
+  return (
+    <>
+      {advice && <div className="detail-grid">{advice}</div>}
+      <BillTrailDetail row={row} title="Bill — advised but no credit landed" />
+    </>
+  )
 }
 
 function buildColumns(rows: Row[]): ColumnDef<Row>[] {
@@ -93,7 +103,10 @@ function buildColumns(rows: Row[]): ColumnDef<Row>[] {
         return <span className={`stamp stamp-${v}`}>{v.replace(/_/g, ' ')}</span>
       if (key === 'confidence')
         return typeof v === 'string' ? <ConfidenceBadge label={v} /> : <span className="empty-cell">—</span>
-      if (key === 'action') return <div className="action-cell">{v ? String(v) : '—'}</div>
+      // display-only: let SCREAMING_SNAKE literals wrap instead of forcing
+      // the column to their full min-content width
+      if ((key === 'gap_type' || key === 'ExpectedBasis') && typeof v === 'string')
+        return v.replace(/_/g, ' ')
       const text = fmtCell(key, v as Cell)
       return text === '—' ? <span className="empty-cell">—</span> : text
     },

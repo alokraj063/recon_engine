@@ -10,11 +10,13 @@ from .models import Customer, MatchRuleSetRow, SourceConfig
 
 DEFAULT_CUSTOMER_KEY = "default"
 
+# (slot source_type, role, adapter_key, params) — lineage is 0..N slots
+# per customer; these two are the seeded IREPS pair.
 DEFAULT_SOURCES = [
-    ("bank_statement", "hsbc", {}),
-    ("bill_status", "ireps", {}),
-    ("lineage_rnote", "ireps_rnote", {"sheet": 0}),
-    ("lineage_crn", "ireps_crn", {"sheet": 0}),
+    ("bank_statement", "bank_statement", "hsbc", {}),
+    ("bill_status", "bill_status", "ireps", {}),
+    ("lineage_rnote", "lineage", "ireps_rnote", {"sheet": 0}),
+    ("lineage_crn", "lineage", "ireps_crn", {"sheet": 0}),
 ]
 
 
@@ -27,7 +29,7 @@ def seed_defaults(session):
         session.add(customer)
         session.flush()
 
-    for source_type, adapter_key, params in DEFAULT_SOURCES:
+    for source_type, role, adapter_key, params in DEFAULT_SOURCES:
         exists = session.execute(
             select(SourceConfig).where(SourceConfig.customer_id == customer.id,
                                        SourceConfig.source_type == source_type)
@@ -35,8 +37,11 @@ def seed_defaults(session):
         if exists is None:
             session.add(SourceConfig(customer_id=customer.id,
                                      source_type=source_type,
+                                     role=role,
                                      adapter_key=adapter_key,
                                      params=params))
+        elif exists.role is None:
+            exists.role = role
 
     rules = session.execute(
         select(MatchRuleSetRow).where(MatchRuleSetRow.customer_id == customer.id,

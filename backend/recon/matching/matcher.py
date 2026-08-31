@@ -57,12 +57,13 @@ class MatchResult:
     candidate_indices: list = field(default_factory=list)
 
 
-def _build_amount_index(candidates, mapping=DEFAULT_MAPPING):
+def _build_amount_index(candidates, mapping=DEFAULT_MAPPING, decimals=2):
     """Rounded bill amount -> list of bill indexes. Rounding because one
     side was read from a PDF and the other from Excel."""
     index = {}
     for idx, row in candidates.iterrows():
-        index.setdefault(round(row[mapping.bill_amount_field], 2), []).append(idx)
+        index.setdefault(round(row[mapping.bill_amount_field], decimals),
+                         []).append(idx)
     return index
 
 
@@ -80,7 +81,7 @@ def _eligible_bills(bill_df, paid_statuses=PAID_STATUSES,
 # --------------------------------------------------------------------- #
 def _score_all_pairs(bank_df, candidates, amt_index, date_tolerance_days,
                      amount_tolerance, weights=None,
-                     mapping=DEFAULT_MAPPING):
+                     mapping=DEFAULT_MAPPING, decimals=2):
     """
     Score everything, assign nothing.
 
@@ -99,7 +100,7 @@ def _score_all_pairs(bank_df, candidates, amt_index, date_tolerance_days,
 
     pairs, no_candidate = [], []
     for pos, b in bank_df.iterrows():
-        cand = lookup(round(b[mapping.bank_amount_field], 2))
+        cand = lookup(round(b[mapping.bank_amount_field], decimals))
         if not cand:
             no_candidate.append(pos)
             continue
@@ -244,7 +245,7 @@ def _assign(bank_df, candidates, pairs, top_score, tied, top_idx,
 # Pass 3
 # --------------------------------------------------------------------- #
 def find_batch(bank_row, candidates, free_idx, date_tol, amt_tol, max_size,
-               mapping=DEFAULT_MAPPING):
+               mapping=DEFAULT_MAPPING, batch_slack=0.5, decimals=2):
     """
     A set of bills agreeing on every exact signal whose amounts sum to
     the credit.
@@ -274,19 +275,22 @@ def find_batch(bank_row, candidates, free_idx, date_tol, amt_tol, max_size,
     if len(pool) < 2:
         return None
 
-    target = round(bank_row[mapping.bank_amount_field], 2)
-    tol = max(amt_tol, 0.5)
+    target = round(bank_row[mapping.bank_amount_field], decimals)
+    # legacy hardcoded 0.5 (50 paise) lives on as batch_slack's default;
+    # per-customer config via MatchRuleSet.batch_amount_slack
+    tol = max(amt_tol, batch_slack)
     for size in range(2, min(max_size, len(pool)) + 1):
         for combo in combinations(pool, size):
             total = round(sum(candidates.loc[i, mapping.bill_amount_field]
-                              for i in combo), 2)
+                              for i in combo), decimals)
             if abs(total - target) <= tol:
                 return list(combo)
     return None
 
 
 def _batched_pass(bank_df, candidates, leftover, used_bills, date_tol, amt_tol,
-                  max_size, mapping=DEFAULT_MAPPING):
+                  max_size, mapping=DEFAULT_MAPPING, batch_slack=0.5,
+                  decimals=2):
     sig = mapping.exact_signals[0] if mapping.exact_signals else None
     results, still_open = [], []
     free = [i for i in candidates.index if i not in used_bills]
@@ -294,7 +298,7 @@ def _batched_pass(bank_df, candidates, leftover, used_bills, date_tol, amt_tol,
     for bp in leftover:
         b = bank_df.loc[bp]
         idxs = find_batch(b, candidates, free, date_tol, amt_tol, max_size,
-                          mapping)
+                          mapping, batch_slack, decimals)
         if idxs is None:
             still_open.append(bp)
             continue
@@ -344,6 +348,8 @@ def match_bank_to_billstatus(
     paid_statuses=PAID_STATUSES,
     weights=None,
     mapping=None,
+    batch_amount_slack=0.5,
+    amount_decimals=2,
 ):
     """
     Returns (results, unmatched_bank).
@@ -353,11 +359,11 @@ def match_bank_to_billstatus(
     """
     mapping = mapping or FieldMapping()
     candidates = _eligible_bills(bill_df, paid_statuses, mapping)
-    amt_index = _build_amount_index(candidates, mapping)
+    amt_index = _build_amount_index(candidates, mapping, amount_decimals)
 
     pairs, no_candidate = _score_all_pairs(
         bank_df, candidates, amt_index, date_tolerance_days, amount_tolerance,
-        weights, mapping)
+        weights, mapping, amount_decimals)
     top_score, tied, top_idx = _ceilings(pairs)
     results, used_bills, used_bank = _assign(
         bank_df, candidates, pairs, top_score, tied, top_idx, mapping)
@@ -366,7 +372,8 @@ def match_bank_to_billstatus(
     if allow_batched:
         batched, leftover = _batched_pass(
             bank_df, candidates, leftover, used_bills,
-            date_tolerance_days, amount_tolerance, max_batch_size, mapping)
+            date_tolerance_days, amount_tolerance, max_batch_size, mapping,
+            batch_amount_slack, amount_decimals)
         results.extend(batched)
 
     unmatched = bank_df.loc[sorted(set(leftover) | set(no_candidate))].copy()

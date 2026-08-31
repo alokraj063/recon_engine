@@ -77,7 +77,15 @@ class SourceConfig(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
-    source_type: Mapped[str] = mapped_column(String(32))   # bank_statement | bill_status | lineage_rnote | lineage_crn
+    # source_type doubles as the SLOT KEY (unique per customer). The two
+    # singleton roles use the fixed values bank_statement / bill_status;
+    # lineage slots are 0..N per customer, named lineage_<key> (the two
+    # seeded ones keep their historical names lineage_rnote / lineage_crn).
+    source_type: Mapped[str] = mapped_column(String(32))
+    # bank_statement | bill_status | lineage — which kind of document the
+    # slot carries; adapter choice is validated against it. NULL on
+    # pre-migration rows -> derived from source_type (see db/seeds.py).
+    role: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     adapter_key: Mapped[str] = mapped_column(String(64))   # hsbc | ireps | ireps_rnote | ireps_crn
     params: Mapped[dict] = mapped_column(JSONVariant, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -102,6 +110,13 @@ class MatchRuleSetRow(Base):
     # which gold columns drive the match signals (recon.rules.FieldMapping
     # as a dict); NULL -> historical defaults
     field_map: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
+    # advisory-text overrides keyed by section then frozen code (see
+    # recon.rules.COPY_SECTIONS / recon.engine.DEFAULT_COPY); NULL -> defaults
+    copy_overrides: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
+    # NULL on the scalar knobs below -> MatchRuleSet dataclass defaults
+    batch_amount_slack: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    amount_decimals: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ar_overdue_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 # --- bronze / silver ---------------------------------------------------
@@ -247,8 +262,10 @@ class GoldRecovery(Base):
 
 
 class GoldLineageDoc(Base):
-    """RNOTE + CRN unified with a doc_type discriminator. Storage mapping
-    only — in-memory frames keep their RN_/CR_ shapes for attach_lineage."""
+    """All upstream lineage documents unified with a doc_type
+    discriminator (RNOTE / CRN / a future source's kinds). Canonical
+    end-to-end: adapters emit this shape and attach_lineage consumes it —
+    db/gold.py LINEAGE_MAP is identity, like BILLS_MAP."""
     __tablename__ = "lineage_docs"
     __table_args__ = (
         # historical 3-col key (kept: unnamed, hard to drop on SQLite);
@@ -276,6 +293,8 @@ class GoldLineageDoc(Base):
     receipt_qty: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     drr_or_challan_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     bill_reg_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    invoice_date: Mapped[Optional[datetime]] = mapped_column(Date, nullable=True)
+    bill_reg_date: Mapped[Optional[datetime]] = mapped_column(Date, nullable=True)
     extras: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
 
 

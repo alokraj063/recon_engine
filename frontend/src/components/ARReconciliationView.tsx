@@ -3,6 +3,7 @@ import { RotateCw } from 'lucide-react'
 import type { ArRow, ArStatus, ArView } from '../types'
 import { fetchAr } from '../api'
 import { inr } from '../format'
+import { FitText } from './FitText'
 
 interface Props {
   customerId: string
@@ -86,26 +87,26 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
 
       {data && data.rows.length > 0 && (
         <>
-          <div className="tiles cc-tiles">
+          <div className="tiles cc-tiles ar-tiles">
             <div className="tile tone-bill">
               <div className="tile-label">AR outstanding</div>
-              <div className="tile-count">{inr(data.kpis.outstanding.value)}</div>
+              <div className="tile-count"><FitText>{inr(data.kpis.outstanding.value)}</FitText></div>
               <div className="tile-amount">{data.kpis.outstanding.count.toLocaleString('en-IN')} bills awaiting credit</div>
             </div>
             <div className="tile">
               <div className="tile-label">Received</div>
-              <div className="tile-count">{inr(data.kpis.received.value)}</div>
+              <div className="tile-count"><FitText>{inr(data.kpis.received.value)}</FitText></div>
               <div className="tile-amount">{data.kpis.received.count} credits settled</div>
               <div className="tile-delta">{inr(data.kpis.received.mtd_value)} this month</div>
             </div>
             <div className="tile tone-neutral">
               <div className="tile-label">Match rate</div>
-              <div className="tile-count">{pct(data.kpis.match_rate)}</div>
+              <div className="tile-count"><FitText>{pct(data.kpis.match_rate)}</FitText></div>
               <div className="tile-amount">of statement credits</div>
             </div>
             <div className="tile tone-bank">
               <div className="tile-label">Overdue &gt; 30d</div>
-              <div className="tile-count">{inr(data.kpis.overdue.value)}</div>
+              <div className="tile-count"><FitText>{inr(data.kpis.overdue.value)}</FitText></div>
               <div className="tile-amount">{data.kpis.overdue.count.toLocaleString('en-IN')} bills</div>
             </div>
           </div>
@@ -147,11 +148,11 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
                             onClick={() => rowClick(r)}>
                           <td className="mono-cell">{r.bill_number ?? '—'}</td>
                           <td>{r.zone ?? '—'}</td>
-                          <td>{r.due_date ?? '—'}</td>
+                          <td className="date">{r.due_date ?? '—'}</td>
                           <td className="num">{r.net_payable_amount !== null ? inr(r.net_payable_amount) : '—'}</td>
                           <td className="mono-cell">{r.pay?.bank_ref ?? '—'}</td>
                           <td className="num">{r.pay?.amount != null ? inr(r.pay.amount) : '—'}</td>
-                          <td>{r.pay?.value_date ?? '—'}</td>
+                          <td className="date">{r.pay?.value_date ?? '—'}</td>
                           <td className="num">
                             {r.variance === null ? '—'
                               : r.variance === 0 ? <span className="empty-cell">₹0</span>

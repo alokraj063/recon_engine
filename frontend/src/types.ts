@@ -316,6 +316,9 @@ export interface AdapterOption {
   /** file extensions the adapter parses (e.g. [".pdf"]) — drives the
    *  file picker's accept attribute; empty means no restriction */
   file_kinds: string[]
+  /** slot role: bank_statement | bill_status | lineage — any lineage-role
+   *  adapter can serve any lineage_* slot */
+  role?: string
 }
 
 /** source_type -> available adapters (GET /api/adapters). */
@@ -345,6 +348,9 @@ export interface FieldMap {
   fallback_due_statuses: string[]
 }
 
+/** Advisory-copy dictionaries keyed by section then frozen code. */
+export type CopyText = Record<string, Record<string, string>>
+
 export interface CustomerRules {
   date_tolerance_days: number
   amount_tolerance: number
@@ -355,6 +361,13 @@ export interface CustomerRules {
   paid_statuses: string[]
   weights: Record<string, number>
   field_map: FieldMap
+  /** stored overrides only (sparse); what PUT persists */
+  copy_overrides?: CopyText
+  /** fully-resolved advisory text (defaults + overrides); read-only echo */
+  copy_effective?: CopyText
+  batch_amount_slack: number
+  amount_decimals: number
+  ar_overdue_days: number
 }
 
 export interface CustomerConfig {

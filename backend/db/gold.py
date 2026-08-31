@@ -48,19 +48,14 @@ RECOVERIES_MAP = {c: c for c in (
     "recovery_amt", "recovery_text",
 )}
 
-RNOTE_MAP = {
-    "RNoteNo": "doc_no", "RNoteDate": "doc_date", "InvoiceNo": "invoice_no",
-    "CO6No": "submission_ref", "CO7No": "payment_order_ref",
-    "RN_PONo": "po_no", "RN_PODate": "po_date", "RNoteQty": "receipt_qty",
-    "RN_DRRNo": "drr_or_challan_no", "RN_BillRegNo": "bill_reg_no",
-}
-
-CRN_MAP = {
-    "CRNNo": "doc_no", "CRNDate": "doc_date", "InvoiceNo": "invoice_no",
-    "CO6No": "submission_ref", "CO7No": "payment_order_ref",
-    "CR_PONo": "po_no", "CR_PODate": "po_date", "CR_Qty": "receipt_qty",
-    "CR_ChallanNo": "drr_or_challan_no", "CR_BillRegNo": "bill_reg_no",
-}
+# Identity since the lineage canonicalization: adapters emit the unified
+# gold lineage_docs shape directly (doc_type in the data). The map still
+# decides typed-column vs extras, like BILLS_MAP.
+LINEAGE_MAP = {c: c for c in (
+    "doc_type", "doc_no", "doc_date", "invoice_no", "submission_ref",
+    "payment_order_ref", "po_no", "po_date", "receipt_qty",
+    "drr_or_challan_no", "bill_reg_no", "invoice_date", "bill_reg_date",
+)}
 
 _HELPER_COLS = ("row_seq", "bill_row_seq")
 
@@ -145,10 +140,8 @@ FRAME_DATE_COLS = {
     "bank_txns": ["value_date"],
     "bills": ["contract_date", "bill_date", "payment_advice_date",
               "submission_date", "payment_order_date"],
-    "lineage_rnote": ["RNoteDate", "RN_PODate"],
-    "lineage_crn": ["CRNDate", "CR_PODate"],
-    # canonical browse view of gold.lineage_docs (db/reconcile_gold.py)
-    "lineage_view": ["doc_date", "po_date"],
+    # canonical unified lineage frame (engine + browse share the shape)
+    "lineage_docs": ["doc_date", "po_date", "invoice_date", "bill_reg_date"],
 }
 
 
@@ -172,6 +165,28 @@ def frame_from_gold(rows, colmap: dict, frame_name: str,
         if c in df.columns:
             df[c] = pd.to_datetime(df[c])
     return df.reset_index(drop=True), ids
+
+
+def lineage_frame(session, customer_id: int):
+    """The customer's full gold.lineage_docs as ONE engine-shaped frame,
+    ordered so attach_lineage's coalesce priority reproduces the legacy
+    per-type behaviour: RNOTE rows first, then CRN, then any other doc
+    type in name order; (bronze_file_id, row_seq) within a type keeps
+    parse order (first-occurrence wins in the join luts)."""
+    from sqlalchemy import select
+
+    from recon.parsers.lineage import LINEAGE_DOC_PRIORITY
+
+    rows = list(session.execute(
+        select(GoldLineageDoc)
+        .where(GoldLineageDoc.customer_id == customer_id)).scalars())
+    if not rows:
+        return None
+    prio = {t: i for i, t in enumerate(LINEAGE_DOC_PRIORITY)}
+    rows.sort(key=lambda r: (prio.get(r.doc_type, len(prio)),
+                             r.doc_type or "", r.bronze_file_id, r.row_seq))
+    df, _ = frame_from_gold(rows, LINEAGE_MAP, "lineage_docs")
+    return df
 
 
 def persist_gold(session, customer_id: int, run_id: Optional[str],
@@ -202,14 +217,12 @@ def persist_gold(session, customer_id: int, run_id: Optional[str],
         ids["recoveries"] = _persist_frame(
             session, GoldRecovery, gold_frames["recoveries"], RECOVERIES_MAP,
             base("recoveries"), resolve=link_bill)
-    if "lineage_rnote" in gold_frames:
-        ids["lineage_rnote"] = _persist_frame(
-            session, GoldLineageDoc, gold_frames["lineage_rnote"], RNOTE_MAP,
-            {**base("lineage_rnote"), "doc_type": "RNOTE"})
-    if "lineage_crn" in gold_frames:
-        ids["lineage_crn"] = _persist_frame(
-            session, GoldLineageDoc, gold_frames["lineage_crn"], CRN_MAP,
-            {**base("lineage_crn"), "doc_type": "CRN"})
+    for frame in gold_frames:
+        # any lineage slot: the frame carries its own doc_type column
+        if frame.startswith("lineage"):
+            ids[frame] = _persist_frame(
+                session, GoldLineageDoc, gold_frames[frame], LINEAGE_MAP,
+                base(frame))
     record_event(session, logger, event_type="gold.rows_persisted",
                  customer_id=customer_id, run_id=run_id,
                  details={frame: len(ids_) for frame, ids_ in ids.items()})

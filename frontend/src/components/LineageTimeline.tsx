@@ -51,11 +51,16 @@ function buildEvents(row: Row): TlEvent[] {
   // (bill_number, net_payable_amount), so these two events only count
   // when dated — otherwise a bill with no advice would still show an
   // "advice" entry.
-  const invoiceDate = str(row.RN_InvoiceDate) ?? str(row.CR_InvoiceDate)
+  // canonical trail columns first; RN_/CR_ fallbacks keep frames of runs
+  // persisted before the lineage canonicalization rendering
+  const invoiceDate =
+    str(row.Invoice_Date) ?? str(row.RN_InvoiceDate) ?? str(row.CR_InvoiceDate)
   if (invoiceDate) push(invoiceDate, 'Invoice raised', [`invoice ${row.bill_number}`])
-  push(str(row.RN_BillRegDate) ?? str(row.CR_BillRegDate), 'Bill registered', [
-    str(row.Bill_Reg_No) && `reg no ${row.Bill_Reg_No}`,
-  ])
+  push(
+    str(row.Bill_Reg_Date) ?? str(row.RN_BillRegDate) ?? str(row.CR_BillRegDate),
+    'Bill registered', [
+      str(row.Bill_Reg_No) && `reg no ${row.Bill_Reg_No}`,
+    ])
   push(str(row.bill_date), 'Bill date', [
     str(row.bill_number) && `bill ${row.bill_number}`,
     money(row.gross_amount) && `bill amt ${money(row.gross_amount)}`,
