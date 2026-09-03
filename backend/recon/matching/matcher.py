@@ -174,7 +174,7 @@ def _assign(bank_df, candidates, pairs, top_score, tied, top_idx,
         flags = []
         if n_tied > 1:
             flags.append(
-                f"AMBIGUOUS - {n_tied} bills share this Net Amt and score "
+                f"AMBIGUOUS - {n_tied} bills share this amount and score "
                 f"the same; picked bill {row.get('bill_number')} arbitrarily"
             )
             conf = "AMBIGUOUS"
@@ -378,15 +378,17 @@ def match_bank_to_billstatus(
 
     unmatched = bank_df.loc[sorted(set(leftover) | set(no_candidate))].copy()
     if not unmatched.empty:
-        # gap literals stay historical; presence of the FIRST exact
-        # signal's bank field decides which one
+        # presence of the FIRST exact signal's bank field decides which
+        # gap code the credit gets (source-neutral codes since 2026-09-01;
+        # legacy ZONE_BILL_NOT_FOUND/NON_IREPS_OR_UNRECOGNISED values in
+        # old run payloads are translated by the frontend's normalizeLegacy)
         sig = mapping.exact_signals[0] if mapping.exact_signals else None
         if sig is None:
-            unmatched["gap_type"] = "NON_IREPS_OR_UNRECOGNISED"
+            unmatched["gap_type"] = "UNRECOGNISED_RECEIPT"
         else:
             unmatched["gap_type"] = unmatched[sig.bank_field].apply(
-                lambda z: "ZONE_BILL_NOT_FOUND" if norm_text(z)
-                else "NON_IREPS_OR_UNRECOGNISED"
+                lambda z: "SIGNAL_BILL_NOT_FOUND" if norm_text(z)
+                else "UNRECOGNISED_RECEIPT"
             )
     return results, unmatched
 

@@ -63,7 +63,7 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
       { label: 'Systems', value: '2', hint: 'HSBC · IREPS' },
       { label: 'Last ingestion', live: (o) => (o?.last_ingestion ? fmtWhen(o.last_ingestion.at) : 'none') },
     ],
-    flowsIn: ['Raw files uploaded on the Ingest page (or repo samples)'],
+    flowsIn: ['Raw files uploaded on the Ingest page (or bundled default documents)'],
     flowsOut: ['Parsed source-native rows → silver', 'Canonical frames → gold'],
     linksTo: [{ label: 'Ingest files', view: 'ingest' }],
   },

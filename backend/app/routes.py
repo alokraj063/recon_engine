@@ -31,7 +31,7 @@ from db.storage import file_sha256
 from logging_setup import customer_id_var, get_logger
 from recon import (REGISTRY, MatchRuleSet, PipelineSinks, SelfCheckError,
                    get_adapter, run_pipeline, write_workbook)
-from recon.engine import DEFAULT_COPY, resolve_copy
+from recon.engine import DEFAULT_COPY, DEFAULT_LABELS, resolve_copy
 from recon.pipeline import check_signal_coverage
 from recon.gold import GOLD_COLUMNS
 from recon.rules import COPY_SECTIONS, FieldMapping
@@ -79,7 +79,7 @@ DEFAULT_PATTERNS = {
 def _default_file(field):
     if not SAMPLE_DIR.is_dir():
         return None
-    # extra lineage slots have no repo sample
+    # extra lineage slots have no default document
     for pattern in DEFAULT_PATTERNS.get(field, ()):
         for p in sorted(SAMPLE_DIR.glob(pattern)):
             if not p.name.startswith("~$"):   # Excel lock files
@@ -125,8 +125,8 @@ def _save_upload(upload: UploadFile, field: str, tmpdir: Path) -> Path:
 
 @router.get("/defaults")
 def default_files(customer_id: str = "default"):
-    """Which repo sample document backs each field when nothing is
-    uploaded. null means no default exists for that field. Samples back
+    """Which bundled default document backs each field when nothing is
+    uploaded. null means no default exists for that field. Defaults back
     the seeded default customer ONLY — for any other customer every
     field is null, so real tenants never see (or ingest) demo data."""
     if customer_id != "default":
@@ -139,9 +139,9 @@ def default_files(customer_id: str = "default"):
 
 
 def _resolve_input(field, upload, tmpdir, required, allow_samples=True):
-    """An uploaded file wins; otherwise fall back to the repo default —
-    but only when allow_samples (the default customer). Returns
-    (path, display_name)."""
+    """An uploaded file wins; otherwise fall back to the bundled default
+    document — but only when allow_samples (the default customer).
+    Returns (path, display_name)."""
     if upload is not None and upload.filename:
         path = _save_upload(upload, field, tmpdir)
         return path, upload.filename
@@ -150,8 +150,9 @@ def _resolve_input(field, upload, tmpdir, required, allow_samples=True):
         if required:
             _fail(400, "INVALID_INPUT",
                   f"{field}: nothing uploaded"
-                  + (" and no repo sample found" if allow_samples
-                     else " (repo samples back the default customer only)"))
+                  + (" and no default document available" if allow_samples
+                     else " (default documents back the default customer "
+                          "only)"))
         return None, None
     return p, p.name
 
@@ -412,7 +413,7 @@ async def create_run(
         _fail(400, "INVALID_INPUT", f"unknown mode '{mode}'")
     tmpdir = Path(tempfile.mkdtemp(prefix="recon_run_"))
     try:
-        # repo samples never stand in for a real tenant's documents
+        # default documents never stand in for a real tenant's documents
         samples_ok = customer_id == "default"
         stmt_path, stmt_name = _resolve_input("statement", statement, tmpdir,
                                               True, samples_ok)
@@ -795,7 +796,7 @@ async def ingest(
     slots: str | None = Form(None),
 ):
     """Raw files -> bronze -> silver -> gold, standalone. `slots` is a
-    comma-separated list of ENABLED slots; the repo-sample fallback only
+    comma-separated list of ENABLED slots; the default-document fallback only
     applies to enabled slots, so skipped documents are truly skipped (an
     uploaded file always implies its slot is enabled). With `slots`
     omitted, only uploaded files are ingested — an empty form no longer
@@ -842,7 +843,7 @@ async def ingest(
         if not any(paths.values()):
             _fail(400, "INVALID_INPUT",
                   "no input files: enabled slots have neither uploads nor "
-                  "repo samples")
+                  "default documents")
 
         with SessionLocal() as session:
             customer, source_configs, _rule_row = _load_customer_context(
@@ -1416,8 +1417,9 @@ def put_customer_config(customer_key: str, body: RulesBody):
         # UI that round-trips the effective text never freezes defaults
         # into the row (and future default-copy edits reach the tenant)
         sparse = {}
+        all_defaults = {**DEFAULT_COPY, "labels": DEFAULT_LABELS}
         for section, entries in (body.copy_overrides or {}).items():
-            defaults = DEFAULT_COPY.get(section, {})
+            defaults = all_defaults.get(section, {})
             kept = {code: text for code, text in entries.items()
                     if text != defaults.get(code)}
             if kept:

@@ -85,6 +85,24 @@ def test_copy_overrides_roundtrip_sparse(client, customer):
                           json=body).status_code == 400
 
 
+def test_labels_roundtrip_sparse(client, customer):
+    from recon.engine import DEFAULT_LABELS
+    cfg = client.get(f"/api/customers/{customer}/config").json()["rules"]
+    # new customers get the generic labels
+    assert cfg["copy_effective"]["labels"] == DEFAULT_LABELS
+
+    body = dict(cfg)
+    body.pop("copy_effective")
+    # round-trip all effective labels with one rename — sparse storage
+    body["copy_overrides"] = {
+        "labels": {**DEFAULT_LABELS, "AMBIGUOUS": "Tied pick"}}
+    got = client.put(f"/api/customers/{customer}/config",
+                     json=body).json()["rules"]
+    assert got["copy_overrides"] == {"labels": {"AMBIGUOUS": "Tied pick"}}
+    assert got["copy_effective"]["labels"]["AMBIGUOUS"] == "Tied pick"
+    assert got["copy_effective"]["labels"]["LOW"] == DEFAULT_LABELS["LOW"]
+
+
 def test_new_scalar_knobs_roundtrip(client, customer):
     cfg = client.get(f"/api/customers/{customer}/config").json()["rules"]
     assert (cfg["batch_amount_slack"], cfg["amount_decimals"],

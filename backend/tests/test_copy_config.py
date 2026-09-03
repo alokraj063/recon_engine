@@ -52,11 +52,11 @@ def test_resolve_copy_defaults_and_partial_merge():
     assert resolve_copy({}) == resolved
 
     partial = resolve_copy(
-        {"gap_type": {"NON_IREPS_OR_UNRECOGNISED": "custom text"}})
-    assert partial["gap_type"]["NON_IREPS_OR_UNRECOGNISED"] == "custom text"
+        {"gap_type": {"UNRECOGNISED_RECEIPT": "custom text"}})
+    assert partial["gap_type"]["UNRECOGNISED_RECEIPT"] == "custom text"
     # the sibling code keeps its default
-    assert partial["gap_type"]["ZONE_BILL_NOT_FOUND"] == \
-        BANK_ACTIONS["ZONE_BILL_NOT_FOUND"]
+    assert partial["gap_type"]["SIGNAL_BILL_NOT_FOUND"] == \
+        BANK_ACTIONS["SIGNAL_BILL_NOT_FOUND"]
     assert partial["review"] == REVIEW_ACTIONS
     # unknown sections/codes are ignored (the API rejects them upstream)
     assert resolve_copy({"nope": {"X": "y"}})["gap_type"] == BANK_ACTIONS
@@ -66,14 +66,14 @@ def test_default_reconcile_stamps_historical_text():
     # unmatched credit (no bill shares the amount) -> BANK_ONLY
     out = reconcile(_bank(amount=42.0), _bills())
     assert list(out["bank_only"]["action"]) == \
-        [BANK_ACTIONS["NON_IREPS_OR_UNRECOGNISED"]]
+        [BANK_ACTIONS["UNRECOGNISED_RECEIPT"]]
     # advised bill with no credit -> BILL_ONLY with the default text
     assert list(out["bill_only"]["action"]) == [BILL_ACTIONS["ADVICE_DATE"]]
 
 
 def test_copy_overrides_reach_both_exception_sides_and_review():
     over = {
-        "gap_type": {"NON_IREPS_OR_UNRECOGNISED": "route to metro ledger"},
+        "gap_type": {"UNRECOGNISED_RECEIPT": "route to metro ledger"},
         "expected_basis": {"ADVICE_DATE": "chase the payer"},
         "review": {"LOW": "double-check this one"},
     }

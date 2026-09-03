@@ -102,7 +102,7 @@ def test_empty_signals_never_vacuously_high():
     unmatched_bank = _bank(amount=999999.0)     # no amount candidate
     _, unmatched = match_bank_to_billstatus(unmatched_bank, _bills(),
                                             mapping=mapping)
-    assert list(unmatched["gap_type"]) == ["NON_IREPS_OR_UNRECOGNISED"]
+    assert list(unmatched["gap_type"]) == ["UNRECOGNISED_RECEIPT"]
 
 
 def test_custom_amount_and_eligibility_fields():
@@ -134,7 +134,7 @@ def test_expected_bills_follows_mapping():
     # fallback_due_statuses ("CO7 DONE") AND CO7Date within lookback
     co7_bills = bills.assign(bill_status="CO7 DONE")
     exp_default = _expected_bills(co7_bills, bank, 0, 5, FieldMapping())
-    assert list(exp_default["ExpectedBasis"]) == ["CO7_ISSUED_NO_ADVICE"]
+    assert list(exp_default["ExpectedBasis"]) == ["PAYMENT_ORDER_NO_ADVICE"]
     # a paid-but-not-CO7-DONE status never enters via the fallback date
     assert _expected_bills(bills, bank, 0, 5, FieldMapping()).empty
     # fallback disabled -> nothing expected even for CO7 DONE bills
@@ -145,7 +145,7 @@ def test_expected_bills_follows_mapping():
     exp_custom = _expected_bills(
         bills, bank, 0, 5,
         FieldMapping(fallback_due_statuses=("PAYMENT MADE",)))
-    assert list(exp_custom["ExpectedBasis"]) == ["CO7_ISSUED_NO_ADVICE"]
+    assert list(exp_custom["ExpectedBasis"]) == ["PAYMENT_ORDER_NO_ADVICE"]
 
 
 def test_reconcile_threads_field_map():

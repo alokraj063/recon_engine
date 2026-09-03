@@ -10,6 +10,37 @@ from .models import Customer, MatchRuleSetRow, SourceConfig
 
 DEFAULT_CUSTOMER_KEY = "default"
 
+# The historical IREPS/railway advisory text, verbatim. Engine defaults
+# (recon.engine.DEFAULT_COPY) are SOURCE-NEUTRAL since 2026-09-01; this
+# tenant-flavoured wording belongs to the seeded default customer as its
+# copy_overrides (migration a91b7c3e5d20 backfills pre-existing rows;
+# the code-rename migration rewrites stored keys to the current codes).
+RAILWAY_COPY = {
+    "gap_type": {
+        "SIGNAL_BILL_NOT_FOUND":
+            "Zone identified from narrative but no bill in the export. "
+            "Check whether the bill sits under a different IREPS module "
+            "or a later export.",
+        "UNRECOGNISED_RECEIPT":
+            "No railway zone in the narrative. Likely intercompany, "
+            "metro, customs or a direct customer receipt. Route to the "
+            "relevant sub-ledger.",
+    },
+    "expected_basis": {
+        "ADVICE_DATE":
+            "IREPS advised the bank but no credit landed. Chase the "
+            "railway or check the next statement.",
+        "PAYMENT_ORDER_NO_ADVICE":
+            "CO7 raised, advice not yet issued. Expected to settle in a "
+            "later statement, monitor only.",
+    },
+    "labels": {
+        "SIGNAL_BILL_NOT_FOUND": "Zone found, bill missing",
+        "UNRECOGNISED_RECEIPT": "Non-IREPS receipt",
+        "PAYMENT_ORDER_NO_ADVICE": "CO7 issued, no advice",
+    },
+}
+
 # (slot source_type, role, adapter_key, params) — lineage is 0..N slots
 # per customer; these two are the seeded IREPS pair.
 DEFAULT_SOURCES = [
@@ -25,7 +56,7 @@ def seed_defaults(session):
         select(Customer).where(Customer.key == DEFAULT_CUSTOMER_KEY)
     ).scalar_one_or_none()
     if customer is None:
-        customer = Customer(key=DEFAULT_CUSTOMER_KEY, name="Default (HSBC / IREPS)")
+        customer = Customer(key=DEFAULT_CUSTOMER_KEY, name="Wabtec")
         session.add(customer)
         session.flush()
 
@@ -54,5 +85,6 @@ def seed_defaults(session):
             is_default=True,
             paid_statuses=["PAYMENT MADE", "CO7 DONE"],
             weights={"advice_date": 4, "zone": 2, "co7_date": 1},
+            copy_overrides=RAILWAY_COPY,
         ))
     return customer

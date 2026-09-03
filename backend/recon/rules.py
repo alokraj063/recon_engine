@@ -119,7 +119,7 @@ class MatchRuleSet:
     weights: Dict[str, int] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     field_map: FieldMapping = FieldMapping()
     # Per-customer advisory text overrides, keyed by COPY_SECTIONS then by
-    # the frozen codes ({"gap_type": {"ZONE_BILL_NOT_FOUND": "..."}}).
+    # the stable codes ({"gap_type": {"SIGNAL_BILL_NOT_FOUND": "..."}}).
     # None/{} = the historical defaults (engine.DEFAULT_COPY). Partial
     # dicts merge over defaults at use time (engine.resolve_copy).
     copy_overrides: Optional[dict] = None

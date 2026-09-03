@@ -67,14 +67,15 @@ async function getJson<T>(url: string): Promise<T> {
   return res.json()
 }
 
-/** Which repo sample document backs each field when nothing is uploaded.
- *  Samples back the default customer only — other customers get nulls. */
+/** Which bundled default document backs each field when nothing is
+ *  uploaded. Defaults back the default customer only — other customers
+ *  get nulls. */
 export async function fetchDefaults(customerId: string): Promise<Defaults> {
   return getJson(`/api/defaults?customer_id=${encodeURIComponent(customerId)}`)
 }
 
 /** POST the chosen files for ingestion (bronze -> silver -> gold);
- *  fields left null fall back to the repo defaults on the server. */
+ *  fields left null fall back to the bundled default documents server-side. */
 export async function ingestFiles(
   files: UploadFiles,
   customerId: string,

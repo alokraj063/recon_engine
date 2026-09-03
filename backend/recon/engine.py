@@ -42,15 +42,23 @@ EXCEPTION_COLS = [
     "sheet", "data_row",
 ]
 
+# SOURCE-NEUTRAL default advisory text, keyed by source-neutral codes
+# (renamed once, 2026-09-01: SIGNAL_BILL_NOT_FOUND was
+# ZONE_BILL_NOT_FOUND, UNRECOGNISED_RECEIPT was NON_IREPS_OR_UNRECOGNISED,
+# PAYMENT_ORDER_NO_ADVICE was CO7_ISSUED_NO_ADVICE — stored copy_overrides
+# keys migrated, old run payloads translated by frontend normalizeLegacy).
+# Tenant-flavoured wording rides copy_overrides — the seeded default
+# customer carries the historical IREPS/railway text (db/seeds.py
+# RAILWAY_COPY), so its analysts see exactly what they always saw.
 BANK_ACTIONS = {
-    "ZONE_BILL_NOT_FOUND":
-        "Zone identified from narrative but no bill in the export. Check "
-        "whether the bill sits under a different IREPS module or a later "
-        "export.",
-    "NON_IREPS_OR_UNRECOGNISED":
-        "No railway zone in the narrative. Likely intercompany, metro, "
-        "customs or a direct customer receipt. Route to the relevant "
-        "sub-ledger.",
+    "SIGNAL_BILL_NOT_FOUND":
+        "The credit carries a recognisable match signal but no bill in "
+        "the export shares its amount. Check whether the bill sits in a "
+        "later export or a different module of the source system.",
+    "UNRECOGNISED_RECEIPT":
+        "No match signal recognised in the credit's narrative. Likely a "
+        "receipt from outside the reconciled source. Route to the "
+        "relevant sub-ledger.",
 }
 
 # Matches that stand but need a human eye. They stay in the matched frame
@@ -70,8 +78,8 @@ REVIEW_ACTIONS = {
         "Neither the exact signals nor the date agreed. Treat as a guess; "
         "verify against the candidate bill before posting.",
     "BATCHED":
-        "One credit covers several bills whose Net Amts sum to it. Verify "
-        "every covered bill before posting.",
+        "One credit covers several bills whose net amounts sum to it. "
+        "Verify every covered bill before posting.",
 }
 
 # Fields shown per candidate bill in a MATCH_REVIEW row, in display order.
@@ -87,14 +95,28 @@ CANDIDATE_FIELDS = [
 
 BILL_ACTIONS = {
     "ADVICE_DATE":
-        "IREPS advised the bank but no credit landed. Chase the railway or "
-        "check the next statement.",
-    "CO7_ISSUED_NO_ADVICE":
-        "CO7 raised, advice not yet issued. Expected to settle in a later "
-        "statement, monitor only.",
+        "The source advised this payment to the bank but no credit "
+        "landed. Chase the payer or check the next statement.",
+    "PAYMENT_ORDER_NO_ADVICE":
+        "Payment order raised, advice not yet issued. Expected to settle "
+        "in a later statement, monitor only.",
     "ZERO_NET_NOTHING_DUE":
         "Net payable is nil after deductions. No credit expected, close "
         "without action.",
+}
+
+# Short display names for the codes — UI-only (stored values never
+# change); per-customer renames ride copy_overrides["labels"].
+DEFAULT_LABELS = {
+    "SIGNAL_BILL_NOT_FOUND": "Signal matched, bill missing",
+    "UNRECOGNISED_RECEIPT": "Unrecognised receipt",
+    "ADVICE_DATE": "Advised, not received",
+    "PAYMENT_ORDER_NO_ADVICE": "Payment order issued, no advice",
+    "ZERO_NET_NOTHING_DUE": "Nil payable",
+    "AMBIGUOUS": "Ambiguous pick",
+    "LOW": "One check failed",
+    "AMOUNT_ONLY": "Amount-only match",
+    "BATCHED": "Batched credit",
 }
 
 # The default advisory copy, keyed by section then by the frozen codes.
@@ -108,11 +130,12 @@ DEFAULT_COPY = {
 
 
 def resolve_copy(copy_overrides=None):
-    """Full per-section text dicts: defaults with any overrides applied.
-    Unknown sections/codes in the overrides are ignored here (the API
-    validates them loudly); a partial dict overrides only what it names."""
+    """Full per-section text dicts: defaults with any overrides applied
+    (advisory sections + the UI-only "labels" section). Unknown sections/
+    codes in the overrides are ignored here (the API validates them
+    loudly); a partial dict overrides only what it names."""
     out = {}
-    for section, defaults in DEFAULT_COPY.items():
+    for section, defaults in {**DEFAULT_COPY, "labels": DEFAULT_LABELS}.items():
         over = (copy_overrides or {}).get(section) or {}
         out[section] = {code: over.get(code, text)
                         for code, text in defaults.items()}
@@ -127,7 +150,7 @@ def _expected_bills(bills, bank_df, window_days, co7_lookback_days, mapping):
     the default window is zero days either side of the statement dates.
     Widen it and you pull in bills that settled earlier and report them
     as false shortfalls. Date/amount/eligibility fields follow the
-    customer's field mapping; ExpectedBasis literals stay historical.
+    customer's field mapping; ExpectedBasis carries the stable codes.
     """
     stmt_lo = pd.to_datetime(bank_df[mapping.bank_date_field]).min()
     stmt_hi = pd.to_datetime(bank_df[mapping.bank_date_field]).max()
@@ -145,7 +168,7 @@ def _expected_bills(bills, bank_df, window_days, co7_lookback_days, mapping):
         co7_due = pd.Series(False, index=bills.index)
 
     expected = bills[advised | co7_due].copy()
-    expected["ExpectedBasis"] = "CO7_ISSUED_NO_ADVICE"
+    expected["ExpectedBasis"] = "PAYMENT_ORDER_NO_ADVICE"
     expected.loc[advised.reindex(expected.index, fill_value=False),
                  "ExpectedBasis"] = "ADVICE_DATE"
     # Nothing payable means its absence is not a shortfall.

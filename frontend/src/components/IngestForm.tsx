@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { History, UserPlus } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { History, Undo2, Upload, UserPlus, X } from 'lucide-react'
 import type { AdapterOption, AdapterRegistry, CustomerInfo, Defaults, IngestResponse } from '../types'
 import { ApiError } from '../types'
 import {
@@ -21,21 +21,88 @@ interface Props {
 interface SlotSpec {
   field: keyof UploadFiles
   sourceType: string
-  hint: string
 }
 
-const BANK_SLOT: SlotSpec = {
-  field: 'statement', sourceType: 'bank_statement',
-  hint: 'click to select the statement file',
-}
+const BANK_SLOT: SlotSpec = { field: 'statement', sourceType: 'bank_statement' }
 
 // ERP document slots, in ingest order; which of them RENDER depends on
 // the chosen ERP system (whichever source_types it has adapters for)
 const ERP_SLOTS: SlotSpec[] = [
-  { field: 'bills', sourceType: 'bill_status', hint: 'click to select the export' },
-  { field: 'rnote', sourceType: 'lineage_rnote', hint: 'click to select the report' },
-  { field: 'crn', sourceType: 'lineage_crn', hint: 'click to select the report' },
+  { field: 'bills', sourceType: 'bill_status' },
+  { field: 'rnote', sourceType: 'lineage_rnote' },
+  { field: 'crn', sourceType: 'lineage_crn' },
 ]
+
+/** One document slot's file state: an explicit Upload button (hidden
+ *  input), drag & drop onto the area, and a badge that says plainly
+ *  whether the bundled default document or the user's own upload will
+ *  be ingested. Removing an upload falls back to the default when one
+ *  exists (that is exactly what clearing the file does server-side). */
+function SlotFileArea({ on, running, file, defaultDoc, accept, onFile }: {
+  on: boolean
+  running: boolean
+  file: File | null
+  defaultDoc: { name: string } | null
+  accept?: string
+  onFile: (f: File | null) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [dragging, setDragging] = useState(false)
+  const disabled = running || !on
+
+  const btn = (label: string, icon: React.ReactNode, onClick: () => void) => (
+    <button className="slot-revert" disabled={running} onClick={onClick}>
+      {icon} {label}
+    </button>
+  )
+  const uploadBtn = btn('Upload file', <Upload size={13} strokeWidth={1.75} />,
+                        () => inputRef.current?.click())
+
+  return (
+    <div
+      className={`slot-file-area${dragging && !disabled ? ' dragover' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); if (!disabled) setDragging(true) }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => {
+        e.preventDefault()
+        setDragging(false)
+        if (disabled) return
+        const f = e.dataTransfer.files?.[0]
+        if (f) onFile(f)
+      }}
+    >
+      {!on ? (
+        <span className="slot-file slot-empty">skipped</span>
+      ) : file ? (
+        <>
+          <span className="slot-badge upload">Your upload</span>
+          <span className="slot-file" title={file.name}>{file.name}</span>
+          {defaultDoc
+            ? btn('Use default document', <Undo2 size={13} strokeWidth={1.75} />,
+                  () => onFile(null))
+            : btn('Remove', <X size={13} strokeWidth={1.75} />, () => onFile(null))}
+        </>
+      ) : defaultDoc ? (
+        <>
+          <span className="slot-badge default">Default document</span>
+          <span className="slot-file" title={defaultDoc.name}>{defaultDoc.name}</span>
+          {uploadBtn}
+        </>
+      ) : (
+        <>
+          <span className="slot-file slot-empty">no file selected — drag &amp; drop or</span>
+          {uploadBtn}
+        </>
+      )}
+      <input ref={inputRef} type="file" accept={accept} disabled={disabled}
+             onChange={(e) => {
+               const f = e.target.files?.[0] ?? null
+               if (f) onFile(f)
+               e.target.value = ''   // allow re-picking the same file later
+             }} />
+    </div>
+  )
+}
 
 /** File-picker accept attribute from the adapter's declared file_kinds;
  *  undefined (accept anything) when the adapter declares none. */
@@ -82,7 +149,7 @@ export function IngestForm({
   }, [])
 
   useEffect(() => {
-    // repo-sample prefills exist for the default customer only
+    // default-document prefills exist for the default customer only
     fetchDefaults(customerId).then(setDefaults).catch(() => setDefaults(NO_DEFAULTS))
     fetchCustomerConfig(customerId)
       .then((c) => setSources(c.sources))
@@ -162,16 +229,8 @@ export function IngestForm({
     }
   }
 
-  const pick = (field: keyof UploadFiles) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0] ?? null
+  const setFile = (field: keyof UploadFiles) => (f: File | null) =>
     setFiles((prev) => ({ ...prev, [field]: f }))
-  }
-
-  const revert = (field: keyof UploadFiles) => (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setFiles((prev) => ({ ...prev, [field]: null }))
-  }
 
   const extraEnabled = (st: string) => enabled[st] ?? true
   const slots = [
@@ -244,35 +303,11 @@ export function IngestForm({
     }
   }
 
-  const fileArea = (s: SlotSpec, on: boolean, accept?: string) => {
-    const own = files[s.field]
-    const dflt = defaults[s.field]
-    return (
-      <label className="slot-file-area">
-        {!on ? (
-          <span className="slot-file slot-empty">skipped</span>
-        ) : own ? (
-          <>
-            <span className="slot-file">{own.name}</span>
-            {dflt && (
-              <button className="slot-revert" onClick={revert(s.field)} disabled={running}>
-                ↺ use repo sample
-              </button>
-            )}
-          </>
-        ) : dflt ? (
-          <>
-            <span className="slot-file">{dflt.name}</span>
-            <span className="slot-tag">repo sample — click to replace</span>
-          </>
-        ) : (
-          <span className="slot-file slot-empty">{s.hint}</span>
-        )}
-        <input type="file" accept={accept} onChange={pick(s.field)}
-               disabled={running || !on} />
-      </label>
-    )
-  }
+  const fileArea = (s: SlotSpec, on: boolean, accept?: string) => (
+    <SlotFileArea on={on} running={running} file={files[s.field]}
+                  defaultDoc={defaults[s.field]} accept={accept}
+                  onFile={setFile(s.field)} />
+  )
 
   const toggle = (field: keyof UploadFiles, on: boolean) => (
     <input type="checkbox" className="slot-toggle" checked={on}
@@ -425,21 +460,10 @@ export function IngestForm({
                       ))}
                     </select>
                   </label>
-                  <label className="slot-file-area">
-                    {!on ? (
-                      <span className="slot-file slot-empty">skipped</span>
-                    ) : own ? (
-                      <span className="slot-file">{own.name}</span>
-                    ) : (
-                      <span className="slot-file slot-empty">click to select the report</span>
-                    )}
-                    <input type="file" accept={acceptOf(opt)}
-                           onChange={(e) => {
-                             const f = e.target.files?.[0] ?? null
-                             setExtraFiles((prev) => ({ ...prev, [st]: f }))
-                           }}
-                           disabled={running || !on} />
-                  </label>
+                  <SlotFileArea on={on} running={running} file={own}
+                                defaultDoc={null} accept={acceptOf(opt)}
+                                onFile={(f) =>
+                                  setExtraFiles((prev) => ({ ...prev, [st]: f }))} />
                   <button className="btn-reject" title="remove this slot"
                           disabled={running} onClick={() => onRemoveSlot(st)}>
                     remove
@@ -477,7 +501,7 @@ export function IngestForm({
           <p className="explain">
             Extra upstream document kinds beyond the ERP's own reports — each slot
             parses with the chosen lineage adapter and joins into the same document
-            trail. No repo samples back these slots.
+            trail. These slots always use your uploaded files.
           </p>
         </div>
       )}

@@ -149,6 +149,9 @@ export function MatchingConfigPanel({ customerId }: Props) {
     }
     patch({ copy_overrides: next })
   }
+  // display label for a frozen code ("labels" section; falls back to code)
+  const labelValue = (code: string): string =>
+    copyValue('labels', code) || code
 
   const setSignal = (i: number, s: Partial<ExactSignal>) => {
     const next = fm.exact_signals.map((sig, j) => (j === i ? { ...sig, ...s } : sig))
@@ -165,7 +168,16 @@ export function MatchingConfigPanel({ customerId }: Props) {
     setSaving(true)
     setError(null)
     try {
-      const res = await saveCustomerConfig(customerId, rules)
+      // an emptied textarea/label means "back to default" — drop it
+      // rather than sending an empty string the API would refuse
+      const cleaned: CopyText = {}
+      for (const [section, entries] of Object.entries(rules.copy_overrides ?? {})) {
+        const kept = Object.fromEntries(
+          Object.entries(entries).filter(([, t]) => t.trim() !== ''))
+        if (Object.keys(kept).length) cleaned[section] = kept
+      }
+      const res = await saveCustomerConfig(customerId,
+                                           { ...rules, copy_overrides: cleaned })
       setConfig(res)
       setRules(res.rules)
       setDirty(false)
@@ -366,8 +378,8 @@ export function MatchingConfigPanel({ customerId }: Props) {
       <div className="config-section">
         <h3 className="ledger-h">Terminology &amp; guidance</h3>
         <p className="explain">
-          The advisory text stamped into exception rows, editable per customer —
-          the underlying codes never change. Edits apply to future runs.
+          The advisory text and display names stamped into exception rows, editable
+          per customer — the underlying codes never change. Edits apply to future runs.
         </p>
         {COPY_SECTIONS.map(({ section, title, note }) => {
           const codes = Object.keys(rules.copy_effective?.[section] ?? {})
@@ -377,11 +389,16 @@ export function MatchingConfigPanel({ customerId }: Props) {
               <h4 className="ingest-section-h">{title}</h4>
               <p className="explain">{note}</p>
               {codes.map((code) => (
-                <label key={code} className="ctx-field copy-row">
-                  <span className="slot-label"><code>{code}</code></span>
+                <div key={code} className="ctx-field copy-row">
+                  <span className="copy-row-head">
+                    <input className="copy-label-input" value={labelValue(code)}
+                           title={`display name — editable; stored under code ${code}`}
+                           onChange={(e) => patchCopy('labels', code, e.target.value)} />
+                  </span>
                   <textarea rows={2} value={copyValue(section, code)}
+                            title={`guidance text for ${code}`}
                             onChange={(e) => patchCopy(section, code, e.target.value)} />
-                </label>
+                </div>
               ))}
             </div>
           )

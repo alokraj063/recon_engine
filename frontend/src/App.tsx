@@ -68,15 +68,82 @@ const PICKER_VIEWS = new Set<View>([...FILTERED_VIEWS, ...FRAME_VIEWS])
 // loaded run payloads, kept across selections (payloads are immutable)
 const payloadCache = new Map<string, ReconResponse>()
 
-function hashRunId(): string | null {
-  const m = window.location.hash.match(/run=([\w-]+)/)
-  return m ? m[1] : null
+const VALID_VIEWS = new Set<View>([
+  'command', 'ingest', 'reconcile', 'ledger', 'ar', 'audit', 'architecture',
+  'summary', 'matched', 'exceptions', 'bank', 'bills', 'bills_enriched',
+  'recoveries', 'gold_bank', 'gold_bills', 'gold_recoveries', 'gold_lineage',
+])
+
+/** The URL hash is the whole navigation state:
+ *    `#view=<view>&run=<id>`            one run (a permalink to evidence)
+ *    `#view=<view>&runs=incremental`    a named bulk selection (also
+ *                                       `snapshot` / `all`) — re-resolved
+ *                                       against the run list on load, so
+ *                                       "all incremental" stays ALL of
+ *                                       them as new runs land
+ *    `#view=<view>&runs=<id>,<id>,...`  a hand-picked subset
+ *  Refreshing anywhere reopens the SAME view and the SAME selection.
+ *  Legacy `#run=<id>` links (no view) still open the run's Summary. */
+function parseHash(): { view: View | null; run: string | null; runs: string | null } {
+  const params = new URLSearchParams(window.location.hash.slice(1))
+  const v = params.get('view')
+  return {
+    view: v && VALID_VIEWS.has(v as View) ? (v as View) : null,
+    run: params.get('run'),
+    runs: params.get('runs'),
+  }
+}
+
+/** `runs=` token -> run ids, against the current run list. */
+function resolveRunsParam(runs: string, list: RunListItem[]): string[] {
+  if (runs === 'all') return list.map((r) => r.run_id)
+  if (runs === 'incremental' || runs === 'snapshot') {
+    return list.filter((r) => r.mode === runs).map((r) => r.run_id)
+  }
+  return runs.split(',').filter(Boolean)
+}
+
+/** Selection -> the hash's run part. Mirrors RunPicker's summary logic:
+ *  a selection that exactly equals a mode (or everything) gets its NAME,
+ *  not 15 uuids. Returns null when a multi selection can't be named yet
+ *  (run list still loading) so the sync effect skips that write. */
+function selectionParam(selection: string[], runList: RunListItem[]): string | null {
+  if (selection.length === 0) return ''
+  if (selection.length === 1) return `&run=${selection[0]}`
+  if (runList.length === 0) return null
+  const sel = new Set(selection)
+  if (selection.length === runList.length
+      && runList.every((r) => sel.has(r.run_id))) return '&runs=all'
+  for (const mode of ['incremental', 'snapshot'] as const) {
+    const ids = runList.filter((r) => r.mode === mode).map((r) => r.run_id)
+    if (ids.length === selection.length && ids.every((id) => sel.has(id))) {
+      return `&runs=${mode}`
+    }
+  }
+  return `&runs=${selection.join(',')}`
+}
+
+const sameIds = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((id) => b.includes(id))
+
+const PAGE_TITLES: Record<string, string> = {
+  command: 'Command Center',
+  ingest: 'Ingest files',
+  reconcile: 'Run reconciliation',
+  ledger: 'Analyst queue',
+  ar: 'AR Reconciliation',
+  audit: 'Audit trail',
+  architecture: 'Architecture',
 }
 
 export default function App() {
   const [running, setRunning] = useState(false)
   const [restoring, setRestoring] = useState(false)
-  const [view, setView] = useState<View>('command')
+  const [view, setView] = useState<View>(() => {
+    const { view: hv, run } = parseHash()
+    // legacy `#run=` links (no view) keep opening the run's Summary
+    return hv ?? (run ? 'summary' : 'command')
+  })
   const [error, setError] = useState<ApiError | null>(null)
   const [customers, setCustomers] = useState<CustomerInfo[]>(FALLBACK_CUSTOMERS)
   const [customerId, setCustomerIdState] = useState<string>(
@@ -105,9 +172,9 @@ export default function App() {
 
   const setCustomerId = (key: string) => {
     if (key !== customerId) {
-      // a selection belongs to one customer's run history
+      // a selection belongs to one customer's run history; the hash-sync
+      // effect drops the run part once the selection clears
       setSelectedRuns(null)
-      window.location.hash = ''
     }
     setCustomerIdState(key)
     localStorage.setItem(CUSTOMER_KEY, key)
@@ -140,7 +207,6 @@ export default function App() {
         setSelectedRuns(ids.map((id, i) => ({
           runId: id, label: labelFor(id), payload: payloads[i],
         })))
-        window.location.hash = 'run=' + ids[0]
       } catch (e) {
         setError(e instanceof ApiError ? e : new ApiError('UNKNOWN', String(e)))
       } finally {
@@ -152,20 +218,68 @@ export default function App() {
 
   const openRun = async (runId: string) => {
     await applySelection([runId])
-    if (payloadCache.has(runId)) {
-      setView('summary')
-    } else {
-      window.location.hash = ''
-      setView('reconcile')
-    }
+    setView(payloadCache.has(runId) ? 'summary' : 'reconcile')
   }
 
   useEffect(() => {
     fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})
-    const id = hashRunId()
-    if (id) void openRun(id)
+    // restore the selection named in the hash WITHOUT changing the view —
+    // the view was already read from the hash, so a refresh stays put
+    const { run, runs } = parseHash()
+    if (runs) {
+      void (async () => {
+        try {
+          const list = (await fetchRuns(customerId))
+            .filter((r) => r.status === 'succeeded')
+          const ids = resolveRunsParam(runs, list)
+          if (ids.length) await applySelection(ids)
+        } catch { /* run list unavailable; empty state guides the user */ }
+      })()
+    } else if (run) {
+      void (async () => {
+        await applySelection([run])
+        if (!payloadCache.has(run)) setView('reconcile')  // restore failed
+      })()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // hash <- state: the single writer. Guarded so applying a hash the
+  // user navigated to (back/forward) never re-writes an identical value;
+  // a null param (multi selection before the run list loads) skips the
+  // write rather than spelling out ids a named token will replace.
+  const runParam = selectionParam(selection, runList)
+  useEffect(() => {
+    if (runParam === null) return
+    const target = `view=${view}${runParam}`
+    if (window.location.hash.slice(1) !== target) {
+      window.location.hash = target
+    }
+  }, [view, runParam])
+
+  // state <- hash: browser back/forward (and hand-edited links) navigate
+  useEffect(() => {
+    const onHashChange = () => {
+      const { view: hv, run, runs } = parseHash()
+      if (hv && hv !== view) setView(hv)
+      const want = runs ? resolveRunsParam(runs, runList) : run ? [run] : null
+      if (want && want.length && !sameIds(want, selection)) {
+        void applySelection(want)
+      }
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, selection.join(','), runList, applySelection])
+
+  // browser-tab title follows the active view
+  useEffect(() => {
+    const goldName = GOLD_VIEWS[view]
+    const title = PAGE_TITLES[view]
+      ?? (goldName ? GOLD_TITLES[goldName]
+          : VIEW_TITLES[view as keyof typeof VIEW_TITLES])
+    document.title = title ? `${title} — Recon Engine` : 'Recon Engine'
+  }, [view])
 
   const onIngested = (_r: IngestResponse) => {
     setIngestEpoch((n) => n + 1)
@@ -186,7 +300,6 @@ export default function App() {
       refreshRunList()
       setSelectedRuns([{ runId: res.run_id, label: 'this run', payload: res }])
       setView('summary')
-      window.location.hash = 'run=' + res.run_id
     } catch (e) {
       // deliberately keep any loaded result: a 409 RUN_IN_PROGRESS or a
       // failed re-run should not wipe what is already on screen
@@ -244,6 +357,8 @@ export default function App() {
       <Sidebar view={view} onNavigate={setView} result={displayResult} />
 
       <main className="content">
+        {/* keyed on the view so every navigation replays the entrance */}
+        <div key={view} className="view-enter">
         {view === 'command' && (
           <CommandCenter
             customers={customers}
@@ -339,6 +454,32 @@ export default function App() {
           </>
         )}
 
+        {/* a result view with no run loaded (restore failed, customer
+            switched, or a stale link): guide instead of a blank page */}
+        {!showResult
+          && (FILTERED_VIEWS.has(view) || FRAME_VIEWS.includes(view as FrameName))
+          && (restoring ? (
+            <p className="footer-note">Restoring run…</p>
+          ) : (
+            <div className="view-card empty-state">
+              <h3>No run loaded</h3>
+              <p>
+                This view shows a reconciliation result. Run one now, or reopen
+                a past run.
+              </p>
+              <div className="empty-state-actions">
+                <button className="btn-run" onClick={() => setView('reconcile')}>
+                  Run reconciliation
+                </button>
+                {runList.length > 0 && (
+                  <RunPicker runs={runList} selection={selection}
+                             onChange={(ids) => void applySelection(ids)} />
+                )}
+              </div>
+              {error && <ErrorBanner error={error} />}
+            </div>
+          ))}
+
         {showResult && primary && selectedRuns && (
           <>
             <div className="result-head">
@@ -422,6 +563,7 @@ export default function App() {
             )}
           </>
         )}
+        </div>
       </main>
     </div>
   )

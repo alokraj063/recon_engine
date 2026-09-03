@@ -917,6 +917,48 @@ th.th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
 .reveal-2 { animation-delay: 0.14s; }
 .reveal-3 { animation-delay: 0.23s; }
 
+/* every navigation replays one quiet entrance (App keys this wrapper
+   on the active view) — same `rise` vocabulary as the result reveals */
+.view-enter { animation: rise 0.24s ease both; }
+
+/* keyboard navigation gets a visible ring in the theme's own colors */
+:focus-visible {
+  outline: 2px solid var(--green-bright);
+  outline-offset: 2px;
+}
+.sidebar :focus-visible { outline-color: var(--side-active); }
+
+/* result views with no run loaded: guidance instead of a blank page */
+.empty-state {
+  text-align: center;
+  padding: 56px 24px;
+}
+.empty-state h3 {
+  margin: 0 0 6px;
+  font-size: var(--fs-h3);
+  color: var(--ink-soft);
+}
+.empty-state p {
+  margin: 0 auto 18px;
+  max-width: 420px;
+  color: var(--ink-faint);
+}
+.empty-state-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @keyframes rise {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }
@@ -975,7 +1017,22 @@ th.th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
 
 /* terminology & guidance editors (matching config) */
 .copy-section { margin-bottom: 12px; }
-.copy-row { margin-bottom: 8px; }
+.copy-row { margin-bottom: 10px; }
+.copy-row-head { display: flex; align-items: center; gap: 10px; }
+.copy-label-input {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  min-width: 260px;
+}
+.copy-label-input:hover, .copy-label-input:focus {
+  border-color: var(--rule-strong);
+  background: var(--paper);
+  outline: none;
+}
 .copy-row textarea {
   font-family: var(--font-mono);
   font-size: var(--fs-body);
@@ -1277,46 +1334,63 @@ tr.active-run td { background: rgba(44, 115, 80, 0.06); }
 .slot-file-area {
   flex: 1;
   min-width: 0;
-  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 4px;
+  border: 1px dashed transparent;
 }
-.slot-row.slot-off .slot-file-area { cursor: default; }
+.slot-file-area.dragover {
+  border-color: var(--green-bright);
+  background: hsl(175 70% 28% / 0.06);
+}
 .slot-file-area .slot-file {
-  display: block;
   font-family: var(--font-mono);
   font-size: var(--fs-body);
   color: var(--ink);
-  word-break: break-all;
+  max-width: 360px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .slot-file-area .slot-empty { color: var(--ink-faint); font-style: italic; }
-.slot-file-area .slot-tag {
-  display: block;
-  margin-top: 4px;
+.slot-badge {
   font-size: var(--fs-label);
+  font-weight: 600;
   letter-spacing: 0.06em;
-  color: var(--green-bright);
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.slot-badge.default {
+  color: var(--ink-faint);
+  border: 1px solid var(--rule-strong);
+  background: var(--paper);
+}
+.slot-badge.upload {
+  color: var(--green);
+  border: 1px solid var(--green);
+  background: hsl(175 70% 28% / 0.08);
 }
 .slot-file-area .slot-revert {
-  display: inline-block;
-  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-family: var(--font-body);
   font-size: var(--fs-label);
   font-weight: 600;
   color: var(--green);
   background: none;
   border: 1px solid var(--rule-strong);
-  padding: 2px 8px;
+  padding: 3px 10px;
   cursor: pointer;
+  white-space: nowrap;
 }
 .slot-file-area .slot-revert:hover { border-color: var(--green); }
-/* visually hidden but still focusable/in the a11y tree */
-.slot-file-area input[type='file'] {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-}
+.slot-file-area input[type='file'] { display: none; }
 
 .slot-format {
   display: flex;

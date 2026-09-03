@@ -9,9 +9,10 @@ import type { ReconResponse, Row } from './types'
  *
  * Rule: a legacy key is moved ONLY when its canonical target is absent —
  * identity for post-rename rows, which never carry legacy keys. Frozen
- * engine-artifact names (LineageStatus, Settled_*, TRAIL, the RN_ / CR_
- * lineage internals, ExpectedBasis, gap_type, zone_from_narrative,
- * bill_zone) are not listed and pass through untouched.
+ * engine-artifact names (LineageStatus, Settled_*, trail columns,
+ * zone_from_narrative, bill_zone) are not listed and pass through
+ * untouched. The gap_type / ExpectedBasis COLUMN names are stable, but
+ * their legacy IREPS-flavoured VALUES are translated (LEGACY_CODES).
  */
 const LEGACY_KEYS: Record<string, string> = {
   // queue display spine (old exception_queue vocabulary)
@@ -64,6 +65,16 @@ const LEGACY_KEYS: Record<string, string> = {
 // list-of-dict cells whose element keys follow the same vocabulary
 const NESTED_LISTS = ['Candidates', 'Attempts']
 
+/** Legacy VALUE translations: the three IREPS-flavoured exception codes
+ *  were renamed to source-neutral ones (2026-09-01); old frozen run
+ *  payloads still carry the old values in these two columns. */
+const LEGACY_CODE_COLS = ['gap_type', 'ExpectedBasis'] as const
+const LEGACY_CODES: Record<string, string> = {
+  ZONE_BILL_NOT_FOUND: 'SIGNAL_BILL_NOT_FOUND',
+  NON_IREPS_OR_UNRECOGNISED: 'UNRECOGNISED_RECEIPT',
+  CO7_ISSUED_NO_ADVICE: 'PAYMENT_ORDER_NO_ADVICE',
+}
+
 export function normalizeRow(row: Row): Row {
   let out: Row | null = null
   for (const [legacy, canonical] of Object.entries(LEGACY_KEYS)) {
@@ -71,6 +82,13 @@ export function normalizeRow(row: Row): Row {
       out = out ?? { ...row }
       out[canonical] = out[legacy]
       delete out[legacy]
+    }
+  }
+  for (const col of LEGACY_CODE_COLS) {
+    const v = (out ?? row)[col]
+    if (typeof v === 'string' && v in LEGACY_CODES) {
+      out = out ?? { ...row }
+      out[col] = LEGACY_CODES[v]
     }
   }
   for (const cell of NESTED_LISTS) {
