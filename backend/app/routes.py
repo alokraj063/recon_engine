@@ -26,7 +26,7 @@ from db.audit import record_event
 from db.bronze import register_file
 from db.ingest import ingest_gold_frames
 from db.models import BronzeFile, Customer, MatchRuleSetRow, SourceConfig
-from db.silver import persist_silver
+from db.silver import persist_silver, silver_frame, silver_files
 from db.storage import file_sha256
 from logging_setup import customer_id_var, get_logger
 from recon import (REGISTRY, MatchRuleSet, PipelineSinks, SelfCheckError,
@@ -70,9 +70,9 @@ SAMPLE_DIR = (Path(__file__).resolve().parents[2]
 
 DEFAULT_PATTERNS = {
     "statement": ("*.pdf", "*.PDF"),
-    "bills": ("BILL STATUS*.xlsx", "BILL STATUS*.xlsm"),
-    "rnote": ("RNOTE*.xlsx", "RNOTE*.xlsm"),
-    "crn": ("CRN*.xlsx", "CRN*.xlsm"),
+    "bills": ("BILL STATUS*.xlsx", "BILL STATUS*.xlsm", "BILL STATUS*.xls"),
+    "rnote": ("RNOTE*.xlsx", "RNOTE*.xlsm", "RNOTE*.xls"),
+    "crn": ("CRN*.xlsx", "CRN*.xlsm", "CRN*.xls"),
 }
 
 
@@ -206,15 +206,33 @@ def _load_customer_context(session, customer_key: str):
 
 def _register_inputs(session, customer, paths, names, source_configs):
     """Bronze-register every provided input; identical bytes reuse rows.
-    Returns {field: bronze_file_id}."""
+    Returns {field: bronze_file_id}.
+
+    Bronze dedup keys on (customer, sha256) only — content-addressed, with
+    no notion of "slot". That's correct for a genuine repeat of the same
+    document, but if a file's bytes were EVER registered under a different
+    slot (the wrong file attached to the wrong upload box, even in a since-
+    failed attempt — bronze commits before parsing can reject it), reusing
+    that row would silently keep serving its stale, now-wrong source_type/
+    original_name forever, with no error and no sign anything was off.
+    Caught here instead: a slot mismatch fails loudly, immediately, before
+    any parsing happens."""
     bronze_ids = {}
     for field, path in paths.items():
         if path is not None:
             slot = _slot_source_type(field)
             sc = source_configs.get(slot)
-            bronze_ids[field] = register_file(
+            row = register_file(
                 session, customer, slot, Path(path), names[field],
-                adapter_key=sc.adapter_key if sc else None).id
+                adapter_key=sc.adapter_key if sc else None)
+            if row.source_type != slot:
+                _fail(400, "INVALID_INPUT",
+                      f"{field}: this file's contents were already "
+                      f"registered as '{row.original_name}' under a "
+                      f"different document type ({row.source_type}). "
+                      f"Check you attached the right file to the {field} "
+                      f"slot.")
+            bronze_ids[field] = row.id
     return bronze_ids
 
 
@@ -986,6 +1004,41 @@ def gold_frame(frame: str, customer_id: str = "default",
         rec["bronze_file_id"] = bfid
         rec["row_seq"] = seq
     return {"name": frame, "count": len(rows), "total": total, "rows": rows}
+
+
+# --- silver layer browsing ----------------------------------------------
+# NOTE: static /silver/* routes must be declared before /silver/{frame}
+
+@router.get("/silver/files")
+def silver_files_route(customer_id: str = "default"):
+    """Every bronze file owning silver rows, with its per-frame counts —
+    the silver browser's file picker and frame list."""
+    with SessionLocal() as session:
+        customer_pk = _get_customer(session, customer_id).id
+        return silver_files(session, customer_pk)
+
+
+@router.get("/silver/{frame}")
+def silver_frame_route(frame: str, customer_id: str = "default",
+                       bronze_file_id: int | None = None,
+                       limit: int = 20000):
+    """One silver frame exactly as its parser produced it — source-native
+    column names, no gold translation. Frame names are adapter-defined
+    (bills, recoveries, transactions, rnote, crn, ...), so the valid set
+    is whatever this customer has actually ingested."""
+    with SessionLocal() as session:
+        customer_pk = _get_customer(session, customer_id).id
+        rows, total = silver_frame(session, customer_pk, frame,
+                                   bronze_file_id, limit)
+        if total == 0:
+            known = sorted({name for f in silver_files(session, customer_pk)
+                            for name in f["silver_counts"]})
+            if frame not in known:
+                _fail(404, "FRAME_NOT_FOUND",
+                      f"no silver frame '{frame}' for this customer; "
+                      f"have: {known}")
+    return {"name": frame, "count": len(rows), "total": total,
+            "rows": clean(rows)}
 
 
 # --- two-step workflow: reconcile from gold -----------------------------

@@ -150,7 +150,13 @@ def gold_frame(session, frame: str, customer_id: int,
         select(func.count()).select_from(model).where(*where)).scalar()
     rows = list(session.execute(
         select(model).where(*where)
-        .order_by(model.bronze_file_id, model.row_seq)
+        # newest ingestion first: bronze_file_id is an auto-increment PK,
+        # so higher = more recently uploaded. The browse table has no
+        # "recently touched" concept (an upsert updates a row owned by
+        # an OLDER file in place), so this is the closest proxy for
+        # "show me that my latest upload actually landed" without
+        # making the user scroll past everything older first.
+        .order_by(model.bronze_file_id.desc(), model.row_seq)
         .limit(min(limit, GOLD_FRAME_CAP))).scalars())
     df, _ = frame_from_gold(rows, colmap, frame_name,
                             ensure=ensure_schema if use_ensure else None)

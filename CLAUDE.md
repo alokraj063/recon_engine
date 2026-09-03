@@ -68,7 +68,31 @@ backend/recon/   the engine package (pure, DB-free; runs with backend/ as cwd)
   parsers/     source document -> plain DataFrame (bank_hsbc, bill_status, lineage).
                Parser output keeps SOURCE-NATIVE names (IREPS PascalCase /
                RN_*/CR_*) — that is the silver vocabulary, persisted as-is to
-               silver.records. lineage.py also owns attach_lineage: a generic
+               silver.records. bill_status.py reads the CURRENT "Bill
+               Status" export — a plain table, one header row (20 IREPS
+               columns) + one data row per bill — and locates that header
+               by TEXT, scanning every worksheet's first few rows, never
+               assuming a fixed row/column/sheet name; a workbook with no
+               matching header raises BillStatusFormatError. `Recovery
+               Details` stays ONE free-text cell in Silver ('<head>: <amt>
+               <head>: <amt> ...') — splitting it into structured lines is
+               a Gold-stage concern (sources/ireps_bills.py), not the
+               parser's. (An older BLOCK-per-bill export format existed
+               before 2026-08 and is no longer supported — this parser
+               does not read it.) Accepts legacy .xls (BIFF) as well as
+               .xlsx/.xlsm — `_open_workbook` dispatches by extension to
+               openpyxl or a small xlrd-backed shim (`_XlsWorkbook`/
+               `_XlsSheet`) exposing the same `.sheetnames`/`.iter_rows`
+               surface, so the header-detection/row-extraction logic
+               above is shared, not duplicated, across both containers;
+               `_XlsSheet` normalizes BIFF's lack of an int type (every
+               number is a float) and its serial-number dates to the same
+               plain int/datetime openpyxl already gives. RNOTE/CRN
+               (lineage.py, below) get .xls "for free" the same way,
+               since they already load via `pandas.read_excel`, which
+               picks openpyxl/xlrd by the file itself — only their
+               adapters' `file_kinds` needed the literal `.xls` added.
+               lineage.py also owns attach_lineage: a generic
                role-aligned join of the CANONICAL unified lineage frame onto
                bills (bill_number->invoice_no, then submission_ref, then
                payment_order_ref), building the trail columns (TRAIL_MAP: PO,
@@ -171,7 +195,8 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
                its audit_log row get written; never commits, rides the caller's
                existing transaction, so a rollback erases both together
   bronze.py    register_file — dedup by (customer, sha256)
-  silver.py    one JSON row per parsed source row, deduped per bronze file
+  silver.py    one JSON row per parsed source row, deduped per bronze file;
+               silver_files/silver_frame read them back for the browse API
   gold.py      persist + frame_from_gold (rebuild engine frames for the pool).
                Since the gold + lineage canonicalizations EVERY frame<->DB map
                is IDENTITY — BANK_MAP/BILLS_MAP/RECOVERIES_MAP/LINEAGE_MAP
@@ -253,7 +278,12 @@ backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/inge
                422). Reads: GET /api/ingestions,
                GET /api/gold/files (feeds statement picker + gold-tab filters),
                GET /api/gold/{frame} for frame in bank|bills|recoveries|lineage
-               (whole-frame with 20k cap, {count,total} exposes truncation).
+               (whole-frame with 20k cap, {count,total} exposes truncation),
+               GET /api/silver/files + GET /api/silver/{frame} — the same
+               browse shape one layer earlier, serving rows EXACTLY as their
+               parser produced them (source-native names, never translated);
+               silver frame names are adapter-defined, so the valid set is
+               whatever the customer has ingested (404 FRAME_NOT_FOUND lists it).
   routes.py    legacy POST /api/runs (multipart one-shot) KEPT for compat/tests
                but retired from the UI; GET /api/runs/{id}[/frames/{name}|
                /workbook], GET /api/customers, GET /api/runs, GET /api/ledger,
@@ -366,8 +396,13 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                (ArchitectureView — the real six-layer stack described in
                frontend/src/architecture.ts with live KPIs from /api/
                overview; keep its statements factually in sync with this
-               file when the architecture changes). Gold data tabs (GoldTable, shared
-               presets in framePresets.ts, refetch-on-mount — no cache, gold
+               file when the architecture changes). Silver data -> "Parsed
+               source rows" (SilverTable) browses the live silver layer with
+               file + frame pickers; it has NO curated preset on purpose —
+               the columns are whatever the source called them, so a new
+               adapter's frame shows up with zero frontend work. Gold data
+               tabs (GoldTable, shared presets in framePresets.ts,
+               refetch-on-mount — no cache, gold
                mutates on ingest) browse the live gold layer with a per-
                ingestion filter; the four per-run frozen frames live under
                Reconciliation result -> Run data (SourceTable, cached — frames
@@ -393,7 +428,7 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
 - **Advisory copy is per-customer config, codes are not.** `MatchRuleSet.copy_overrides` swaps the human text mapped onto `gap_type`/`ExpectedBasis`/review-confidence codes (`engine.DEFAULT_COPY` + `resolve_copy`); the codes themselves (`NON_IREPS_OR_UNRECOGNISED`, `CO7_ISSUED_NO_ADVICE`, `"advice"`/`"co7"`, `LineageStatus` values, MatchedVia literals) are FROZEN — they live in golden CSVs, persisted payloads, ledger rows and the frontend. Never rename a code; change its display text (or add a `labels` entry) instead.
 - **Display paths read canonical ROLES, not the field_map — by design.** `exception_queue` (`amount`=net_payable_amount, `value_date`=payment_advice_date), `summarise`'s bank-side `amount`, and the AR view's advice→order→submission aging chain are deliberately hardcoded to the canonical columns. A custom `field_map` may only point at columns that still MEAN the canonical role; a new source's adapter must map onto the roles, not around them.
 - **IREPS data is dirty in specific ways** the code already handles — don't regress: four spellings of "nothing here" (`None`, `nan`, `"nan"`, `"----"`) via `scoring.norm_text`; int/str ID drift via `lineage._key`; quantities like `"3 Set"` (why `gold_lineage_docs.receipt_qty` is a String); recovery amounts packed several to a cell (summed); Net Amt rounded to whole rupees (₹1 slack).
-- **Bill Status is a block-format sheet, not a table** — label-driven header parsing; unknown labels land in `UnparsedHeader` (stored in gold `extras`, never dropped).
+- **Bill Status is a plain table** (one header row, one row per bill — see `parsers/bill_status.py`), columns located by header TEXT never by position. Silver stays source-native and single-cell: `RecoveryDetails` is the raw `'<head>: <amt> <head>: <amt> ...'` string IREPS writes, never split in the parser. The IREPS bills adapter's `to_gold()` (`sources/ireps_bills.py`) is where that string becomes the structured `recoveries`/`recovery_count`/`recovery_sum`/`net_check`/`recovery_check` gold fields and the long-format `recoveries` gold frame — Silver→Gold derivation belongs in the adapter, not the parser. `----` is IREPS's "CO7 not issued yet" placeholder on `CO7No`/`CO7Date` only; other placeholder tokens (`NA`, `-`, blank) on date columns are absorbed by `pd.to_datetime(errors="coerce")` rather than an enumerated list. Identifier columns (`ContractNo`, `BillNumber`, `CO6No`, `CO7No`) are never coerced to numeric — a bill number is not an amount, and some rows legitimately carry non-numeric placeholders (`BillNumber="-"`) that downstream code already treats as "no bill number" (`engine.group_bill_attempts.UNGROUPABLE_KEYS`, `db/ingest._BLANK_KEYS`) without the parser needing to null them. `Sheet`/`DataRow` are Silver bookkeeping fields (not literal IREPS columns) — `data_row` in particular is a real dependency of `group_bill_attempts`' resubmission tie-break, not decoration. `header_row`/`unparsed_header` (artifacts of a pre-2026-08 block-per-bill export this parser no longer reads) come back NA via `ensure_schema` — nothing feeds them any more. The IREPS bills adapter's `selfcheck()` raises when a workbook yields ZERO bill rows — an upload that isn't this format fails loud instead of ingesting an empty layer.
 - **Zone extraction** tests longer railway zone codes first so `NER` isn't read as `ER` (`bank_hsbc.ZONE_CODES` order matters).
 - **Bank self-check is fail-loud**: the HSBC adapter's `selfcheck` ties parsed credits to the totals printed on the statement's last page and raises `SelfCheckError` on mismatch; everything downstream depends on that parse.
 - **Money is Float end-to-end** (golden parity). Moving to Numeric/Decimal is a deliberate future migration that requires re-baselining the golden master — do not change it casually.

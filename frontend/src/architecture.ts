@@ -94,8 +94,9 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
       { label: 'Lineage docs', live: (o) => n(o?.gold.lineage_docs) },
     ],
     flowsIn: ['Adapter output (canonical frames)'],
-    flowsOut: ['Reconciliation pools (engine)', 'Gold data browse tabs'],
+    flowsOut: ['Reconciliation pools (engine)', 'Silver and gold browse tabs'],
     linksTo: [
+      { label: 'Silver — parsed rows', view: 'silver' },
       { label: 'Gold — Bills', view: 'gold_bills' },
       { label: 'Gold — Bank txns', view: 'gold_bank' },
       { label: 'Gold — Lineage docs', view: 'gold_lineage' },

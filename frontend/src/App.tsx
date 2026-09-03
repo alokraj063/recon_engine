@@ -15,6 +15,7 @@ import { CommandCenter } from './components/CommandCenter'
 import { ErrorBanner } from './components/ErrorBanner'
 import { ExceptionQueue } from './components/ExceptionQueue'
 import { GoldTable } from './components/GoldTable'
+import { SilverTable } from './components/SilverTable'
 import { IngestForm } from './components/IngestForm'
 import { LedgerView } from './components/LedgerView'
 import { MatchedTable } from './components/MatchedTable'
@@ -35,7 +36,8 @@ const GOLD_VIEWS: Record<string, GoldFrameName> = {
 
 const VIEW_TITLES: Record<
   Exclude<View, 'command' | 'ingest' | 'reconcile' | 'ledger' | 'ar' | 'audit'
-    | 'architecture' | 'gold_bank' | 'gold_bills' | 'gold_recoveries' | 'gold_lineage'>,
+    | 'architecture' | 'silver' | 'gold_bank' | 'gold_bills' | 'gold_recoveries'
+    | 'gold_lineage'>,
   string
 > = {
   summary: 'Summary',
@@ -71,7 +73,8 @@ const payloadCache = new Map<string, ReconResponse>()
 const VALID_VIEWS = new Set<View>([
   'command', 'ingest', 'reconcile', 'ledger', 'ar', 'audit', 'architecture',
   'summary', 'matched', 'exceptions', 'bank', 'bills', 'bills_enriched',
-  'recoveries', 'gold_bank', 'gold_bills', 'gold_recoveries', 'gold_lineage',
+  'recoveries', 'silver', 'gold_bank', 'gold_bills', 'gold_recoveries',
+  'gold_lineage',
 ])
 
 /** The URL hash is the whole navigation state:
@@ -133,6 +136,7 @@ const PAGE_TITLES: Record<string, string> = {
   ledger: 'Analyst queue',
   ar: 'AR Reconciliation',
   audit: 'Audit trail',
+  silver: 'Silver — parsed source rows',
   architecture: 'Architecture',
 }
 
@@ -357,6 +361,24 @@ export default function App() {
       <Sidebar view={view} onNavigate={setView} result={displayResult} />
 
       <main className="content">
+        {/* Always mounted, never destroyed by a view switch — unlike every
+            other view below (deliberately remounted via key={view} for the
+            entrance animation), the Ingest form holds file selections and
+            per-slot state that a browser can never restore once lost, so
+            navigating away and back must not unmount it. Visibility is
+            CSS-only (`hidden`), not conditional rendering. */}
+        <div hidden={view !== 'ingest'}>
+          <IngestForm
+            customers={customers}
+            customerId={customerId}
+            onCustomerChange={setCustomerId}
+            onCustomersChanged={() =>
+              fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})}
+            onIngested={onIngested}
+          />
+          {restoring && <p className="footer-note">Restoring run…</p>}
+        </div>
+
         {/* keyed on the view so every navigation replays the entrance */}
         <div key={view} className="view-enter">
         {view === 'command' && (
@@ -367,20 +389,6 @@ export default function App() {
             onNavigate={setView}
             refreshKey={ingestEpoch + (selectedRuns?.length ?? 0)}
           />
-        )}
-
-        {view === 'ingest' && (
-          <>
-            <IngestForm
-              customers={customers}
-              customerId={customerId}
-              onCustomerChange={setCustomerId}
-              onCustomersChanged={() =>
-                fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})}
-              onIngested={onIngested}
-            />
-            {restoring && <p className="footer-note">Restoring run…</p>}
-          </>
         )}
 
         {view === 'reconcile' && (
@@ -439,6 +447,24 @@ export default function App() {
               setView('ledger')
             }}
           />
+        )}
+
+        {view === 'silver' && (
+          <>
+            <div className="result-head">
+              <h2>Silver — parsed source rows</h2>
+              <span className="file-note">customer: {customerId}</span>
+            </div>
+            <div className="view-card">
+              <p className="frame-note">
+                Every parsed row in the shape its own source produced —
+                IREPS bill blocks, bank lines, lineage documents — before
+                any translation into the common gold schema.
+              </p>
+              <SilverTable key={`${customerId}:${ingestEpoch}`}
+                           customerId={customerId} />
+            </div>
+          </>
         )}
 
         {goldFrame && (

@@ -174,6 +174,16 @@ export interface LedgerViewData {
 /** Gold-layer browse frames served by GET /api/gold/{frame}. */
 export type GoldFrameName = 'bank' | 'bills' | 'recoveries' | 'lineage'
 
+/** A bronze file owning silver rows. Frame names are adapter-defined —
+ *  whatever that source's parser produced — so they stay open strings. */
+export interface SilverFileInfo {
+  bronze_file_id: number
+  source_type: string
+  original_name: string
+  uploaded_at: string
+  silver_counts: Record<string, number>
+}
+
 export interface IngestFileOutcome {
   field: string
   source_type: string

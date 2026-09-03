@@ -112,7 +112,9 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
   const kpis = useMemo(() => ({
     total: enriched.length,
     decisions: counts.decision,
-    runs: counts.run,
+    // distinct executions, not lifecycle events: incremental logs both
+    // run.started + run.succeeded per run, snapshot logs run.succeeded only
+    runs: new Set(enriched.filter((e) => e.cat === 'run' && e.run_id).map((e) => e.run_id)).size,
     ingests: counts.ingest,
     last24: enriched.filter((e) => within('24h', e.created_at)).length,
   }), [enriched, counts])
@@ -190,7 +192,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
             <div className="tile tone-review">
               <div className="tile-label">Runs</div>
               <div className="tile-count">{kpis.runs}</div>
-              <div className="tile-amount">run lifecycle events</div>
+              <div className="tile-amount">run executions</div>
             </div>
             <div className="tile tone-neutral">
               <div className="tile-label">Ingest</div>

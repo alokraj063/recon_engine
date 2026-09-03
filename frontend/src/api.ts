@@ -19,6 +19,7 @@ import {
   type ReconResponse,
   type Row,
   type RunListItem,
+  type SilverFileInfo,
 } from './types'
 import { normalizeRows, normalizeRun } from './normalizeLegacy'
 
@@ -226,6 +227,23 @@ export async function fetchGoldFrame(
   const qs = new URLSearchParams({ customer_id: customerId })
   if (bronzeFileId !== undefined) qs.set('bronze_file_id', String(bronzeFileId))
   return getJson(`/api/gold/${frame}?${qs}`)
+}
+
+/** Bronze files owning silver rows, with their per-frame counts. */
+export async function fetchSilverFiles(customerId: string): Promise<SilverFileInfo[]> {
+  return getJson(`/api/silver/files?customer_id=${encodeURIComponent(customerId)}`)
+}
+
+/** One silver frame, source-native: the parser's own column names, no
+ *  gold translation. */
+export async function fetchSilverFrame(
+  customerId: string,
+  frame: string,
+  bronzeFileId?: number,
+): Promise<{ name: string; count: number; total: number; rows: Row[] }> {
+  const qs = new URLSearchParams({ customer_id: customerId })
+  if (bronzeFileId !== undefined) qs.set('bronze_file_id', String(bronzeFileId))
+  return getJson(`/api/silver/${encodeURIComponent(frame)}?${qs}`)
 }
 
 /** Lock an OPEN (review-confidence) ledger match. Idempotent.
