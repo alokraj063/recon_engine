@@ -19,7 +19,13 @@ from recon.sources.ireps_rnote import RNOTE_TO_GOLD  # noqa: E402
 
 
 def test_bills_map_matches_gold_schema():
-    assert set(BILLS_TO_GOLD.values()) == set(GOLD_COLUMNS["bills"])
+    # header_row/unparsed_header were artifacts of the old block-format
+    # export (a free-text header line per bill block, split label by
+    # label); the current tabular export has one ordinary header row for
+    # the whole sheet, so nothing feeds them any more — they come back NA
+    # via ensure_schema, same pattern as lineage's doc_type below.
+    want = set(GOLD_COLUMNS["bills"]) - {"header_row", "unparsed_header"}
+    assert set(BILLS_TO_GOLD.values()) == want
     # a silver name mapping onto itself would mask a missed rename
     assert not set(BILLS_TO_GOLD) & set(GOLD_COLUMNS["bills"])
 

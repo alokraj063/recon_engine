@@ -31,7 +31,7 @@ class IrepsCrnAdapter(SourceAdapter):
     adapter_key = "ireps_crn"
     label = "IREPS CRN report"
     system = "IREPS"
-    file_kinds = (".xlsx", ".xlsm")
+    file_kinds = (".xlsx", ".xlsm", ".xls")
 
     def parse(self, path, params: dict) -> SilverResult:
         return SilverResult({"crn": load_crn(path, params.get("sheet", 0))})

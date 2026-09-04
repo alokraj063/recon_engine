@@ -35,7 +35,8 @@ const GOLD_VIEWS: Record<string, GoldFrameName> = {
 
 const VIEW_TITLES: Record<
   Exclude<View, 'command' | 'ingest' | 'reconcile' | 'ledger' | 'ar' | 'audit'
-    | 'architecture' | 'gold_bank' | 'gold_bills' | 'gold_recoveries' | 'gold_lineage'>,
+    | 'architecture' | 'gold_bank' | 'gold_bills' | 'gold_recoveries'
+    | 'gold_lineage'>,
   string
 > = {
   summary: 'Summary',
@@ -357,6 +358,24 @@ export default function App() {
       <Sidebar view={view} onNavigate={setView} result={displayResult} />
 
       <main className="content">
+        {/* Always mounted, never destroyed by a view switch — unlike every
+            other view below (deliberately remounted via key={view} for the
+            entrance animation), the Ingest form holds file selections and
+            per-slot state that a browser can never restore once lost, so
+            navigating away and back must not unmount it. Visibility is
+            CSS-only (`hidden`), not conditional rendering. */}
+        <div hidden={view !== 'ingest'}>
+          <IngestForm
+            customers={customers}
+            customerId={customerId}
+            onCustomerChange={setCustomerId}
+            onCustomersChanged={() =>
+              fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})}
+            onIngested={onIngested}
+          />
+          {restoring && <p className="footer-note">Restoring run…</p>}
+        </div>
+
         {/* keyed on the view so every navigation replays the entrance */}
         <div key={view} className="view-enter">
         {view === 'command' && (
@@ -367,20 +386,6 @@ export default function App() {
             onNavigate={setView}
             refreshKey={ingestEpoch + (selectedRuns?.length ?? 0)}
           />
-        )}
-
-        {view === 'ingest' && (
-          <>
-            <IngestForm
-              customers={customers}
-              customerId={customerId}
-              onCustomerChange={setCustomerId}
-              onCustomersChanged={() =>
-                fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})}
-              onIngested={onIngested}
-            />
-            {restoring && <p className="footer-note">Restoring run…</p>}
-          </>
         )}
 
         {view === 'reconcile' && (

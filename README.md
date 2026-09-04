@@ -47,11 +47,11 @@ Excel, and the FastAPI app only moves files in and frames out.
     # terminal 2 - frontend (proxies /api to :8000)
     cd frontend && npm run dev        # open http://localhost:5173
 
-The form comes pre-filled with the sample documents in this repo (from
-the sample-documents folder; `GET /api/defaults` reports them) — click
-Run immediately, or click any slot to replace a file with your own.
-Adjust the tunables under "Advanced options" if needed, run, and download
-the formatted workbook from the result header.
+Ingesting and reconciling are two steps. On **Ingest files**, attach a
+document to each slot you want in this ingestion — an ingestion is
+exactly the files you attach, nothing is ever substituted for an empty
+slot — then go to **Run reconciliation**, pick the statement, and run.
+Download the formatted workbook from the result header.
 
 Besides the result tabs, a "source data" tab group shows what the parsers
 extracted: the full bank statement table (debits included, recon rows

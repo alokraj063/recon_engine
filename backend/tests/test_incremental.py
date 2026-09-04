@@ -37,9 +37,9 @@ from db.bronze import register_file  # noqa: E402
 from db.ingest import ingest_gold_frames, new_stats  # noqa: E402
 from db.storage import storage  # noqa: E402
 from db.models import (AuditLog, Customer, ExceptionLedger, GoldBankTxn,  # noqa: E402
-                       GoldBill, GoldRecovery, IngestConflict, MatchLedger,
-                       MatchLedgerBill, Run, RunMatchBill, SilverRecord,
-                       BronzeFile)
+                       GoldBill, GoldFileRow, GoldRecovery, IngestConflict,
+                       MatchLedger, MatchLedgerBill, Run, RunMatchBill,
+                       SilverRecord, BronzeFile)
 from recon.engine import reconcile  # noqa: E402
 from recon.sources import get_adapter  # noqa: E402
 
@@ -57,12 +57,32 @@ def world(tmp_path_factory):
     bills_gold = bills_adapter.to_gold(bills_adapter.parse(cfg.bill_status, {}), {})
 
     credits = bank_gold[bank_gold["used_in_recon"]].reset_index(drop=True)
-    half = len(credits) // 2
 
     def as_stmt(df):
         df = df.reset_index(drop=True).copy()
         df["row_seq"] = range(len(df))
         return df
+
+    # Split the credits so BOTH halves carry matchable ones. A positional
+    # half/half split used to do that by luck, back when the sample
+    # statement and bill export covered the same weeks; they no longer
+    # have to (the samples are refreshed independently), and a run with
+    # zero matchable credits tests nothing about incremental behaviour.
+    # So: reconcile everything once, then deal the credits that DO match
+    # alternately into the two halves.
+    matchable = set(reconcile(
+        credits.drop(columns=["used_in_recon"]),
+        bills_gold["bills"], None, None)["matched"]["bank_ref"])
+    hits = [i for i, ref in enumerate(credits["bank_ref"]) if ref in matchable]
+    assert len(hits) >= 2, (
+        "the sample statement and bill export share fewer than two "
+        "matchable credits — this scenario needs one per run "
+        f"(found {len(hits)}); refresh the sample documents so the "
+        "statement's period overlaps the bills")
+    rest = [i for i in range(len(credits)) if i not in set(hits)]
+    cut = len(rest) // 2
+    first = sorted(set(hits[0::2]) | set(rest[:cut]))
+    second = sorted(set(hits[1::2]) | set(rest[cut:]))
 
     key = f"ptest-{uuid.uuid4().hex[:8]}"
     with SessionLocal() as s:
@@ -87,8 +107,8 @@ def world(tmp_path_factory):
     world = {
         "customer_pk": customer_pk,
         "bronze": ids,
-        "bank_half1": as_stmt(credits.iloc[:half]),
-        "bank_half2": as_stmt(credits.iloc[half:]),
+        "bank_half1": as_stmt(credits.iloc[first]),
+        "bank_half2": as_stmt(credits.iloc[second]),
         "bank_full": as_stmt(credits),
         "bills_gold": bills_gold,
     }
@@ -106,7 +126,8 @@ def world(tmp_path_factory):
             s.execute(delete(MatchLedgerBill)
                       .where(MatchLedgerBill.match_ledger_id.in_(ledger_ids)))
         for model in (AuditLog, IngestConflict, ExceptionLedger, MatchLedger,
-                      GoldRecovery, GoldBill, GoldBankTxn, SilverRecord,
+                      GoldFileRow, GoldRecovery, GoldBill, GoldBankTxn,
+                      SilverRecord,
                       Run, BronzeFile):
             s.execute(delete(model).where(model.customer_id == customer_pk))
         s.execute(delete(Customer).where(Customer.id == customer_pk))

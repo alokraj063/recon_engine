@@ -16,12 +16,13 @@ from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import Boolean, Date, Float, Integer, String, Text
+from sqlalchemy import Boolean, Date, Float, Integer, String, Text, select
 
 from logging_setup import get_logger
 
 from .audit import record_event
-from .models import GoldBankTxn, GoldBill, GoldLineageDoc, GoldRecovery
+from .models import (GoldBankTxn, GoldBill, GoldFileRow, GoldLineageDoc,
+                     GoldRecovery)
 
 logger = get_logger(__name__)
 
@@ -105,6 +106,31 @@ def _coerce(v, sa_type):
     if isinstance(sa_type, Boolean):
         return bool(v)
     return v
+
+
+def reported_by_file(session, model, bronze_file_id: int, customer_id: int):
+    """WHERE clause selecting the rows of `model` that one ingested file
+    reported — its gold.file_rows sightings.
+
+    "Owns" and "reported" differ the moment the same entity appears in two
+    exports: the entity upsert keeps ONE gold row, stamped with the file
+    that FIRST inserted it, so a later export owns nothing it re-reports.
+    Every reader that means "this upload's data" (browse filters, the
+    statement picker, a statement's reconciliation pool) must ask this,
+    not bronze_file_id.
+
+    Falls back to plain ownership for a file ingested before sightings
+    existed — those rows are still exactly the ones it brought. Scoped by
+    customer like every other gold read: bronze ids are handed out by
+    SQLite's rowid counter, which REUSES the ids of deleted files, so an
+    unscoped lookup could pick up a long-gone tenant's sightings.
+    """
+    sighted = select(GoldFileRow.gold_row_id).where(
+        GoldFileRow.bronze_file_id == bronze_file_id,
+        GoldFileRow.customer_id == customer_id)
+    if session.execute(sighted.limit(1)).first() is None:
+        return model.bronze_file_id == bronze_file_id
+    return model.id.in_(sighted)
 
 
 def _persist_frame(session, model, df: pd.DataFrame, colmap: dict,

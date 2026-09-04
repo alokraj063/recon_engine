@@ -36,6 +36,11 @@ export interface IngestStats {
   bills_updated: number
   rows_reused: number
   conflicts: number
+  /** rows the upload CARRIED into gold — new, updated and unchanged
+   *  alike. The one number that is never 0 for a real file, so "my
+   *  export landed" has an answer even when it inserted nothing.
+   *  Optional: ingestions recorded before this stat existed lack it. */
+  rows_reported?: number
 }
 
 export interface LedgerStats {
@@ -82,14 +87,6 @@ export interface ReconResponse {
 
 /** Source frames a completed run exposes via /api/runs/{id}/frames/{name}. */
 export type FrameName = 'bank' | 'bills' | 'bills_enriched' | 'recoveries'
-
-export interface DefaultFileInfo {
-  name: string
-  size: number
-}
-
-/** Repo sample document backing each field when nothing is uploaded. */
-export type Defaults = Record<'statement' | 'bills' | 'rnote' | 'crn', DefaultFileInfo | null>
 
 export class ApiError extends Error {
   code: string

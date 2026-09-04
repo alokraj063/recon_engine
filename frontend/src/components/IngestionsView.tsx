@@ -45,6 +45,7 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
               <tr>
                 <th>When</th>
                 <th>Files</th>
+                <th style={{ textAlign: 'right' }}>Rows reported</th>
                 <th style={{ textAlign: 'right' }}>Rows inserted</th>
                 <th style={{ textAlign: 'right' }}>Bills updated</th>
                 <th style={{ textAlign: 'right' }}>Reused</th>
@@ -64,6 +65,7 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
                       </span>
                     ))}
                   </td>
+                  <td className="num">{i.stats?.rows_reported ?? '—'}</td>
                   <td className="num">{i.stats?.rows_inserted ?? '—'}</td>
                   <td className="num">{i.stats?.bills_updated ?? '—'}</td>
                   <td className="num">
@@ -84,9 +86,10 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
 
       <p className="footer-note">
         Every ingestion is idempotent: re-uploading identical bytes dedups at the file level, and
-        a newer bills export updates existing bills in place instead of duplicating them. Bills
-        consumed by a LOCKED ledger match are never silently changed — attempted changes land in
-        conflicts.
+        a newer bills export updates existing bills in place instead of duplicating them — so an
+        export can report thousands of rows and insert none. Each file stays browsable as its own
+        ingestion either way. Bills consumed by a LOCKED ledger match are never silently changed —
+        attempted changes land in conflicts.
       </p>
     </>
   )
