@@ -24,9 +24,9 @@ from recon.gold import ensure_schema
 from recon.rules import MatchRuleSet
 
 from .gold import (BANK_MAP, BILLS_MAP, LINEAGE_MAP, RECOVERIES_MAP,
-                   frame_from_gold, lineage_frame)
+                   frame_from_gold, lineage_frame, reported_by_file)
 from .models import (AuditLog, BronzeFile, GoldBankTxn, GoldBill,
-                     GoldLineageDoc, GoldRecovery)
+                     GoldFileRow, GoldLineageDoc, GoldRecovery)
 
 logger = get_logger(__name__)
 
@@ -51,8 +51,12 @@ def build_snapshot_frames(session, customer_id: int,
     state). ids lists are positional, like the matcher's indices."""
     txn_rows = list(session.execute(
         select(GoldBankTxn)
-        .where(GoldBankTxn.bronze_file_id == statement_bronze_id)
-        .order_by(GoldBankTxn.row_seq)).scalars())
+        .where(reported_by_file(session, GoldBankTxn, statement_bronze_id,
+                               customer_id))
+        # (bronze_file_id, row_seq) not row_seq alone: a credit this
+        # statement re-reports is owned by the earlier statement it first
+        # arrived on, so the rows can span files
+        .order_by(GoldBankTxn.bronze_file_id, GoldBankTxn.row_seq)).scalars())
     bank_all_df, _ = frame_from_gold(txn_rows, BANK_MAP, "bank_txns",
                                      ensure=ensure_schema)
     credit_rows = [r for r in txn_rows if r.used_in_recon]
@@ -116,15 +120,17 @@ def run_snapshot(session, customer_id: int, statement_bronze_id: int,
     return out, f["bank_ids"], f["bill_ids"]
 
 
-def statement_credits_frame(session, statement_bronze_id: int):
+def statement_credits_frame(session, statement_bronze_id: int,
+                            customer_id: int):
     """The chosen statement's FULL credits rebuilt from gold — the frame
     a bank-adapter selfcheck must verify. Incremental runs match on a
     pool (a designed subset of the statement), so checking the pool
     against the statement's printed totals would mismatch by design."""
     txn_rows = list(session.execute(
         select(GoldBankTxn)
-        .where(GoldBankTxn.bronze_file_id == statement_bronze_id)
-        .order_by(GoldBankTxn.row_seq)).scalars())
+        .where(reported_by_file(session, GoldBankTxn, statement_bronze_id,
+                               customer_id))
+        .order_by(GoldBankTxn.bronze_file_id, GoldBankTxn.row_seq)).scalars())
     credit_rows = [r for r in txn_rows if r.used_in_recon]
     bank_df, _ = frame_from_gold(credit_rows, BANK_MAP, "bank_txns",
                                  ensure=ensure_schema)
@@ -145,17 +151,19 @@ def gold_frame(session, frame: str, customer_id: int,
     model, colmap, frame_name, use_ensure = BROWSE_FRAMES[frame]
     where = [model.customer_id == customer_id]
     if bronze_file_id is not None:
-        where.append(model.bronze_file_id == bronze_file_id)
+        # every row that ingestion REPORTED, not just the ones it happens
+        # to own — an export whose bills already existed still filters to
+        # exactly the bills it carried (db/gold.py reported_by_file)
+        where.append(reported_by_file(session, model, bronze_file_id,
+                                      customer_id))
     total = session.execute(
         select(func.count()).select_from(model).where(*where)).scalar()
     rows = list(session.execute(
         select(model).where(*where)
         # newest ingestion first: bronze_file_id is an auto-increment PK,
-        # so higher = more recently uploaded. The browse table has no
-        # "recently touched" concept (an upsert updates a row owned by
-        # an OLDER file in place), so this is the closest proxy for
-        # "show me that my latest upload actually landed" without
-        # making the user scroll past everything older first.
+        # so higher = more recently uploaded — an unfiltered browse opens
+        # on the most recent arrivals rather than making the user scroll
+        # past everything older first.
         .order_by(model.bronze_file_id.desc(), model.row_seq)
         .limit(min(limit, GOLD_FRAME_CAP))).scalars())
     df, _ = frame_from_gold(rows, colmap, frame_name,
@@ -165,11 +173,15 @@ def gold_frame(session, frame: str, customer_id: int,
 
 
 def gold_files(session, customer_id: int) -> List[dict]:
-    """Every bronze file owning gold rows, with per-frame counts; bank
-    statements additionally get their credit count + value-date range —
-    this feeds both the Reconcile statement picker and the gold tabs'
-    ingestion filters."""
-    counts: Dict[int, Dict[str, int]] = {}
+    """Every bronze file that put rows in gold, with per-frame counts;
+    bank statements additionally get their credit count + value-date range
+    — this feeds both the Reconcile statement picker and the gold tabs'
+    ingestion filters.
+
+    Counts are of rows REPORTED, so an export that re-reported 34 existing
+    bills lists 34 (and appears at all), instead of vanishing behind the
+    file that first inserted them."""
+    owned: Dict[int, Dict[str, int]] = {}
     for model, key in ((GoldBankTxn, "bank_txns"), (GoldBill, "bills"),
                        (GoldRecovery, "recoveries"),
                        (GoldLineageDoc, "lineage_docs")):
@@ -177,7 +189,20 @@ def gold_files(session, customer_id: int) -> List[dict]:
                 select(model.bronze_file_id, func.count())
                 .where(model.customer_id == customer_id)
                 .group_by(model.bronze_file_id)):
-            counts.setdefault(bfid, {})[key] = n
+            owned.setdefault(bfid, {})[key] = n
+
+    sighted: Dict[int, Dict[str, int]] = {}
+    for bfid, frame, n in session.execute(
+            select(GoldFileRow.bronze_file_id, GoldFileRow.frame, func.count())
+            .where(GoldFileRow.customer_id == customer_id)
+            .group_by(GoldFileRow.bronze_file_id, GoldFileRow.frame)):
+        # every lineage slot browses as one frame, like BROWSE_FRAMES
+        key = "lineage_docs" if frame.startswith("lineage") else frame
+        f = sighted.setdefault(bfid, {})
+        f[key] = f.get(key, 0) + n
+
+    # per file, all-or-nothing — the same rule reported_by_file applies
+    counts = {**owned, **sighted}
     if not counts:
         return []
     files = {b.id: b for b in session.execute(
@@ -194,7 +219,8 @@ def gold_files(session, customer_id: int) -> List[dict]:
                 select(func.min(GoldBankTxn.value_date),
                        func.max(GoldBankTxn.value_date),
                        func.count())
-                .where(GoldBankTxn.bronze_file_id == bfid,
+                .where(reported_by_file(session, GoldBankTxn, bfid,
+                                       customer_id),
                        GoldBankTxn.used_in_recon.is_(True))).one()
             statement = {
                 "value_date_min": lo.isoformat() if lo else None,
@@ -239,13 +265,16 @@ def list_ingestions(session, customer_id: int, limit: int = 50) -> List[dict]:
 def get_statement_bronze(session, customer_id: int,
                          statement_bronze_id: int) -> Optional[BronzeFile]:
     """The bronze row for a reconcile target — must belong to the
-    customer, be a bank statement, and own gold txn rows."""
+    customer, be a bank statement, and have reported gold txn rows
+    (reported, not owned: a statement whose credits all already arrived on
+    an earlier one is still a statement you can reconcile)."""
     b = session.get(BronzeFile, statement_bronze_id)
     if (b is None or b.customer_id != customer_id
             or b.source_type != "bank_statement"):
         return None
     has_gold = session.execute(
         select(GoldBankTxn.id)
-        .where(GoldBankTxn.bronze_file_id == statement_bronze_id)
+        .where(reported_by_file(session, GoldBankTxn, statement_bronze_id,
+                               customer_id))
         .limit(1)).first()
     return b if has_gold else None

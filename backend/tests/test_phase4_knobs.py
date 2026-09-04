@@ -98,7 +98,7 @@ def test_configurable_bill_entity_key(tmp_path):
     from db.bronze import register_file
     from db.ingest import ingest_gold_frames
     from db.models import (AuditLog, BronzeFile, Customer, GoldBill,
-                           SilverRecord)
+                           GoldFileRow, SilverRecord)
     from db.storage import storage
     from recon.gold import ensure_schema
 
@@ -146,7 +146,8 @@ def test_configurable_bill_entity_key(tmp_path):
         assert n == 1
     finally:
         with SessionLocal() as s:
-            for model in (AuditLog, GoldBill, SilverRecord, BronzeFile):
+            for model in (AuditLog, GoldFileRow, GoldBill, SilverRecord,
+                          BronzeFile):
                 s.execute(delete(model).where(model.customer_id == cust))
             s.execute(delete(Customer).where(Customer.id == cust))
             s.commit()

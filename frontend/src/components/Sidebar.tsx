@@ -1,7 +1,7 @@
 import type { ComponentType } from 'react'
 import {
   ArrowDownLeft, Boxes, FileSearch, FileStack, Gauge, GitBranch, GitMerge,
-  Landmark, LayoutDashboard, Layers, Link2, ListChecks, ListMinus, ReceiptText,
+  Landmark, LayoutDashboard, Link2, ListChecks, ListMinus, ReceiptText,
   TriangleAlert, Upload, Download,
 } from 'lucide-react'
 import type { ReconResponse } from '../types'
@@ -23,7 +23,6 @@ export type View =
   | 'bills'
   | 'bills_enriched'
   | 'recoveries'
-  | 'silver'
   | 'gold_bank'
   | 'gold_bills'
   | 'gold_recoveries'
@@ -128,9 +127,6 @@ export function Sidebar({ view, onNavigate, result }: Props) {
         {resultItems.map(item)}
         <div className="nav-sub-label">Run data</div>
         {runDataItems.map(item)}
-
-        <div className="nav-group-label">Silver data</div>
-        {openItem({ view: 'silver', label: 'Parsed source rows', icon: Layers })}
 
         <div className="nav-group-label">Gold data</div>
         {goldItems.map(openItem)}

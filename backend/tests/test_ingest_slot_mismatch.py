@@ -22,8 +22,8 @@ sys.path.insert(0, str(BACKEND))
 
 from db import SessionLocal, init_db  # noqa: E402
 from db.models import (AuditLog, BronzeFile, Customer, GoldBankTxn,  # noqa: E402
-                       GoldBill, GoldLineageDoc, GoldRecovery, SilverRecord,
-                       SourceConfig)
+                       GoldBill, GoldFileRow, GoldLineageDoc, GoldRecovery,
+                       MatchRuleSetRow, SilverRecord, SourceConfig)
 from db.storage import storage  # noqa: E402
 
 
@@ -52,9 +52,9 @@ def customer(client):
         # reuse for the NEXT customer created anywhere in the test run —
         # silently polluting an unrelated, later test's customer-scoped
         # queries (this bit a sibling test the first time this was missed)
-        for model in (GoldRecovery, GoldBill, GoldBankTxn, GoldLineageDoc,
-                      SilverRecord, BronzeFile, AuditLog, SourceConfig,
-                      Customer):
+        for model in (GoldFileRow, GoldRecovery, GoldBill, GoldBankTxn,
+                      GoldLineageDoc, SilverRecord, BronzeFile, AuditLog,
+                      SourceConfig, MatchRuleSetRow, Customer):
             where = (model.id == cust.id) if model is Customer else (model.customer_id == cust.id)
             s.execute(delete(model).where(where))
         s.commit()
@@ -95,7 +95,7 @@ def test_slot_mismatch_fails_loud_but_a_genuine_repeat_still_dedups(client, cust
         "/api/ingest",
         files={"bills": ("bills.xlsx", mismatched,
                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
-        data={"customer_id": customer, "slots": "bills"},
+        data={"customer_id": customer},
     )
     # the content is garbage, so parsing fails — but the bronze row for
     # "bills" is committed BEFORE parsing runs, so it persists regardless
@@ -105,7 +105,7 @@ def test_slot_mismatch_fails_loud_but_a_genuine_repeat_still_dedups(client, cust
         "/api/ingest",
         files={"crn": ("crn.xlsx", mismatched,
                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
-        data={"customer_id": customer, "slots": "crn"},
+        data={"customer_id": customer},
     )
     assert r2.status_code == 400, r2.text
     body = r2.json()["detail"]
@@ -118,7 +118,7 @@ def test_slot_mismatch_fails_loud_but_a_genuine_repeat_still_dedups(client, cust
         "/api/ingest",
         files={"bills": ("real_bills.xlsx", real_bills,
                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
-        data={"customer_id": customer, "slots": "bills"},
+        data={"customer_id": customer},
     )
     assert r3.status_code == 200, r3.text
     assert r3.json()["files"][0]["outcome"] == "registered"
@@ -127,7 +127,7 @@ def test_slot_mismatch_fails_loud_but_a_genuine_repeat_still_dedups(client, cust
         "/api/ingest",
         files={"bills": ("real_bills_reexported.xlsx", real_bills,
                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
-        data={"customer_id": customer, "slots": "bills"},
+        data={"customer_id": customer},
     )
     assert r4.status_code == 200, r4.text
     assert r4.json()["files"][0]["outcome"] == "deduped"

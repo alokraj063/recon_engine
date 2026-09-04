@@ -19,6 +19,17 @@ free-text cell per bill ('<head>: <amt> <head>: <amt> ...'); splitting it
 into structured recovery lines is a Gold-layer concern (see
 sources/ireps_bills.py), not this parser's — Silver keeps it verbatim.
 
+The column list is treated as a MOVING TARGET, because it is one: this
+export already changed shape once. Only REQUIRED_HEADERS have to be
+present for a sheet to count as Bill Status — the four without which a
+bill cannot be identified, registered, stated or paid. Everything else is
+optional and NA-fills when absent, and any column IREPS adds that this
+map doesn't know is still extracted, under its own header text as the
+silver field name (see `_find_header`). So a future export that adds
+'UTR No' or drops 'Accounting Unit' keeps ingesting: the new field
+reaches gold through the adapter's `extras`, and only a genuinely
+unusable file fails — with a message naming the headers it missed.
+
 IREPS exports the same tabular format as either `.xlsx`/`.xlsm` (OOXML,
 read via openpyxl) or the legacy `.xls` (BIFF, read via xlrd) — both are
 accepted. `_open_workbook` picks the reader by extension and hands back
@@ -33,6 +44,7 @@ come back exactly as openpyxl would already give them.
 
 import re
 from pathlib import Path
+from typing import NamedTuple, Optional
 
 import openpyxl
 import pandas as pd
@@ -61,6 +73,13 @@ HEADER_TO_FIELD = {
     "Reason For Return": "ReasonForReturn",
     "Recovery Details": "RecoveryDetails",
 }
+
+# The columns that MUST be present for a worksheet to be a Bill Status
+# table at all: the bill's own number, the registration reference it is
+# upserted by, its state, and the amount that has to reach the bank.
+# Every other column above is optional — a missing one NA-fills rather
+# than failing the upload.
+REQUIRED_HEADERS = ("Bill Number", "CO6 No", "Status", "Net Amt")
 
 # Silver-layer bookkeeping, not one of the 20 IREPS columns: which sheet a
 # row came from and its physical Excel row. Kept for the same reason the
@@ -153,22 +172,52 @@ def _norm_header(text):
 
 
 _HEADER_LOOKUP = {_norm_header(h): f for h, f in HEADER_TO_FIELD.items()}
+_REQUIRED_FIELDS = tuple(HEADER_TO_FIELD[h] for h in REQUIRED_HEADERS)
 
 
-def _find_header(ws, max_scan=MAX_HEADER_SCAN_ROWS):
-    """The row (within the first few) whose cells name every required
-    column, mapped as {field: column index}. None if this sheet isn't a
-    Bill Status table."""
+class _Header(NamedTuple):
+    """Where a sheet's Bill Status table starts and what its columns are.
+
+    `row` is None when the sheet carries no such table — then `missing`
+    names the REQUIRED headers absent from its closest candidate row, so
+    a rejected upload can say what it was looking for.
+    """
+    row: Optional[int]
+    cols: dict          # silver field name -> column index
+    extras: dict        # unknown column's own header text -> column index
+    missing: list       # REQUIRED headers absent from the closest row
+
+
+def _find_header(ws, max_scan=MAX_HEADER_SCAN_ROWS) -> _Header:
+    """The row (within the first few) that names every REQUIRED column."""
+    best_missing: list = []
     for r in range(1, min(ws.max_row, max_scan) + 1):
         row = next(ws.iter_rows(min_row=r, max_row=r, values_only=True), ())
-        cols = {}
+        cols, extras = {}, {}
         for idx, cell in enumerate(row):
-            field = _HEADER_LOOKUP.get(_norm_header(cell))
-            if field and field not in cols:
-                cols[field] = idx
-        if len(cols) == len(HEADER_TO_FIELD):
-            return r, cols
-    return None, None
+            text = _norm_header(cell)
+            if not text:
+                continue
+            field = _HEADER_LOOKUP.get(text)
+            if field:
+                cols.setdefault(field, idx)
+            else:
+                # a column this map doesn't know: keep it under its own
+                # header text (whitespace-normalised, otherwise verbatim —
+                # silver speaks the source's vocabulary), first occurrence
+                # wins, never shadowing a known field name
+                label = re.sub(r"\s+", " ",
+                               str(cell).replace("\xa0", " ")).strip()
+                if label not in FIELDS:
+                    extras.setdefault(label, idx)
+        missing = [h for h, f in zip(REQUIRED_HEADERS, _REQUIRED_FIELDS)
+                   if f not in cols]
+        if not missing:
+            return _Header(r, cols, extras, [])
+        # remember the closest near-miss for the error message
+        if cols and (not best_missing or len(missing) < len(best_missing)):
+            best_missing = missing
+    return _Header(None, {}, {}, best_missing)
 
 
 def parse_bill_status(path):
@@ -176,29 +225,44 @@ def parse_bill_status(path):
     Parse every bill row in the workbook into one Silver record per bill.
     Accepts .xlsx/.xlsm (OOXML) and legacy .xls (BIFF) alike.
 
-    Scans every worksheet for one whose header row carries all 20 IREPS
-    Bill Status columns (order and starting column don't matter); a
-    worksheet without that header is skipped, not treated as data. Raises
-    BillStatusFormatError if no worksheet matches at all.
+    Scans every worksheet for one whose header row names the REQUIRED
+    columns (order and starting column don't matter); a worksheet without
+    that header is skipped, not treated as data. Known optional columns
+    that the export dropped come back all-NA, and columns it ADDED come
+    back under their own header text. Raises BillStatusFormatError if no
+    worksheet matches at all.
     """
     wb = _open_workbook(path)
     records = []
     matched_sheets = []
+    near_miss: list = []
+    # unknown columns in first-seen order, so the frame's column order is
+    # deterministic across sheets that carry different extras
+    extra_fields: list = []
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        header_row, cols = _find_header(ws)
-        if header_row is None:
+        header = _find_header(ws)
+        if header.row is None:
+            # across sheets as within one: report the closest thing to a
+            # Bill Status header the workbook had
+            if header.missing and (not near_miss
+                                   or len(header.missing) < len(near_miss)):
+                near_miss = header.missing
             continue
         matched_sheets.append(sheet_name)
+        for label in header.extras:
+            if label not in extra_fields:
+                extra_fields.append(label)
+        read = {**header.cols, **header.extras}
 
         for r, row in enumerate(
-                ws.iter_rows(min_row=header_row + 1, values_only=True),
-                start=header_row + 1):
+                ws.iter_rows(min_row=header.row + 1, values_only=True),
+                start=header.row + 1):
             if all(v is None for v in row):
                 continue
             rec = {field: (row[idx] if idx < len(row) else None)
-                  for field, idx in cols.items()}
+                  for field, idx in read.items()}
             rec["Sheet"] = sheet_name
             rec["DataRow"] = r
             records.append(rec)
@@ -206,9 +270,12 @@ def parse_bill_status(path):
     if not matched_sheets:
         raise BillStatusFormatError(
             "no Bill Status header row found in any worksheet; expected a "
-            "table with columns: " + ", ".join(HEADER_TO_FIELD))
+            "table whose header names at least "
+            + ", ".join(REQUIRED_HEADERS)
+            + (f" (closest row was missing: {', '.join(near_miss)})"
+               if near_miss else ""))
 
-    df = pd.DataFrame(records, columns=FIELDS)
+    df = pd.DataFrame(records, columns=FIELDS + extra_fields)
     if df.empty:
         return df
 
@@ -239,5 +306,7 @@ def parse_bill_status(path):
 
     # Zone/PartyName/PartyCode/Status/AccountingUnit/ReasonForReturn/
     # RecoveryDetails and the identifier fields above are left exactly as
-    # read — Silver is source-native, never transformed.
+    # read — Silver is source-native, never transformed. So are the
+    # unknown extra columns: nothing here knows what a column IREPS adds
+    # next MEANS, and guessing a dtype for it would be an invention.
     return df

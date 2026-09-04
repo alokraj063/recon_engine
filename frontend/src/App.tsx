@@ -15,7 +15,6 @@ import { CommandCenter } from './components/CommandCenter'
 import { ErrorBanner } from './components/ErrorBanner'
 import { ExceptionQueue } from './components/ExceptionQueue'
 import { GoldTable } from './components/GoldTable'
-import { SilverTable } from './components/SilverTable'
 import { IngestForm } from './components/IngestForm'
 import { LedgerView } from './components/LedgerView'
 import { MatchedTable } from './components/MatchedTable'
@@ -36,7 +35,7 @@ const GOLD_VIEWS: Record<string, GoldFrameName> = {
 
 const VIEW_TITLES: Record<
   Exclude<View, 'command' | 'ingest' | 'reconcile' | 'ledger' | 'ar' | 'audit'
-    | 'architecture' | 'silver' | 'gold_bank' | 'gold_bills' | 'gold_recoveries'
+    | 'architecture' | 'gold_bank' | 'gold_bills' | 'gold_recoveries'
     | 'gold_lineage'>,
   string
 > = {
@@ -73,8 +72,7 @@ const payloadCache = new Map<string, ReconResponse>()
 const VALID_VIEWS = new Set<View>([
   'command', 'ingest', 'reconcile', 'ledger', 'ar', 'audit', 'architecture',
   'summary', 'matched', 'exceptions', 'bank', 'bills', 'bills_enriched',
-  'recoveries', 'silver', 'gold_bank', 'gold_bills', 'gold_recoveries',
-  'gold_lineage',
+  'recoveries', 'gold_bank', 'gold_bills', 'gold_recoveries', 'gold_lineage',
 ])
 
 /** The URL hash is the whole navigation state:
@@ -136,7 +134,6 @@ const PAGE_TITLES: Record<string, string> = {
   ledger: 'Analyst queue',
   ar: 'AR Reconciliation',
   audit: 'Audit trail',
-  silver: 'Silver — parsed source rows',
   architecture: 'Architecture',
 }
 
@@ -447,24 +444,6 @@ export default function App() {
               setView('ledger')
             }}
           />
-        )}
-
-        {view === 'silver' && (
-          <>
-            <div className="result-head">
-              <h2>Silver — parsed source rows</h2>
-              <span className="file-note">customer: {customerId}</span>
-            </div>
-            <div className="view-card">
-              <p className="frame-note">
-                Every parsed row in the shape its own source produced —
-                IREPS bill blocks, bank lines, lineage documents — before
-                any translation into the common gold schema.
-              </p>
-              <SilverTable key={`${customerId}:${ingestEpoch}`}
-                           customerId={customerId} />
-            </div>
-          </>
         )}
 
         {goldFrame && (

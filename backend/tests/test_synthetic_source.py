@@ -28,9 +28,9 @@ from db import SessionLocal, incremental, init_db, reconcile_gold  # noqa: E402
 from db.bronze import register_file  # noqa: E402
 from db.ingest import ingest_gold_frames  # noqa: E402
 from db.models import (AuditLog, BronzeFile, Customer, ExceptionLedger,  # noqa: E402
-                       GoldBankTxn, GoldBill, GoldLineageDoc, GoldRecovery,
-                       MatchLedger, MatchLedgerBill, Run, RunMatchBill,
-                       SilverRecord, SourceConfig)
+                       GoldBankTxn, GoldBill, GoldFileRow, GoldLineageDoc,
+                       GoldRecovery, MatchLedger, MatchLedgerBill, Run,
+                       RunMatchBill, SilverRecord, SourceConfig)
 from db.storage import storage  # noqa: E402
 from recon.gold import ensure_schema  # noqa: E402
 from recon.rules import ExactSignal, FieldMapping, MatchRuleSet  # noqa: E402
@@ -204,8 +204,9 @@ def world(tmp_path_factory):
         if ledger_ids:
             s.execute(delete(MatchLedgerBill)
                       .where(MatchLedgerBill.match_ledger_id.in_(ledger_ids)))
-        for model in (AuditLog, ExceptionLedger, MatchLedger, GoldRecovery,
-                      GoldBill, GoldBankTxn, GoldLineageDoc, SilverRecord,
+        for model in (AuditLog, ExceptionLedger, MatchLedger, GoldFileRow,
+                      GoldRecovery, GoldBill, GoldBankTxn, GoldLineageDoc,
+                      SilverRecord,
                       Run, SourceConfig, BronzeFile):
             s.execute(delete(model).where(model.customer_id == customer_pk))
         s.execute(delete(Customer).where(Customer.id == customer_pk))

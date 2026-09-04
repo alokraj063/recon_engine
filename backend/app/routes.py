@@ -26,7 +26,7 @@ from db.audit import record_event
 from db.bronze import register_file
 from db.ingest import ingest_gold_frames
 from db.models import BronzeFile, Customer, MatchRuleSetRow, SourceConfig
-from db.silver import persist_silver, silver_frame, silver_files
+from db.silver import persist_silver
 from db.storage import file_sha256
 from logging_setup import customer_id_var, get_logger
 from recon import (REGISTRY, MatchRuleSet, PipelineSinks, SelfCheckError,
@@ -62,29 +62,6 @@ def _slot_source_type(field: str) -> str:
     """Upload field -> slot key: the four legacy names map, anything else
     (an extra lineage slot) IS its slot key."""
     return SOURCE_TYPES.get(field, field)
-
-# Sample documents shipped in the repo, used as defaults when a field has
-# no upload. The UI shows them pre-filled; any of them can be replaced.
-SAMPLE_DIR = (Path(__file__).resolve().parents[2]
-              / "Receipt_reconciliation_and_IDR _ Requested_sample_documents")
-
-DEFAULT_PATTERNS = {
-    "statement": ("*.pdf", "*.PDF"),
-    "bills": ("BILL STATUS*.xlsx", "BILL STATUS*.xlsm", "BILL STATUS*.xls"),
-    "rnote": ("RNOTE*.xlsx", "RNOTE*.xlsm", "RNOTE*.xls"),
-    "crn": ("CRN*.xlsx", "CRN*.xlsm", "CRN*.xls"),
-}
-
-
-def _default_file(field):
-    if not SAMPLE_DIR.is_dir():
-        return None
-    # extra lineage slots have no default document
-    for pattern in DEFAULT_PATTERNS.get(field, ()):
-        for p in sorted(SAMPLE_DIR.glob(pattern)):
-            if not p.name.startswith("~$"):   # Excel lock files
-                return p
-    return None
 
 
 def _fail(status, code, detail):
@@ -123,38 +100,19 @@ def _save_upload(upload: UploadFile, field: str, tmpdir: Path) -> Path:
     return dest
 
 
-@router.get("/defaults")
-def default_files(customer_id: str = "default"):
-    """Which bundled default document backs each field when nothing is
-    uploaded. null means no default exists for that field. Defaults back
-    the seeded default customer ONLY — for any other customer every
-    field is null, so real tenants never see (or ingest) demo data."""
-    if customer_id != "default":
-        return {field: None for field in SOURCE_TYPES}
-    return {
-        field: ({"name": p.name, "size": p.stat().st_size} if p else None)
-        for field in SOURCE_TYPES
-        for p in [_default_file(field)]
-    }
+def _resolve_input(field, upload, tmpdir, required):
+    """The uploaded file for a slot, or (None, None) when nothing was
+    attached. Returns (path, display_name).
 
-
-def _resolve_input(field, upload, tmpdir, required, allow_samples=True):
-    """An uploaded file wins; otherwise fall back to the bundled default
-    document — but only when allow_samples (the default customer).
-    Returns (path, display_name)."""
+    An upload is the ONLY source of documents: the repo's sample files
+    used to stand in for an empty slot on the seeded `default` customer,
+    which meant a run could quietly reconcile demo data a user never
+    chose. Every ingestion is now exactly the files it was given."""
     if upload is not None and upload.filename:
-        path = _save_upload(upload, field, tmpdir)
-        return path, upload.filename
-    p = _default_file(field) if allow_samples else None
-    if p is None:
-        if required:
-            _fail(400, "INVALID_INPUT",
-                  f"{field}: nothing uploaded"
-                  + (" and no default document available" if allow_samples
-                     else " (default documents back the default customer "
-                          "only)"))
-        return None, None
-    return p, p.name
+        return _save_upload(upload, field, tmpdir), upload.filename
+    if required:
+        _fail(400, "INVALID_INPUT", f"{field}: no file uploaded")
+    return None, None
 
 
 def _get_customer(session, customer_key: str) -> Customer:
@@ -431,16 +389,11 @@ async def create_run(
         _fail(400, "INVALID_INPUT", f"unknown mode '{mode}'")
     tmpdir = Path(tempfile.mkdtemp(prefix="recon_run_"))
     try:
-        # default documents never stand in for a real tenant's documents
-        samples_ok = customer_id == "default"
         stmt_path, stmt_name = _resolve_input("statement", statement, tmpdir,
-                                              True, samples_ok)
-        bills_path, bills_name = _resolve_input("bills", bills, tmpdir,
-                                                True, samples_ok)
-        rnote_path, rnote_name = _resolve_input("rnote", rnote, tmpdir,
-                                                False, samples_ok)
-        crn_path, crn_name = _resolve_input("crn", crn, tmpdir,
-                                            False, samples_ok)
+                                              True)
+        bills_path, bills_name = _resolve_input("bills", bills, tmpdir, True)
+        rnote_path, rnote_name = _resolve_input("rnote", rnote, tmpdir, False)
+        crn_path, crn_name = _resolve_input("crn", crn, tmpdir, False)
         paths = {"statement": stmt_path, "bills": bills_path,
                  "rnote": rnote_path, "crn": crn_path}
         names = {"statement": stmt_name, "bills": bills_name,
@@ -811,14 +764,13 @@ async def ingest(
     rnote: UploadFile | None = File(None),
     crn: UploadFile | None = File(None),
     customer_id: str = Form("default"),
-    slots: str | None = Form(None),
 ):
-    """Raw files -> bronze -> silver -> gold, standalone. `slots` is a
-    comma-separated list of ENABLED slots; the default-document fallback only
-    applies to enabled slots, so skipped documents are truly skipped (an
-    uploaded file always implies its slot is enabled). With `slots`
-    omitted, only uploaded files are ingested — an empty form no longer
-    silently ingests all four samples. No Run row — a failed ingest
+    """Raw files -> bronze -> silver -> gold, standalone.
+
+    An ingestion is EXACTLY the files it was given: every uploaded slot is
+    processed, a slot with no upload is simply not part of it, and at
+    least one file is required. Nothing is ever substituted — a slot left
+    empty ingests nothing at all. No Run row either: a failed ingest
     leaves log lines only, since nothing ran."""
     tmpdir = Path(tempfile.mkdtemp(prefix="recon_ingest_"))
     try:
@@ -832,36 +784,29 @@ async def ingest(
         extra_slots = [st for st in pre_source_configs
                        if st not in SOURCE_TYPES.values()
                        and role_of(st) == "lineage"]
-        if extra_slots:
-            form = await request.form()
-            for st in extra_slots:
-                up = form.get(st)
-                uploads[st] = up if hasattr(up, "filename") else None
-        enabled = {f for f, u in uploads.items() if u is not None and u.filename}
-        if slots is not None:
-            requested = {s.strip() for s in slots.split(",") if s.strip()}
-            unknown = requested - set(uploads)
-            if unknown:
-                _fail(400, "INVALID_INPUT",
-                      f"unknown slot(s): {sorted(unknown)}")
-            enabled |= requested
-        if not enabled:
+        form = await request.form()
+        for st in extra_slots:
+            up = form.get(st)
+            uploads[st] = up if hasattr(up, "filename") else None
+        # a file posted under a field name no slot answers to would
+        # otherwise vanish silently (a typo'd slot key, or a lineage slot
+        # this customer hasn't configured) — the ingest would "succeed"
+        # without it
+        stray = sorted({name for name, value in form.multi_items()
+                        if hasattr(value, "filename") and name not in uploads})
+        if stray:
             _fail(400, "INVALID_INPUT",
-                  "no slots enabled: upload a file or enable at least one "
-                  f"of {'/'.join(sorted(uploads))}")
+                  f"no such document slot(s): {stray}; this customer's slots "
+                  f"are {sorted(uploads)}")
 
         paths, names = {}, {}
-        samples_ok = customer_id == "default"
         for field, upload in uploads.items():
-            if field in enabled:
-                paths[field], names[field] = _resolve_input(
-                    field, upload, tmpdir, False, samples_ok)
-            else:
-                paths[field], names[field] = None, None
+            paths[field], names[field] = _resolve_input(
+                field, upload, tmpdir, False)
         if not any(paths.values()):
             _fail(400, "INVALID_INPUT",
-                  "no input files: enabled slots have neither uploads nor "
-                  "default documents")
+                  "no files uploaded: attach at least one of "
+                  f"{'/'.join(sorted(uploads))}")
 
         with SessionLocal() as session:
             customer, source_configs, _rule_row = _load_customer_context(
@@ -1004,41 +949,6 @@ def gold_frame(frame: str, customer_id: str = "default",
         rec["bronze_file_id"] = bfid
         rec["row_seq"] = seq
     return {"name": frame, "count": len(rows), "total": total, "rows": rows}
-
-
-# --- silver layer browsing ----------------------------------------------
-# NOTE: static /silver/* routes must be declared before /silver/{frame}
-
-@router.get("/silver/files")
-def silver_files_route(customer_id: str = "default"):
-    """Every bronze file owning silver rows, with its per-frame counts —
-    the silver browser's file picker and frame list."""
-    with SessionLocal() as session:
-        customer_pk = _get_customer(session, customer_id).id
-        return silver_files(session, customer_pk)
-
-
-@router.get("/silver/{frame}")
-def silver_frame_route(frame: str, customer_id: str = "default",
-                       bronze_file_id: int | None = None,
-                       limit: int = 20000):
-    """One silver frame exactly as its parser produced it — source-native
-    column names, no gold translation. Frame names are adapter-defined
-    (bills, recoveries, transactions, rnote, crn, ...), so the valid set
-    is whatever this customer has actually ingested."""
-    with SessionLocal() as session:
-        customer_pk = _get_customer(session, customer_id).id
-        rows, total = silver_frame(session, customer_pk, frame,
-                                   bronze_file_id, limit)
-        if total == 0:
-            known = sorted({name for f in silver_files(session, customer_pk)
-                            for name in f["silver_counts"]})
-            if frame not in known:
-                _fail(404, "FRAME_NOT_FOUND",
-                      f"no silver frame '{frame}' for this customer; "
-                      f"have: {known}")
-    return {"name": frame, "count": len(rows), "total": total,
-            "rows": clean(rows)}
 
 
 # --- two-step workflow: reconcile from gold -----------------------------
@@ -1256,7 +1166,7 @@ async def _reconcile_incremental_from_gold(customer_pk, customer_key,
         def statement_selfcheck():
             with SessionLocal() as session:
                 bank_df = reconcile_gold.statement_credits_frame(
-                    session, statement_bronze_id)
+                    session, statement_bronze_id, customer_pk)
             return _gold_selfcheck(bank_adapter, bank_adapter_params,
                                    bank_df, stmt_path, customer_pk,
                                    statement_bronze_id)

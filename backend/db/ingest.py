@@ -27,8 +27,9 @@ from logging_setup import get_logger
 from .audit import record_event
 from .gold import (BANK_MAP, BILLS_MAP, LINEAGE_MAP, RECOVERIES_MAP,
                    _coerce, _is_na, _json_clean, _persist_frame)
-from .models import (GoldBankTxn, GoldBill, GoldLineageDoc, GoldRecovery,
-                     IngestConflict, MatchLedger, MatchLedgerBill)
+from .models import (GoldBankTxn, GoldBill, GoldFileRow, GoldLineageDoc,
+                     GoldRecovery, IngestConflict, MatchLedger,
+                     MatchLedgerBill)
 
 logger = get_logger(__name__)
 
@@ -77,7 +78,29 @@ def _consumed_bill_ids(session, customer_id, statuses=("LOCKED",)) -> set:
 
 def new_stats() -> dict:
     return {"files_reused": 0, "rows_inserted": 0, "bills_updated": 0,
-            "rows_reused": 0, "conflicts": 0}
+            "rows_reused": 0, "conflicts": 0, "rows_reported": 0}
+
+
+def _record_sightings(session, customer_id: int, frame: str,
+                      bronze_file_id: int, ids: Dict[int, str]) -> int:
+    """Remember that this file REPORTED these gold rows, whether it
+    inserted them, updated them or matched them unchanged.
+
+    Without this, an export whose entities all already exist leaves no
+    trace in gold and reads as "nothing happened" — see GoldFileRow.
+    Idempotent: replaying the same file adds nothing."""
+    if not ids:
+        return 0
+    seen = set(session.execute(
+        select(GoldFileRow.row_seq)
+        .where(GoldFileRow.bronze_file_id == bronze_file_id,
+               GoldFileRow.frame == frame)).scalars())
+    new = [{"customer_id": customer_id, "bronze_file_id": bronze_file_id,
+            "frame": frame, "gold_row_id": row_id, "row_seq": seq}
+           for seq, row_id in sorted(ids.items()) if seq not in seen]
+    if new:
+        session.bulk_insert_mappings(GoldFileRow, new)
+    return len(new)
 
 
 def _ingest_keyed(session, model, df, colmap, base, key_cols_db,
@@ -317,6 +340,16 @@ def ingest_gold_frames(session, customer_id: int,
             ids[frame] = _ingest_lineage(
                 session, gold_frames[frame], LINEAGE_MAP, base(frame), stats,
                 existing_file_rows=file_rows.get(frame))
+
+    # what this upload actually reported, per frame — the only record that
+    # survives when every row it carried already existed. The stat counts
+    # rows CARRIED (not sightings written), so a replayed file still
+    # answers "34 rows" rather than "0".
+    for frame, frame_ids in ids.items():
+        _record_sightings(session, customer_id, frame, bronze_ids[frame],
+                          frame_ids)
+        stats["rows_reported"] += len(frame_ids)
+
     record_event(session, logger, event_type="gold.ingest_completed",
                  customer_id=customer_id, run_id=run_id,
                  details={**stats, "frames": list(gold_frames.keys())})

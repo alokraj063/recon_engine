@@ -21,7 +21,7 @@ A plain-language walk-through of every screen in the app — what you're looking
 - [Audit trail](#audit-trail)
 - [A run's results: Summary, Matched, Exceptions](#a-runs-results-summary-matched-exceptions)
 - [Run data tabs](#run-data-tabs)
-- [Browsing raw data: Gold data & Silver data](#browsing-raw-data-gold-data--silver-data)
+- [Browsing live data: Gold data](#browsing-live-data-gold-data)
 - [Switching & creating customers](#switching--creating-customers)
 - [Architecture page](#architecture-page)
 - [Common questions](#common-questions)
@@ -47,7 +47,7 @@ Every screen in this guide is a view onto the same four-stage journey. Understan
 Two more things worth knowing before you start clicking around:
 
 - **Ingesting** (uploading files) and **reconciling** (matching bank credits to bills) are two separate steps, on two separate pages. Uploading a file never runs a match by itself — you always go and click "Run reconciliation" afterwards.
-- Two tabs look similar but behave completely differently: **Gold data** and **Silver data** (in the left sidebar) are always live — open them any time and they show what's true right now. The **Reconciliation result** tabs (Summary, Matched, Exceptions, and the four "Run data" tabs) are a frozen photograph of one specific run and never change on their own.
+- Two kinds of tab look similar but behave completely differently: the **Gold data** tabs (in the left sidebar) are always live — open them any time and they show what's true right now. The **Reconciliation result** tabs (Summary, Matched, Exceptions, and the four "Run data" tabs) are a frozen photograph of one specific run and never change on their own.
 
 ---
 
@@ -55,7 +55,7 @@ Two more things worth knowing before you start clicking around:
 
 The screen is always split the same way: a sidebar of pages on the left, the page content on the right.
 
-**The sidebar** is grouped into *Operate* (upload files, run a match, tune the matching rules), *Workspace* (review and decide on exceptions, browse aging receivables, see the full history log), *Reconciliation result* (the outcome of whichever run you currently have open — greyed out until you've opened one), *Silver data* and *Gold data* (always-live browsers for what's actually in the system), and *Platform* (a technical overview page). A badge number next to a Reconciliation-result item (e.g. "Matched · 29") is a live count from the run you currently have open.
+**The sidebar** is grouped into *Operate* (upload files, run a match, tune the matching rules), *Workspace* (review and decide on exceptions, browse aging receivables, see the full history log), *Reconciliation result* (the outcome of whichever run you currently have open — greyed out until you've opened one), *Gold data* (always-live browsers for what's actually in the system), and *Platform* (a technical overview page). A badge number next to a Reconciliation-result item (e.g. "Matched · 29") is a live count from the run you currently have open.
 
 **Customer switcher** — near the top of most pages sits a dropdown listing every customer this instance manages. Everything else on screen belongs to whichever customer is selected. Switching it clears whatever run you had open (a run belongs to one customer) and remembers your choice for next time. **"+ new customer"** (on the Ingest files page) creates a brand-new one, starting from a copy of the default customer's file-format choices and matching rules.
 
@@ -92,13 +92,13 @@ Changing a format dropdown is a **permanent setting for this customer**, saved t
 This is the button that actually sends your files in. It only turns on once at least one slot has a file attached. Here is exactly what happens to each file, in order:
 
 1. **Saved (Bronze)** — The file is stored exactly as uploaded. If you accidentally upload the exact same file twice, the app recognises it (down to the byte) and doesn't store a second copy — you'll see it marked *deduped* instead of *registered*.
-2. **Read (Silver)** — The file is opened and every row read into that source's own column names — nothing is renamed or reinterpreted yet. This raw version is always available afterwards on the [Silver data](#browsing-raw-data-gold-data--silver-data) page, exactly as the source file had it.
+2. **Read (Silver)** — The file is opened and every row read into that source's own column names — nothing is renamed or reinterpreted yet. This as-read version is kept as the record of what the app actually saw in your file; the screens all read the translated version below.
 3. **Translated (Gold)** — Those source-specific column names are translated into one shared set of names every part of the app uses — so it doesn't matter which ERP a bill came from, the matching engine sees the same shape either way.
 4. **Merged in** — Each row is checked against everything already in the system. A bill that matches one already there (same bill number and same registration reference) has its details refreshed in place. A bill that's new goes in as a new row. **Nothing from a previous upload is ever removed** — new uploads add to the pool, they don't replace it.
 
 Once it's done, you'll see a result panel: which files were registered vs. deduped, how many rows were newly added vs. updated vs. left untouched, and — if you included a bank statement — a line confirming the count and total the statement itself prints on its last page actually match what was read (this catches a corrupted or mis-scanned PDF immediately, before it can cause a bad match later).
 
-> **Where files come from by default:** if a slot is left with no upload, some setups pre-fill it with a bundled sample document so you can try the app immediately. Once you're working with your own data, make sure every slot you care about actually has *your* file attached before clicking Ingest — an empty slot quietly uses whatever sample was pre-filled instead.
+> **An ingestion is exactly the files you attach.** A slot you leave empty (or untick) is skipped — nothing is ever filled in for you, so what lands in the system is only ever the documents you chose. If you attach nothing at all, the Ingest button stays off.
 
 > **Behind the scenes:** "Same bill number and registration reference" is the default rule for recognising a bill you've already seen — it mirrors how a daily export naturally re-lists yesterday's bills alongside new ones. This is configurable per customer. A bill that's already been accepted as a confirmed match is protected: if a later file tries to change one of its numbers, that change is logged as a conflict instead of silently overwriting a settled payment.
 
@@ -208,13 +208,11 @@ Every table on this page has an "Export .xlsx" link at the top, giving you the w
 
 ---
 
-## Browsing raw data: Gold data & Silver data
+## Browsing live data: Gold data
 
-The one pair of screens in the whole app that are **always live** — no run needs to be open, and they reflect this second's true state.
+The screens in the whole app that are **always live** — no run needs to be open, and they reflect this second's true state.
 
-**Gold data** — the translated, unified pool: Bank transactions / Bills / Recoveries / Lineage documents, exactly what the matching engine sees. Every file you've ever ingested is in here together; an "Ingestion" dropdown lets you narrow the view down to one specific upload.
-
-**Silver data** — the raw, as-read version — one row per source file, in that source's *own* column names, before any translation. Useful for confirming exactly what the app saw in your original file if a number in Gold ever looks surprising. This page has no fixed set of columns — it shows whatever fields that particular source's file actually had.
+**Gold data** — the translated, unified pool: Bank transactions / Bills / Recoveries / Lineage documents, exactly what the matching engine sees. Every file you've ever ingested is in here together; an "Ingestion" dropdown narrows the view to one specific upload — and it shows everything that upload *reported*, including bills it refreshed rather than added, so a re-export of bills you already had still shows you its own rows.
 
 ---
 

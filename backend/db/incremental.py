@@ -33,7 +33,7 @@ from recon.rules import MatchRuleSet
 from .audit import record_event
 from .base import SessionLocal
 from .gold import (BANK_MAP, BILLS_MAP, RECOVERIES_MAP, frame_from_gold,
-                   lineage_frame)
+                   lineage_frame, reported_by_file)
 from .models import (ExceptionLedger, GoldBankTxn, GoldBill,
                      GoldRecovery, MatchLedger, MatchLedgerBill, Run)
 
@@ -120,9 +120,12 @@ def build_pool(session, customer_id: int, statement_bronze_id: int) -> dict:
 
     txn_rows = list(session.execute(
         select(GoldBankTxn)
-        .where(GoldBankTxn.bronze_file_id == statement_bronze_id,
+        .where(reported_by_file(session, GoldBankTxn, statement_bronze_id,
+                                customer_id),
                GoldBankTxn.used_in_recon.is_(True))
-        .order_by(GoldBankTxn.row_seq)).scalars())
+        # the statement's credits can span files: one it re-reports is
+        # owned by the earlier statement it first arrived on
+        .order_by(GoldBankTxn.bronze_file_id, GoldBankTxn.row_seq)).scalars())
     seen = {r.id for r in txn_rows}
     carried = [r for r in session.execute(
         select(GoldBankTxn)

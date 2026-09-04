@@ -335,6 +335,96 @@ def test_xls_adapter_selfcheck(tmp_path):
     assert adapter.selfcheck(gold, path, {})["parsed_count"] == 1
 
 
+# --- the column list is a moving target ---------------------------------
+# This export already changed shape once. A future one that adds or drops
+# a column must keep ingesting: only REQUIRED_HEADERS are load-bearing.
+
+def test_an_added_column_reaches_silver_under_its_own_header(tmp_path):
+    """A column IREPS adds that no map knows: extracted anyway, named by
+    the header text the source itself wrote."""
+    headers = HEADERS + ["UTR No", "Payment Date"]
+    wb, ws, path = workbook(tmp_path, headers=headers)
+    write_row(ws, 2, {**ROW, "UTR No": "HSBCN26073100123",
+                      "Payment Date": pd.Timestamp("2026-07-31").to_pydatetime()},
+              headers=headers)
+    df = parse_bill_status(save(wb, path))
+
+    assert df.iloc[0]["UTR No"] == "HSBCN26073100123"
+    assert df.iloc[0]["Payment Date"] == datetime.datetime(2026, 7, 31)
+    # the known columns are unaffected by the newcomers
+    assert df.iloc[0]["BillNumber"] == "1331000197"
+    assert df.iloc[0]["NetAmt"] == 359243
+
+
+def test_an_added_column_rides_through_to_gold_extras(tmp_path):
+    """...and reaches gold without an adapter change: unmapped columns
+    survive to_gold, which is what puts them in gold.bills.extras."""
+    headers = HEADERS + ["UTR No"]
+    wb, ws, path = workbook(tmp_path, headers=headers)
+    write_row(ws, 2, {**ROW, "UTR No": "HSBCN26073100123"}, headers=headers)
+    path = save(wb, path)
+
+    adapter = get_adapter("bill_status", "ireps")
+    gold = adapter.to_gold(adapter.parse(path, {}), {})["bills"]
+    assert gold.iloc[0]["UTR No"] == "HSBCN26073100123"
+    assert gold.iloc[0]["net_payable_amount"] == 359243
+
+
+def test_a_dropped_optional_column_still_parses(tmp_path):
+    """An export that stops sending 'Accounting Unit' / 'Reason For
+    Return' parses fine — those fields simply come back empty."""
+    headers = [h for h in HEADERS
+               if h not in ("Accounting Unit", "Reason For Return")]
+    wb, ws, path = workbook(tmp_path, headers=headers)
+    write_row(ws, 2, headers=headers)
+    df = parse_bill_status(save(wb, path))
+
+    assert len(df) == 1
+    assert pd.isna(df.iloc[0]["AccountingUnit"])
+    assert pd.isna(df.iloc[0]["ReasonForReturn"])
+    assert df.iloc[0]["BillNumber"] == "1331000197"
+    # and the gold transform still runs over the NA-filled columns
+    adapter = get_adapter("bill_status", "ireps")
+    gold = adapter.to_gold(adapter.parse(save(wb, path), {}), {})["bills"]
+    assert pd.isna(gold.iloc[0]["org_unit"])
+    assert gold.iloc[0]["recovery_count"] == 2
+
+
+def test_a_missing_required_column_fails_loud_and_names_it(tmp_path):
+    """Dropping a load-bearing column is NOT tolerated — a bill with no
+    net amount cannot be reconciled, so the upload must fail, saying so."""
+    headers = [h for h in HEADERS if h != "Net Amt"]
+    wb, ws, path = workbook(tmp_path, headers=headers)
+    write_row(ws, 2, headers=headers)
+
+    with pytest.raises(BillStatusFormatError) as err:
+        parse_bill_status(save(wb, path))
+    assert "Net Amt" in str(err.value)
+
+
+def test_sheets_with_different_extra_columns_share_one_frame(tmp_path):
+    """Two sheets, each with its own added column: every row keeps its
+    own value and misses the other's."""
+    wb = openpyxl.Workbook()
+    first = wb.active
+    first.title = "Friction"
+    second = wb.create_sheet("Hosur")
+    for ws, extra, bill in ((first, "UTR No", "F1"), (second, "Batch", "H1")):
+        headers = HEADERS + [extra]
+        for i, h in enumerate(headers):
+            ws.cell(row=1, column=1 + i, value=h)
+        write_row(ws, 2, {**ROW, "Bill Number": bill, extra: f"{extra}-val"},
+                  headers=headers)
+    df = parse_bill_status(save(wb, tmp_path / "two_sheets.xlsx"))
+
+    assert set(df["BillNumber"]) == {"F1", "H1"}
+    by_bill = df.set_index("BillNumber")
+    assert by_bill.loc["F1", "UTR No"] == "UTR No-val"
+    assert by_bill.loc["H1", "Batch"] == "Batch-val"
+    assert pd.isna(by_bill.loc["F1", "Batch"])
+    assert pd.isna(by_bill.loc["H1", "UTR No"])
+
+
 # --- Test 10 — invalid file --------------------------------------------
 
 def test_missing_required_columns_raises(tmp_path):

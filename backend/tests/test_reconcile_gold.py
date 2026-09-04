@@ -26,7 +26,8 @@ from db import SessionLocal, init_db, reconcile_gold  # noqa: E402
 from db.bronze import register_file  # noqa: E402
 from db.ingest import ingest_gold_frames  # noqa: E402
 from db.models import (AuditLog, BronzeFile, Customer, GoldBankTxn,  # noqa: E402
-                       GoldBill, GoldLineageDoc, GoldRecovery, SilverRecord)
+                       GoldBill, GoldFileRow, GoldLineageDoc, GoldRecovery,
+                       SilverRecord)
 from db.storage import storage  # noqa: E402
 from recon import MatchRuleSet, run_pipeline  # noqa: E402
 from recon.sources import get_adapter  # noqa: E402
@@ -79,7 +80,8 @@ def world():
            "params": params}
 
     with SessionLocal() as s:
-        for model in (AuditLog, GoldRecovery, GoldBill, GoldBankTxn,
+        for model in (AuditLog, GoldFileRow, GoldRecovery, GoldBill,
+                      GoldBankTxn,
                       GoldLineageDoc, SilverRecord, BronzeFile):
             s.execute(delete(model).where(model.customer_id == customer_pk))
         s.execute(delete(Customer).where(Customer.id == customer_pk))

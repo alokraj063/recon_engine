@@ -29,7 +29,8 @@ from db import SessionLocal, init_db  # noqa: E402
 from db.bronze import register_file  # noqa: E402
 from db.ingest import ingest_gold_frames  # noqa: E402
 from db.models import (AuditLog, BronzeFile, Customer, GoldBankTxn,  # noqa: E402
-                       GoldBill, GoldLineageDoc, GoldRecovery, SilverRecord)
+                       GoldBill, GoldFileRow, GoldLineageDoc, GoldRecovery,
+                       SilverRecord)
 from db.storage import storage  # noqa: E402
 from recon.gold import ensure_schema  # noqa: E402
 
@@ -57,7 +58,8 @@ def customer(tmp_path):
         pk, ckey = c.id, c.key
     yield {"pk": pk, "bronze": ids}
     with SessionLocal() as s:
-        for model in (AuditLog, GoldRecovery, GoldBill, GoldBankTxn,
+        for model in (AuditLog, GoldFileRow, GoldRecovery, GoldBill,
+                      GoldBankTxn,
                      GoldLineageDoc, SilverRecord, BronzeFile):
             s.execute(delete(model).where(model.customer_id == pk))
         s.execute(delete(Customer).where(Customer.id == pk))

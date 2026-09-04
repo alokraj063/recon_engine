@@ -1365,11 +1365,6 @@ tr.active-run td { background: rgba(44, 115, 80, 0.06); }
   border-radius: 999px;
   white-space: nowrap;
 }
-.slot-badge.default {
-  color: var(--ink-faint);
-  border: 1px solid var(--rule-strong);
-  background: var(--paper);
-}
 .slot-badge.upload {
   color: var(--green);
   border: 1px solid var(--green);
