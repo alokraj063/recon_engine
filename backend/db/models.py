@@ -229,7 +229,9 @@ class GoldBill(Base):
     recovery_sum: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     net_check: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     recovery_check: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    sheet: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Friction / Rohtak / Hosur, derived from vendor_code by the adapter
+    # (was `sheet`, the worksheet name, until migration a9e4d7c2b301)
+    operating_unit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     header_row: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     data_row: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     extras: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
@@ -254,7 +256,7 @@ class GoldRecovery(Base):
     gold_bill_id: Mapped[Optional[str]] = mapped_column(ForeignKey("gold.bills.id"), nullable=True, index=True)
     bill_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     submission_ref: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    sheet: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    operating_unit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     recovery_head: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     recovery_amt: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     recovery_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -296,6 +298,47 @@ class GoldLineageDoc(Base):
     invoice_date: Mapped[Optional[datetime]] = mapped_column(Date, nullable=True)
     bill_reg_date: Mapped[Optional[datetime]] = mapped_column(Date, nullable=True)
     extras: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
+
+
+class GoldFileRow(Base):
+    """Which gold rows a bronze file REPORTED — the many-to-many between
+    ingested files and the entity rows they carry.
+
+    Gold rows are ENTITIES, not file rows: the entity upsert means a bill
+    first seen in Monday's export and re-reported by Tuesday's stays ONE
+    row, still stamped with Monday's bronze_file_id. Without this table
+    Tuesday's upload owns nothing, so "show me what I just ingested"
+    answers "nothing" — the file is missing from the ingestion filters and
+    a statement whose credits all deduped can't even be picked to
+    reconcile. One row here per (file, gold row) says "this file reported
+    this entity", whether it inserted it, updated it, or matched it
+    unchanged.
+
+    Written only by db/ingest.py, the ingestion-owned path every route
+    uses. A per-RUN writer (db/gold.py persist_gold) must never record
+    sightings: it re-inserts a fresh gold row per run for the same file
+    row, which collides on the uniqueness below. Rows ingested before this
+    table existed have no sightings at all — readers fall back to plain
+    bronze_file_id ownership for those (db/gold.py reported_by_file).
+    """
+    __tablename__ = "file_rows"
+    __table_args__ = (
+        Index("uq_file_rows_file_frame_seq",
+              "bronze_file_id", "frame", "row_seq", unique=True),
+        {"schema": "gold"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    bronze_file_id: Mapped[int] = mapped_column(ForeignKey("bronze.files.id"), index=True)
+    # the INGEST frame name (bills / recoveries / bank_txns / lineage_<slot>),
+    # so a file's own parse order stays readable per frame
+    frame: Mapped[str] = mapped_column(String(64))
+    # the gold row's uuid. Deliberately no FK: one table serves every gold
+    # frame, and uuids are unique across all of them
+    gold_row_id: Mapped[str] = mapped_column(String(32), index=True)
+    row_seq: Mapped[int] = mapped_column(Integer)
+    seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # --- runs --------------------------------------------------------------

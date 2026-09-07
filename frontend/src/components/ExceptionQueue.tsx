@@ -113,10 +113,13 @@ function buildColumns(rows: Row[]): ColumnDef<Row>[] {
   }))
 }
 
-export function ExceptionQueue({ rows, onOpenInQueue, primaryRunId }: {
+export function ExceptionQueue({ rows, onOpenInQueue, primaryRunId, emptyNote }: {
   rows: Row[]
   onOpenInQueue?: (matchLedgerId: string | null) => void
   primaryRunId?: string | null
+  /** why the WHOLE queue is empty (the run raised no exceptions) — a
+   *  segment with nothing in it gets its own note below */
+  emptyNote?: React.ReactNode
 }) {
   const [side, setSide] = useState<Side>('ALL')
   const columns = useMemo(() => buildColumns(rows), [rows])
@@ -139,6 +142,12 @@ export function ExceptionQueue({ rows, onOpenInQueue, primaryRunId }: {
       columns={columns}
       numericIds={AMOUNT_COLS}
       toolbar={seg}
+      emptyNote={rows.length === 0 ? emptyNote : (
+        <p className="frame-note">
+          no {side.replace(/_/g, ' ')} exceptions in this run —{' '}
+          <button className="link-btn" onClick={() => setSide('ALL')}>show all</button>
+        </p>
+      )}
       renderDetail={(row) => (
         <Detail row={row} onOpenInQueue={onOpenInQueue} primaryRunId={primaryRunId} />
       )}

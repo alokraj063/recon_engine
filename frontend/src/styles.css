@@ -492,6 +492,12 @@ table.data td.date, .ledger td.date {
 
 .table-tools .row-count { font-size: var(--fs-note); color: var(--ink-faint); margin-left: auto; }
 
+/* a result table with nothing in it: a note in place of the bordered box */
+.table-empty { padding: 4px 0 8px; }
+.table-empty-note { display: block; }
+.table-empty-note p { margin: 0 0 6px; }
+.table-empty-note strong { font-style: normal; font-weight: 600; color: var(--ink); }
+
 .seg { display: inline-flex; border: 1px solid var(--rule-strong); }
 
 .seg button {
@@ -998,6 +1004,124 @@ th.th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
   margin: 0 0 16px;
 }
 
+/* what an ingestion did to gold, one line per entity kind
+   (IngestStatsSummary) */
+.ingest-kinds { display: flex; flex-direction: column; gap: 8px; margin: 0 0 16px; }
+.ingest-kinds .stat-chips { margin: 0; }
+.ingest-kind { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.ingest-kind-title {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  min-width: 150px;
+}
+/* compact mode (All ingestions table): one stat strip per kind —
+   title | headline total | composition bar | dot-labelled parts.
+   The bar is part-to-whole in the EMPHASIS form: new (teal) and updated
+   (blue) are the subject, duplicates are the neutral track, conflicts
+   are a status colour painted only when > 0 and never colour-alone
+   (the part carries an icon + word). */
+.ingest-kinds.compact { gap: 6px; margin: 0; }
+.ingest-strip {
+  display: grid;
+  grid-template-columns: 102px 56px 104px minmax(0, 1fr);
+  align-items: center;
+  gap: 0 10px;
+  min-height: 18px;
+}
+.ingest-strip .ingest-kind-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ingest-total {
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.ingest-total.zero { color: var(--ink-faint); font-weight: 500; }
+.ingest-bar, .ingest-bar-slot {
+  display: flex;
+  height: 8px;
+  gap: 2px;                        /* surface gap between touching segments */
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--paper-card);
+}
+.ingest-bar-seg { display: block; flex: 0 1 0; min-width: 3px; }
+.ingest-bar-seg.seg-inserted { background: var(--green-bright); }
+.ingest-bar-seg.seg-updated { background: var(--blue); }
+.ingest-bar-seg.seg-unchanged { background: var(--rule-strong); }
+.ingest-bar-seg.seg-conflicts { background: var(--sienna); }
+.ingest-bar-seg.seg-empty { flex: 1 1 auto; background: var(--paper-deep); }
+.ingest-parts { display: flex; flex-wrap: wrap; gap: 2px 12px; min-width: 0; }
+.ingest-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-note);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.ingest-part .part-value { font-weight: 600; color: var(--ink); }
+.ingest-part .part-label { color: var(--ink-faint); }
+.ingest-part .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--rule-strong);
+  flex-shrink: 0;
+}
+.ingest-part.part-inserted .dot { background: var(--green-bright); }
+.ingest-part.part-updated .dot { background: var(--blue); }
+.ingest-part.part-unchanged .dot { background: var(--paper-card); box-shadow: inset 0 0 0 1.5px var(--rule-strong); }
+.ingest-part.part-conflicts .dot { background: var(--paper-card); box-shadow: inset 0 0 0 1.5px var(--rule-strong); }
+.ingest-part.zero .part-value { font-weight: 500; color: var(--ink-faint); }
+.ingest-part.zero .dot { opacity: 0.45; }
+.ingest-part.warn, .ingest-part.warn .part-value, .ingest-part.warn .part-label { color: var(--sienna); }
+.ingest-part .part-icon { flex-shrink: 0; }
+
+/* the All ingestions table itself */
+table.ledger.ingestions { table-layout: fixed; min-width: 900px; }
+.ingestions .col-when { width: 108px; }
+.ingestions .col-files { width: 30%; }
+.ingestions .col-check { width: 104px; }
+.ledger td.when-cell { white-space: nowrap; vertical-align: top; padding-top: 9px; }
+.ledger td.gold-cell, .ledger td.check-cell { vertical-align: top; padding-top: 8px; }
+.ledger td.files-cell { vertical-align: top; }
+.ledger td.files-cell .file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 0 4px 4px 0;
+  vertical-align: top;
+}
+.file-chip .file-chip-role {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  flex-shrink: 0;
+}
+.file-chip .file-chip-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.file-chip .file-chip-outcome {
+  color: var(--ink-faint);
+  font-weight: 400;
+  flex-shrink: 0;
+}
+.file-chip.chip-settled .file-chip-role,
+.file-chip.chip-settled .file-chip-outcome { color: var(--green-bright); }
+.file-chip.chip-settled .file-chip-outcome { font-weight: 600; }
+.files-all-dup {
+  display: block;
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+  font-style: italic;
+  margin-top: 1px;
+}
+
 .run-context {
   display: flex;
   gap: 20px;
@@ -1365,11 +1489,6 @@ tr.active-run td { background: rgba(44, 115, 80, 0.06); }
   border-radius: 999px;
   white-space: nowrap;
 }
-.slot-badge.default {
-  color: var(--ink-faint);
-  border: 1px solid var(--rule-strong);
-  background: var(--paper);
-}
 .slot-badge.upload {
   color: var(--green);
   border: 1px solid var(--green);
@@ -1471,6 +1590,50 @@ tr.active-run td { background: rgba(44, 115, 80, 0.06); }
   color: var(--ink-faint);
 }
 .run-picker-outside { color: var(--sienna); }
+
+/* run-date range inside the picker / filter panels */
+.run-picker-dates {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 12px 8px;
+  font-size: var(--fs-note);
+}
+.run-picker-dates label { display: inline-flex; align-items: center; gap: 5px; }
+.run-picker-dates input[type='date'],
+.runs-filter-dates input[type='date'] {
+  font-family: var(--font-mono);
+  font-size: var(--fs-note);
+  padding: 3px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+  background: var(--paper-card);
+  color: var(--ink);
+}
+.run-picker-dates .link-btn { font-size: var(--fs-label); }
+
+/* the workspace run FILTER (narrows rows; empty = all runs) */
+.run-filter .run-picker-btn.on { border-color: var(--green-bright); color: var(--green-bright); }
+.run-picker-foot .link-btn { font-size: var(--fs-label); }
+.run-cell {
+  font-family: var(--font-mono);
+  font-size: var(--fs-note);
+  white-space: nowrap;
+  color: var(--ink-soft);
+}
+
+/* Runs inset filter bar */
+.runs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.runs-filter-dates { display: inline-flex; align-items: center; gap: 6px; }
+
+/* result / run-data nav with no run loaded: reachable, quietly muted */
+.nav-item-idle:not(.active) { opacity: 0.75; }
 
 /* --- command center ----------------------------------------------------- */
 

@@ -9,6 +9,10 @@
 export interface FramePreset {
   curated: Array<[string, string]>
   hidden: string[]
+  /** categorical columns that get a value dropdown in the GoldTable
+   *  toolbar — [column key, toolbar label]; options are derived from the
+   *  fetched rows, so only low-cardinality columns belong here */
+  facets?: Array<[string, string]>
 }
 
 export const SHARED_PRESETS: Record<'bank' | 'bills' | 'recoveries' | 'lineage', FramePreset> = {
@@ -46,18 +50,19 @@ export const SHARED_PRESETS: Record<'bank' | 'bills' | 'recoveries' | 'lineage',
       ['return_reason', 'Reason for return'],
       ['net_check', 'Net ✓'],
       ['recovery_check', 'Recov ✓'],
-      ['sheet', 'Sheet'],
+      ['operating_unit', 'Operating unit'],
       ['data_row', 'Row'],
     ],
     hidden: ['vendor_name', 'vendor_code', 'unparsed_header', 'header_row',
              'recoveries', 'recovery_sum', 'org_unit', 'contract_date',
              'bronze_file_id', 'row_seq'],
+    facets: [['bill_status', 'Status'], ['zone', 'Zone'], ['operating_unit', 'Operating unit']],
   },
   recoveries: {
     curated: [
       ['bill_number', 'Bill no.'],
       ['submission_ref', 'Submission ref'],
-      ['sheet', 'Sheet'],
+      ['operating_unit', 'Operating unit'],
       ['recovery_head', 'Recovery head'],
       ['recovery_amt', 'Amount'],
       ['recovery_text', 'Raw text'],

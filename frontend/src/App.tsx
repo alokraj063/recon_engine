@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Download } from 'lucide-react'
 import { fetchCustomers, fetchRun, fetchRuns, reconcileFromGold, workbookUrl } from './api'
 import {
@@ -35,7 +35,8 @@ const GOLD_VIEWS: Record<string, GoldFrameName> = {
 
 const VIEW_TITLES: Record<
   Exclude<View, 'command' | 'ingest' | 'reconcile' | 'ledger' | 'ar' | 'audit'
-    | 'architecture' | 'gold_bank' | 'gold_bills' | 'gold_recoveries' | 'gold_lineage'>,
+    | 'architecture' | 'gold_bank' | 'gold_bills' | 'gold_recoveries'
+    | 'gold_lineage'>,
   string
 > = {
   summary: 'Summary',
@@ -173,8 +174,11 @@ export default function App() {
   const setCustomerId = (key: string) => {
     if (key !== customerId) {
       // a selection belongs to one customer's run history; the hash-sync
-      // effect drops the run part once the selection clears
+      // effect drops the run part once the selection clears. The run list
+      // is cleared too, so the auto-load below can never pick the OLD
+      // customer's latest run while the new list is still in flight.
       setSelectedRuns(null)
+      setRunList([])
     }
     setCustomerIdState(key)
     localStorage.setItem(CUSTOMER_KEY, key)
@@ -216,10 +220,9 @@ export default function App() {
     [labelFor],
   )
 
-  const openRun = async (runId: string) => {
-    await applySelection([runId])
-    setView(payloadCache.has(runId) ? 'summary' : 'reconcile')
-  }
+  // true while a hash-named selection is still being restored, so the
+  // latest-run auto-load below does not race it
+  const hashRestore = useRef(!!(parseHash().run || parseHash().runs))
 
   useEffect(() => {
     fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})
@@ -234,15 +237,31 @@ export default function App() {
           const ids = resolveRunsParam(runs, list)
           if (ids.length) await applySelection(ids)
         } catch { /* run list unavailable; empty state guides the user */ }
+        hashRestore.current = false
       })()
     } else if (run) {
       void (async () => {
         await applySelection([run])
+        hashRestore.current = false
         if (!payloadCache.has(run)) setView('reconcile')  // restore failed
       })()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // A result view opened with nothing loaded shows the LATEST run rather
+  // than a dead end — the picker in its header then switches runs. One
+  // attempt per run id: a run that fails to load must not be retried
+  // forever (the empty state + error banner take over).
+  const autoLoadTried = useRef<string | null>(null)
+  useEffect(() => {
+    if (selectedRuns || restoring || hashRestore.current) return
+    if (!FILTERED_VIEWS.has(view) && !FRAME_VIEWS.includes(view as FrameName)) return
+    const latest = runList[0]?.run_id
+    if (!latest || autoLoadTried.current === latest) return
+    autoLoadTried.current = latest
+    void applySelection([latest])
+  }, [view, selectedRuns, restoring, runList, applySelection])
 
   // hash <- state: the single writer. Guarded so applying a hash the
   // user navigated to (back/forward) never re-writes an identical value;
@@ -352,11 +371,71 @@ export default function App() {
         : primary)
     : null
 
+  // Why a result table is empty, in the run's own terms — composed here
+  // because only App holds the mode + (selection-aggregated) counts.
+  const runScope = multi && selectedRuns
+    ? `across the ${selectedRuns.length} selected runs`
+    : `in this ${primary?.meta.mode ?? ''} run`.replace('  ', ' ')
+  const counts = displayResult?.meta.counts
+  const openExceptions = counts
+    ? counts.bank_only + counts.bill_only + (counts.match_review ?? 0) : 0
+  const matchedEmptyNote = (
+    <div className="frame-note table-empty-note">
+      <p><strong>No matched reconciliations {runScope}.</strong></p>
+      {primary?.meta.mode === 'incremental' && (
+        <p>
+          Credits and bills locked by an earlier run never re-enter the matching pool, so a
+          statement that was already reconciled matches nothing new — that is expected, not a
+          failure.
+        </p>
+      )}
+      {counts && openExceptions > 0 && (
+        <p>
+          {counts.bank_only} bank-only and {counts.bill_only} bill-only exception
+          {counts.bank_only + counts.bill_only === 1 ? '' : 's'} went to the{' '}
+          <button className="link-btn" onClick={() => setView('exceptions')}>Exception queue</button>.
+        </p>
+      )}
+    </div>
+  )
+  const exceptionsEmptyNote = (
+    <div className="frame-note table-empty-note">
+      <p><strong>No exceptions {runScope}.</strong></p>
+      <p>
+        Every credit on the statement found its bill and every advised bill found its credit.
+        {counts && counts.matched > 0 && (
+          <>
+            {' '}See the {counts.matched} matched row{counts.matched === 1 ? '' : 's'} under{' '}
+            <button className="link-btn" onClick={() => setView('matched')}>Matched</button>.
+          </>
+        )}
+      </p>
+    </div>
+  )
+
   return (
     <div className="layout">
       <Sidebar view={view} onNavigate={setView} result={displayResult} />
 
       <main className="content">
+        {/* Always mounted, never destroyed by a view switch — unlike every
+            other view below (deliberately remounted via key={view} for the
+            entrance animation), the Ingest form holds file selections and
+            per-slot state that a browser can never restore once lost, so
+            navigating away and back must not unmount it. Visibility is
+            CSS-only (`hidden`), not conditional rendering. */}
+        <div hidden={view !== 'ingest'}>
+          <IngestForm
+            customers={customers}
+            customerId={customerId}
+            onCustomerChange={setCustomerId}
+            onCustomersChanged={() =>
+              fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})}
+            onIngested={onIngested}
+          />
+          {restoring && <p className="footer-note">Restoring run…</p>}
+        </div>
+
         {/* keyed on the view so every navigation replays the entrance */}
         <div key={view} className="view-enter">
         {view === 'command' && (
@@ -367,20 +446,6 @@ export default function App() {
             onNavigate={setView}
             refreshKey={ingestEpoch + (selectedRuns?.length ?? 0)}
           />
-        )}
-
-        {view === 'ingest' && (
-          <>
-            <IngestForm
-              customers={customers}
-              customerId={customerId}
-              onCustomerChange={setCustomerId}
-              onCustomersChanged={() =>
-                fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})}
-              onIngested={onIngested}
-            />
-            {restoring && <p className="footer-note">Restoring run…</p>}
-          </>
         )}
 
         {view === 'reconcile' && (
@@ -408,8 +473,6 @@ export default function App() {
             customerId={customerId}
             focusId={ledgerFocus}
             onFocusHandled={() => setLedgerFocus(null)}
-            activeRunId={primary?.run_id ?? null}
-            onOpenRun={openRun}
           />
         )}
 
@@ -462,10 +525,11 @@ export default function App() {
             <p className="footer-note">Restoring run…</p>
           ) : (
             <div className="view-card empty-state">
-              <h3>No run loaded</h3>
+              <h3>{runList.length ? 'No run loaded' : 'No runs yet'}</h3>
               <p>
-                This view shows a reconciliation result. Run one now, or reopen
-                a past run.
+                {runList.length
+                  ? 'This view shows a reconciliation result. Pick a past run, or run a new one.'
+                  : 'This view shows a reconciliation result. Ingest files, then run a reconciliation for this customer.'}
               </p>
               <div className="empty-state-actions">
                 <button className="btn-run" onClick={() => setView('reconcile')}>
@@ -534,10 +598,13 @@ export default function App() {
                     : undefined}
                 />
               )}
-              {view === 'matched' && <MatchedTable rows={matchedRows} />}
+              {view === 'matched' && (
+                <MatchedTable rows={matchedRows} emptyNote={matchedEmptyNote} />
+              )}
               {view === 'exceptions' && (
                 <ExceptionQueue
                   rows={exceptionRows}
+                  emptyNote={exceptionsEmptyNote}
                   primaryRunId={primary?.run_id ?? null}
                   onOpenInQueue={(id) => {
                     setLedgerFocus(id)

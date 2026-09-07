@@ -33,7 +33,7 @@ class IrepsRnoteAdapter(SourceAdapter):
     adapter_key = "ireps_rnote"
     label = "IREPS RNOTE report"
     system = "IREPS"
-    file_kinds = (".xlsx", ".xlsm")
+    file_kinds = (".xlsx", ".xlsm", ".xls")
 
     def parse(self, path, params: dict) -> SilverResult:
         # `sheet` finally reachable from config (the CLI never exposed it)

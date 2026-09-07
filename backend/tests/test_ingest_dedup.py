@@ -25,7 +25,7 @@ from db import SessionLocal, init_db  # noqa: E402
 from db.bronze import register_file  # noqa: E402
 from db.ingest import ingest_gold_frames  # noqa: E402
 from db.models import (AuditLog, BronzeFile, Customer, GoldBankTxn,  # noqa: E402
-                       SilverRecord)
+                       GoldFileRow, SilverRecord)
 from db.storage import storage  # noqa: E402
 from recon.gold import ensure_schema  # noqa: E402
 
@@ -64,7 +64,8 @@ def customer(tmp_path):
         pk, ckey = c.id, c.key
     yield {"pk": pk, "bronze": ids}
     with SessionLocal() as s:
-        for model in (AuditLog, GoldBankTxn, SilverRecord, BronzeFile):
+        for model in (AuditLog, GoldFileRow, GoldBankTxn, SilverRecord,
+                      BronzeFile):
             s.execute(delete(model).where(model.customer_id == pk))
         s.execute(delete(Customer).where(Customer.id == pk))
         s.commit()
@@ -90,6 +91,15 @@ def test_same_txns_in_different_files_dedup(customer):
     assert stats2["rows_reused"] == 2
     # and the returned ids map still resolves every incoming row
     assert len(ids2["bank_txns"]) == 2
+    # a statement-only ingest breaks down as bank transactions ONLY — no
+    # bills entry for the UI to render "bills updated 0" from
+    assert set(stats1["by_frame"]) == set(stats2["by_frame"]) == {"bank_txns"}
+    assert stats1["by_frame"]["bank_txns"] == {
+        "reported": 2, "inserted": 2, "updated": 0, "unchanged": 0,
+        "conflicts": 0}
+    assert stats2["by_frame"]["bank_txns"] == {
+        "reported": 2, "inserted": 0, "updated": 0, "unchanged": 2,
+        "conflicts": 0}
 
     with SessionLocal() as s:
         total = s.execute(select(func.count()).select_from(GoldBankTxn)

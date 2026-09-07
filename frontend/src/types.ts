@@ -30,12 +30,32 @@ export interface Selfcheck {
   passed?: boolean
 }
 
+/** One gold frame's share of an ingestion: how many rows it carried
+ *  (reported) and what became of each — new, updated in place, already
+ *  in gold (not added), or a refused change to a LOCKED bill. */
+export interface FrameIngestStats {
+  reported: number
+  inserted: number
+  updated: number
+  unchanged: number
+  conflicts: number
+}
+
 export interface IngestStats {
   files_reused: number
   rows_inserted: number
   bills_updated: number
   rows_reused: number
   conflicts: number
+  /** rows the upload CARRIED into gold — new, updated and unchanged
+   *  alike. The one number that is never 0 for a real file, so "my
+   *  export landed" has an answer even when it inserted nothing.
+   *  Optional: ingestions recorded before this stat existed lack it. */
+  rows_reported?: number
+  /** the same counts per gold frame — bank_txns | bills | recoveries |
+   *  lineage_<slot> — so the UI can say "new bills" vs "new
+   *  transactions". Optional: older ingestions lack it. */
+  by_frame?: Record<string, FrameIngestStats>
 }
 
 export interface LedgerStats {
@@ -82,14 +102,6 @@ export interface ReconResponse {
 
 /** Source frames a completed run exposes via /api/runs/{id}/frames/{name}. */
 export type FrameName = 'bank' | 'bills' | 'bills_enriched' | 'recoveries'
-
-export interface DefaultFileInfo {
-  name: string
-  size: number
-}
-
-/** Repo sample document backing each field when nothing is uploaded. */
-export type Defaults = Record<'statement' | 'bills' | 'rnote' | 'crn', DefaultFileInfo | null>
 
 export class ApiError extends Error {
   code: string
@@ -274,6 +286,9 @@ export interface ArRow {
   match_ledger_id: string | null
   match_seq: number | null
   exception_id: string | null
+  /** run that produced the row: the match's run for settled / in-review,
+   *  the exception's first-seen run for outstanding */
+  run_id: string | null
 }
 
 export interface ArView {

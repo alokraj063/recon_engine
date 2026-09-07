@@ -34,7 +34,7 @@ export const CANDIDATE_LABELS: Array<[string, string]> = [
   ['DRR_or_Challan', 'DRR / challan'],
   ['Bill_Reg_No', 'Bill reg no'],
   ['return_reason', 'Reason for return'],
-  ['sheet', 'Export sheet'],
+  ['operating_unit', 'Operating unit'],
   ['data_row', 'Export row'],
 ]
 

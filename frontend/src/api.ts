@@ -6,7 +6,6 @@ import {
   type CustomerConfig,
   type CustomerInfo,
   type CustomerRules,
-  type Defaults,
   type FrameName,
   type GoldFileInfo,
   type GoldFrameName,
@@ -67,32 +66,24 @@ async function getJson<T>(url: string): Promise<T> {
   return res.json()
 }
 
-/** Which bundled default document backs each field when nothing is
- *  uploaded. Defaults back the default customer only — other customers
- *  get nulls. */
-export async function fetchDefaults(customerId: string): Promise<Defaults> {
-  return getJson(`/api/defaults?customer_id=${encodeURIComponent(customerId)}`)
-}
-
-/** POST the chosen files for ingestion (bronze -> silver -> gold);
- *  fields left null fall back to the bundled default documents server-side. */
+/** POST the chosen files for ingestion (bronze -> silver -> gold). The
+ *  ingestion is exactly these files: a slot with no file is not part of
+ *  it, and nothing is ever substituted server-side. */
 export async function ingestFiles(
   files: UploadFiles,
   customerId: string,
-  slots: string[],
   extraFiles?: Record<string, File | null>,
 ): Promise<IngestResponse> {
   const form = new FormData()
   for (const field of ['statement', 'bills', 'rnote', 'crn'] as const) {
     const f = files[field]
-    if (f && slots.includes(field)) form.append(field, f)
+    if (f) form.append(field, f)
   }
   // extra lineage slots upload under their slot key (source_type)
   for (const [slot, f] of Object.entries(extraFiles ?? {})) {
-    if (f && slots.includes(slot)) form.append(slot, f)
+    if (f) form.append(slot, f)
   }
   form.append('customer_id', customerId)
-  form.append('slots', slots.join(','))
 
   let res: Response
   try {

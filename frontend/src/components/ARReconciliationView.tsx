@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RotateCw } from 'lucide-react'
-import type { ArRow, ArStatus, ArView } from '../types'
-import { fetchAr } from '../api'
+import type { ArRow, ArStatus, ArView, RunListItem } from '../types'
+import { fetchAr, fetchRuns } from '../api'
 import { inr } from '../format'
 import { FitText } from './FitText'
+import {
+  EMPTY_RUN_FILTER, RunFilter, runFilterSet, runLabelFor, type RunFilterValue,
+} from './RunFilter'
 
 interface Props {
   customerId: string
@@ -40,21 +43,31 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
   const [data, setData] = useState<ArView | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('ALL')
+  const [runs, setRuns] = useState<RunListItem[]>([])
+  const [runFilter, setRunFilter] = useState<RunFilterValue>(EMPTY_RUN_FILTER)
 
   const load = useCallback(() => {
     setError(null)
     fetchAr(customerId)
       .then(setData)
       .catch((e) => setError(String(e.message ?? e)))
+    fetchRuns(customerId, 200).then(setRuns).catch(() => setRuns([]))
   }, [customerId])
 
   useEffect(load, [load, refreshKey])
+  useEffect(() => setRunFilter(EMPTY_RUN_FILTER), [customerId])
 
-  const rows = (data?.rows ?? []).filter(
-    (r) => filter === 'ALL' || r.status === filter)
+  const runSet = useMemo(() => runFilterSet(runFilter, runs), [runFilter, runs])
+  // the run filter narrows the working set (table + status breakdown);
+  // the KPI tiles and aging bars stay whole-customer — they are the live
+  // AR position, not a per-run figure
+  const inScope = (data?.rows ?? []).filter(
+    (r) => !runSet || (!!r.run_id && runSet.has(r.run_id)))
+  const rows = inScope.filter((r) => filter === 'ALL' || r.status === filter)
   const agingMax = Math.max(1, ...(data?.aging ?? []).map((b) => b.value))
-  const statusCounts = (data?.rows ?? []).reduce<Record<string, number>>(
+  const statusCounts = inScope.reduce<Record<string, number>>(
     (acc, r) => ({ ...acc, [r.status]: (acc[r.status] ?? 0) + 1 }), {})
+  const runNote = data && runSet ? `${inScope.length} of ${data.rows.length} bills` : undefined
 
   const rowClick = (r: ArRow) => {
     if (r.match_ledger_id) onOpenInQueue(r.match_ledger_id)
@@ -70,9 +83,15 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
             {data && ` · as of ${data.as_of}`}
           </p>
         </div>
-        <button className="btn-refresh btn-ic" onClick={load}>
-          <RotateCw size={13} strokeWidth={1.75} /> refresh
-        </button>
+        <span className="file-note">
+          <button className="btn-refresh btn-ic" onClick={load}>
+            <RotateCw size={13} strokeWidth={1.75} /> refresh
+          </button>
+          {runs.length > 0 && (
+            <RunFilter runs={runs} value={runFilter} onChange={setRunFilter}
+                       note={runNote} />
+          )}
+        </span>
       </div>
 
       {error && <p className="frame-note">could not load AR view: {error}</p>}
@@ -114,7 +133,10 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
           <div className="ar-grid">
             <div className="cc-panel">
               <div className="cc-panel-head">
-                <h3 className="ledger-h">Bills ↔ payments</h3>
+                <h3 className="ledger-h">
+                  Bills ↔ payments
+                  {runSet && <span className="chip-note"> {runNote}</span>}
+                </h3>
                 <span className="seg">
                   {FILTERS.map(([f, label]) => (
                     <button key={f} className={filter === f ? 'on' : ''}
@@ -125,7 +147,9 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
                 </span>
               </div>
               {rows.length === 0 ? (
-                <p className="frame-note">nothing with this status</p>
+                <p className="frame-note">
+                  nothing with this status{runSet ? ' for the selected runs' : ''}
+                </p>
               ) : (
                 <div className="ledger-wrap ar-table-wrap">
                   <table className="ledger">
@@ -137,7 +161,7 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
                         <th style={{ textAlign: 'right' }}>Paid amt</th>
                         <th>Value date</th>
                         <th style={{ textAlign: 'right' }}>Variance</th>
-                        <th>Match</th><th>Status</th><th>Age</th>
+                        <th>Match</th><th>Run</th><th>Status</th><th>Age</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -159,6 +183,9 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
                               : <span className="ar-variance">{inr(r.variance)}</span>}
                           </td>
                           <td>{r.match_seq !== null ? `M-${r.match_seq}` : '—'}</td>
+                          <td className="run-cell" title={r.run_id ?? undefined}>
+                            {runLabelFor(runs, r.run_id)}
+                          </td>
                           <td><span className={`stamp stamp-ar-${r.status}`}>
                             {STATUS_LABEL[r.status]}</span></td>
                           <td>

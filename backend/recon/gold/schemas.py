@@ -43,7 +43,7 @@ GOLD_COLUMNS = {
     "bills": [
         "contract_no", "contract_date", "bill_date", "bill_number", "zone",
         "vendor_name", "vendor_code", "payment_advice_date", "org_unit",
-        "unparsed_header", "sheet", "header_row", "submission_ref",
+        "unparsed_header", "operating_unit", "header_row", "submission_ref",
         "submission_date", "bill_status", "gross_amount", "approved_amount",
         "deduction_amount", "net_payable_amount", "payment_order_ref",
         "payment_order_date", "data_row", "recoveries", "recovery_count",
@@ -51,7 +51,7 @@ GOLD_COLUMNS = {
     ],
     # long-format recovery lines; bill_index is positional into bills
     "recoveries": [
-        "bill_index", "bill_number", "submission_ref", "sheet",
+        "bill_index", "bill_number", "submission_ref", "operating_unit",
         "recovery_head", "recovery_amt", "recovery_text",
     ],
     # upstream lineage documents: ONE canonical unified shape whatever

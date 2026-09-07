@@ -64,7 +64,7 @@ export function Sidebar({ view, onNavigate, result }: Props) {
       count: counts ? counts.bank_only + counts.bill_only + (counts.match_review ?? 0) : undefined,
     },
   ]
-  // frozen per-run evidence, disabled until a run is loaded
+  // frozen per-run evidence of the loaded (primary) run
   const runDataItems: NavItem[] = [
     { view: 'bank', label: 'Bank statement', icon: Landmark, count: counts?.bank_txns },
     { view: 'bills', label: 'Bills', icon: ReceiptText, count: counts?.bills },
@@ -78,11 +78,13 @@ export function Sidebar({ view, onNavigate, result }: Props) {
     { view: 'gold_lineage', label: 'Lineage docs', icon: FileStack },
   ]
 
+  // result views are always reachable: with no run loaded they open on
+  // the latest run (App auto-loads it) or, with no runs yet, on a guide
+  // to run one — never a greyed-out item
   const item = ({ view: v, label, icon, count }: NavItem) => (
     <button
       key={v}
-      className={`nav-item${view === v ? ' active' : ''}`}
-      disabled={!result}
+      className={`nav-item${view === v ? ' active' : ''}${result ? '' : ' nav-item-idle'}`}
       onClick={() => onNavigate(v)}
     >
       <span className="nav-main"><NavIcon icon={icon} />{label}</span>
@@ -141,7 +143,10 @@ export function Sidebar({ view, onNavigate, result }: Props) {
             <Download size={14} strokeWidth={1.75} /> Workbook (.xlsx)
           </a>
         ) : (
-          <p className="sidebar-note">Ingest files, then run a reconciliation.</p>
+          <p className="sidebar-note">
+            Ingest files, then run a reconciliation — or open a result view to
+            pick a past run.
+          </p>
         )}
       </div>
     </aside>

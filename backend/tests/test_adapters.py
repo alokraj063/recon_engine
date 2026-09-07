@@ -19,7 +19,13 @@ from recon.sources.ireps_rnote import RNOTE_TO_GOLD  # noqa: E402
 
 
 def test_bills_map_matches_gold_schema():
-    assert set(BILLS_TO_GOLD.values()) == set(GOLD_COLUMNS["bills"])
+    # header_row/unparsed_header were artifacts of the old block-format
+    # export (a free-text header line per bill block, split label by
+    # label); the current tabular export has one ordinary header row for
+    # the whole sheet, so nothing feeds them any more — they come back NA
+    # via ensure_schema, same pattern as lineage's doc_type below.
+    want = set(GOLD_COLUMNS["bills"]) - {"header_row", "unparsed_header"}
+    assert set(BILLS_TO_GOLD.values()) == want
     # a silver name mapping onto itself would mask a missed rename
     assert not set(BILLS_TO_GOLD) & set(GOLD_COLUMNS["bills"])
 
@@ -35,3 +41,17 @@ def test_lineage_maps_match_gold_schema():
     for name, colmap in (("rnote", RNOTE_TO_GOLD), ("crn", CRN_TO_GOLD)):
         assert set(colmap.values()) == want, name
         assert not set(colmap) & set(GOLD_COLUMNS["lineage_docs"]), name
+
+
+def test_operating_unit_derived_from_party_code_suffix():
+    """Silver->Gold rule: the IREPS PartyCode's trailing digits name the
+    operating unit. Unknown / blank codes come back None, never a guess;
+    a numeric cell read back as a float ("...833.0") still resolves."""
+    from recon.sources.ireps_bills import operating_unit_for
+    assert operating_unit_for("MM04:1065309") == "Friction"
+    assert operating_unit_for("XX60828") == "Rohtak"
+    assert operating_unit_for("833") == "Hosur"
+    assert operating_unit_for("12345833.0") == "Hosur"
+    assert operating_unit_for("99999") is None
+    assert operating_unit_for(None) is None
+    assert operating_unit_for(float("nan")) is None

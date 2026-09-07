@@ -2,6 +2,12 @@
 Silver persistence: parsed rows in the source's native shape, one JSON
 payload per row. Rows are keyed by bronze file, so re-running with the
 same bytes never duplicates silver (bronze dedups by sha256 first).
+
+Write-only by design: silver is the audit trail of what each parser
+actually read (source-native names — IREPS PascalCase, RN_*/CR_* — never
+translated to gold), and the layer downstream consumers rebuild frames
+from is GOLD. There is deliberately no silver browse API; a row's journey
+is inspected through the gold tables and the run artifacts.
 """
 
 from typing import Dict, List

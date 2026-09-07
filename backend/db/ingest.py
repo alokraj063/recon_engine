@@ -27,8 +27,9 @@ from logging_setup import get_logger
 from .audit import record_event
 from .gold import (BANK_MAP, BILLS_MAP, LINEAGE_MAP, RECOVERIES_MAP,
                    _coerce, _is_na, _json_clean, _persist_frame)
-from .models import (GoldBankTxn, GoldBill, GoldLineageDoc, GoldRecovery,
-                     IngestConflict, MatchLedger, MatchLedgerBill)
+from .models import (GoldBankTxn, GoldBill, GoldFileRow, GoldLineageDoc,
+                     GoldRecovery, IngestConflict, MatchLedger,
+                     MatchLedgerBill)
 
 logger = get_logger(__name__)
 
@@ -37,7 +38,10 @@ BILL_MUTABLE = ["bill_status", "payment_order_ref", "payment_order_date",
                 "payment_advice_date", "gross_amount", "approved_amount",
                 "deduction_amount", "net_payable_amount", "recovery_count",
                 "recovery_sum", "return_reason", "net_check",
-                "recovery_check", "sheet", "header_row", "data_row"]
+                "recovery_check", "header_row", "data_row"]
+# operating_unit is deliberately NOT mutable: it is derived from
+# vendor_code (immutable identity), so a later export can never move a
+# bill between units
 
 _BLANK_KEYS = {"", "-", "----", "NAN", "NONE"}
 
@@ -76,14 +80,68 @@ def _consumed_bill_ids(session, customer_id, statuses=("LOCKED",)) -> set:
 
 
 def new_stats() -> dict:
+    """Flat accumulator across every frame in the ingestion (the keys the
+    API, tests and every persisted ingestion.completed audit row use) plus
+    `by_frame`: the same counts broken down per gold frame (bank_txns |
+    bills | recoveries | lineage_<slot>), each
+    {reported, inserted, updated, unchanged, conflicts} — what the UI
+    renders per entity kind ("new bills" vs "new transactions")."""
     return {"files_reused": 0, "rows_inserted": 0, "bills_updated": 0,
-            "rows_reused": 0, "conflicts": 0}
+            "rows_reused": 0, "conflicts": 0, "rows_reported": 0,
+            "by_frame": {}}
+
+
+_FLAT_TO_FRAME = {"rows_inserted": "inserted", "bills_updated": "updated",
+                  "rows_reused": "unchanged", "conflicts": "conflicts"}
+
+
+def _frame_delta(before: dict, after: dict) -> dict:
+    """One frame's share of the flat counters: what its _ingest_* call
+    added between the `before` snapshot and now."""
+    return {name: after[flat] - before[flat]
+            for flat, name in _FLAT_TO_FRAME.items()}
+
+
+def _record_sightings(session, customer_id: int, frame: str,
+                      bronze_file_id: int, ids: Dict[int, str]) -> int:
+    """Remember that this file REPORTED these gold rows, whether it
+    inserted them, updated them or matched them unchanged.
+
+    Without this, an export whose entities all already exist leaves no
+    trace in gold and reads as "nothing happened" — see GoldFileRow.
+    Idempotent: replaying the same file adds nothing."""
+    if not ids:
+        return 0
+    seen = set(session.execute(
+        select(GoldFileRow.row_seq)
+        .where(GoldFileRow.bronze_file_id == bronze_file_id,
+               GoldFileRow.frame == frame)).scalars())
+    new = [{"customer_id": customer_id, "bronze_file_id": bronze_file_id,
+            "frame": frame, "gold_row_id": row_id, "row_seq": seq}
+           for seq, row_id in sorted(ids.items()) if seq not in seen]
+    if new:
+        session.bulk_insert_mappings(GoldFileRow, new)
+    return len(new)
 
 
 def _ingest_keyed(session, model, df, colmap, base, key_cols_db,
-                  key_cols_frame, stats) -> Dict[int, str]:
+                  key_cols_frame, stats,
+                  existing_file_rows: Optional[Dict[int, str]] = None
+                  ) -> Dict[int, str]:
     """Generic natural-key ingest: reuse the existing row when the key
-    matches, insert otherwise. No mutation of existing rows."""
+    matches, insert otherwise. No mutation of existing rows.
+
+    A row whose natural key is blank/placeholder (_norm_key -> None)
+    never matches ANY existing row by design — two such rows from two
+    DIFFERENT files really are unrelated and must both land in gold. But
+    that same rule made a re-ingest of the identical bronze file
+    non-idempotent: replaying it would try to insert that row again,
+    hitting the (bronze_file_id, row_seq) uniqueness constraint.
+    `existing_file_rows` ({row_seq: id} already owned by THIS bronze
+    file) catches that specific case: a blank-keyed row already sitting
+    at this row_seq means this exact ingest already ran once, so it's
+    reused instead of reinserted."""
+    existing_file_rows = existing_file_rows or {}
     existing = {}
     for row in session.execute(
             select(model).where(model.customer_id == base["customer_id"])
@@ -99,6 +157,10 @@ def _ingest_keyed(session, model, df, colmap, base, key_cols_db,
         key = tuple(_norm_key(rec.get(c)) for c in key_cols_frame)
         if all(k is not None for k in key) and key in existing:
             ids[seq] = existing[key]
+            stats["rows_reused"] += 1
+            continue
+        if seq in existing_file_rows:
+            ids[seq] = existing_file_rows[seq]
             stats["rows_reused"] += 1
             continue
         to_insert.append(rec)
@@ -119,12 +181,25 @@ DEFAULT_BANK_KEY = ("bank_ref", "value_date", "amount")
 
 
 def _ingest_bills(session, df, base, stats,
-                  key_cols=DEFAULT_BILL_KEY) -> Tuple[Dict[int, str], set]:
+                  key_cols=DEFAULT_BILL_KEY,
+                  existing_file_rows: Optional[Dict[int, str]] = None
+                  ) -> Tuple[Dict[int, str], set]:
     """Bill upsert by the customer's entity key (default (bill_number,
     submission_ref) — an ERP without a CO6-like ref configures its own
     via source_configs.params["entity_key"]); LOCKED bills never mutate.
-    Returns ({row_seq: gold_bill_id}, set of newly inserted ids)."""
+    Returns ({row_seq: gold_bill_id}, set of newly inserted ids).
+
+    A bill whose entity key is blank/placeholder (e.g. bill_number '-',
+    IREPS's works-contract convention) never matches ANY existing bill —
+    correct across different files (each is a genuinely distinct, un-
+    linkable bill), but that same rule made replaying the SAME bronze
+    file non-idempotent: it kept trying to insert that row again and hit
+    the (bronze_file_id, row_seq) uniqueness constraint. `existing_file_
+    rows` ({row_seq: id} already owned by THIS bronze file) catches that:
+    a blank-keyed row already sitting at this row_seq means this exact
+    ingest already ran, so it's reused instead of reinserted."""
     customer_id = base["customer_id"]
+    existing_file_rows = existing_file_rows or {}
     locked = _consumed_bill_ids(session, customer_id, ("LOCKED",))
     existing = {}
     for row in session.execute(
@@ -146,6 +221,10 @@ def _ingest_bills(session, df, base, stats,
         key = tuple(_norm_key(rec.get(c)) for c in key_cols)
         row = existing.get(key) if all(k is not None for k in key) else None
         if row is None:
+            if seq in existing_file_rows:
+                ids[seq] = existing_file_rows[seq]
+                stats["rows_reused"] += 1
+                continue
             to_insert.append(rec)
             continue
         ids[seq] = row.id
@@ -215,34 +294,56 @@ def ingest_gold_frames(session, customer_id: int,
     models = {frame: fixed_models.get(frame, GoldLineageDoc)
               for frame in gold_frames}
     ids: Dict[str, Dict[int, str]] = {}
+    by_frame: Dict[str, dict] = stats["by_frame"]
     reused_files = set()
+    # {row_seq: id} already owned by this bronze file, per frame — kept
+    # even when the whole-file shortcut below doesn't apply, so each
+    # _ingest_* can still recognise "this row_seq was already inserted
+    # under this exact bronze file" for rows with no usable entity key
+    # (see _ingest_bills' docstring: a blank/placeholder key never
+    # matches by key, so without this a replayed ingest of the same file
+    # tries to insert those rows again and hits the (bronze_file_id,
+    # row_seq) uniqueness constraint)
+    file_rows: Dict[str, Dict[int, str]] = {}
 
     # file-level dedup first: same bytes -> reuse every row
     for frame, df in gold_frames.items():
         rows = _existing_file_rows(session, models[frame], bronze_ids[frame])
+        file_rows[frame] = rows
         if rows and len(rows) == len(df):
             ids[frame] = rows
             reused_files.add(frame)
+            # the whole file is a duplicate: every row already in gold,
+            # nothing added — the flat counters don't see these rows
+            # (only rows_reported does), the per-frame view says so
+            by_frame[frame] = {"inserted": 0, "updated": 0,
+                               "unchanged": len(rows), "conflicts": 0}
     # count FILES, not frames — one bills upload yields two gold frames
     # (bills + recoveries) sharing a bronze file
     stats["files_reused"] += len({bronze_ids[f] for f in reused_files})
 
     if "bank_txns" in gold_frames and "bank_txns" not in reused_files:
+        before = dict(stats)
         ids["bank_txns"] = _ingest_keyed(
             session, GoldBankTxn, gold_frames["bank_txns"], BANK_MAP,
             base("bank_txns"),
             # frame names -> DB names (only "timestamp" differs)
             key_cols_db=tuple(BANK_MAP.get(c, c) for c in bank_key),
             key_cols_frame=bank_key,
-            stats=stats)
+            stats=stats,
+            existing_file_rows=file_rows.get("bank_txns"))
+        by_frame["bank_txns"] = _frame_delta(before, stats)
 
     inserted_bill_ids: set = set()
     if "bills" in gold_frames and "bills" not in reused_files:
+        before = dict(stats)
         ids["bills"], inserted_bill_ids = _ingest_bills(
             session, gold_frames["bills"], base("bills"), stats,
-            key_cols=bill_key)
+            key_cols=bill_key, existing_file_rows=file_rows.get("bills"))
+        by_frame["bills"] = _frame_delta(before, stats)
 
     if "recoveries" in gold_frames and "recoveries" not in reused_files:
+        before = dict(stats)
         bill_ids = ids.get("bills", {})
         df = gold_frames["recoveries"]
         keep = []
@@ -265,21 +366,45 @@ def ingest_gold_frames(session, customer_id: int,
             stats["rows_inserted"] += len(keep)
         else:
             ids.setdefault("recoveries", {})
+        by_frame["recoveries"] = _frame_delta(before, stats)
 
     for frame in gold_frames:
         if frame.startswith("lineage") and frame not in reused_files:
+            before = dict(stats)
             ids[frame] = _ingest_lineage(
-                session, gold_frames[frame], LINEAGE_MAP, base(frame), stats)
+                session, gold_frames[frame], LINEAGE_MAP, base(frame), stats,
+                existing_file_rows=file_rows.get(frame))
+            by_frame[frame] = _frame_delta(before, stats)
+
+    # what this upload actually reported, per frame — the only record that
+    # survives when every row it carried already existed. The stat counts
+    # rows CARRIED (not sightings written), so a replayed file still
+    # answers "34 rows" rather than "0".
+    for frame, frame_ids in ids.items():
+        _record_sightings(session, customer_id, frame, bronze_ids[frame],
+                          frame_ids)
+        stats["rows_reported"] += len(frame_ids)
+        by_frame.setdefault(frame, {"inserted": 0, "updated": 0,
+                                    "unchanged": 0, "conflicts": 0})
+        by_frame[frame]["reported"] = len(frame_ids)
+
     record_event(session, logger, event_type="gold.ingest_completed",
                  customer_id=customer_id, run_id=run_id,
                  details={**stats, "frames": list(gold_frames.keys())})
     return ids, stats
 
 
-def _ingest_lineage(session, df, colmap, base, stats) -> Dict[int, str]:
+def _ingest_lineage(session, df, colmap, base, stats,
+                    existing_file_rows: Optional[Dict[int, str]] = None
+                    ) -> Dict[int, str]:
     """Lineage docs are append-only, keyed by (doc_type, doc_no) — the
     doc_type now rides in the frame itself (canonical unified shape), so
-    one code path serves every lineage slot."""
+    one code path serves every lineage slot.
+
+    A doc with a blank doc_no never matches by key, same rationale as
+    _ingest_bills/_ingest_keyed above — `existing_file_rows` is the same
+    guard against re-inserting it on a replayed ingest of this bronze file."""
+    existing_file_rows = existing_file_rows or {}
     existing = {}
     for rid, doc_type, doc_no in session.execute(
             select(GoldLineageDoc.id, GoldLineageDoc.doc_type,
@@ -296,6 +421,9 @@ def _ingest_lineage(session, df, colmap, base, stats) -> Dict[int, str]:
         key = (_norm_key(rec.get("doc_type")), _norm_key(rec.get("doc_no")))
         if key[0] is not None and key[1] is not None and key in existing:
             ids[seq] = existing[key]
+            stats["rows_reused"] += 1
+        elif seq in existing_file_rows:
+            ids[seq] = existing_file_rows[seq]
             stats["rows_reused"] += 1
         else:
             to_insert.append(rec)

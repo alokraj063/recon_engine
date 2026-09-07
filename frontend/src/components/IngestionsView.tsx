@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { fetchIngestions } from '../api'
 import { ApiError, type IngestionListItem } from '../types'
 import { fmtWhen } from '../format'
+import {
+  IngestStatsSummary, fileOutcomeLabel, fileOutcomeShort, sourceRoleTag,
+} from './IngestStatsSummary'
 
 interface Props {
   customerId: string
@@ -40,53 +43,69 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
           </p>
         )}
         {items && items.length > 0 && (
-          <table className="ledger">
+          <table className="ledger ingestions">
+            <colgroup>
+              <col className="col-when" />
+              <col className="col-files" />
+              <col className="col-gold" />
+              <col className="col-check" />
+            </colgroup>
             <thead>
               <tr>
                 <th>When</th>
                 <th>Files</th>
-                <th style={{ textAlign: 'right' }}>Rows inserted</th>
-                <th style={{ textAlign: 'right' }}>Bills updated</th>
-                <th style={{ textAlign: 'right' }}>Reused</th>
-                <th style={{ textAlign: 'right' }}>Conflicts</th>
+                <th>What landed in gold</th>
                 <th>Self-check</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((i) => (
+              {items.map((i) => {
+                const allDup = i.files.length > 0 && i.files.every((f) => f.outcome === 'deduped')
+                return (
                 <tr key={i.id}>
-                  <td>{fmtWhen(i.at)}</td>
-                  <td>
-                    {i.files.map((f) => (
-                      <span key={f.bronze_file_id}
-                            className={`chip${f.outcome === 'registered' ? ' chip-settled' : ''}`}>
-                        {f.original_name ?? `file #${f.bronze_file_id}`} · {f.outcome}
+                  <td className="when-cell">{fmtWhen(i.at)}</td>
+                  <td className="files-cell">
+                    {i.files.map((f) => {
+                      const name = f.original_name ?? `file #${f.bronze_file_id}`
+                      const isNew = f.outcome === 'registered'
+                      return (
+                        <span key={f.bronze_file_id}
+                              className={`chip file-chip${isNew ? ' chip-settled' : ''}`}
+                              title={`${name} · ${fileOutcomeLabel(f.outcome)}`}>
+                          <span className="file-chip-role">{sourceRoleTag(f.source_type)}</span>
+                          <span className="file-chip-name">{name}</span>
+                          <span className="file-chip-outcome">{fileOutcomeShort(f.outcome)}</span>
+                        </span>
+                      )
+                    })}
+                    {allDup && (
+                      <span className="files-all-dup">
+                        all files identical to earlier uploads
                       </span>
-                    ))}
+                    )}
                   </td>
-                  <td className="num">{i.stats?.rows_inserted ?? '—'}</td>
-                  <td className="num">{i.stats?.bills_updated ?? '—'}</td>
-                  <td className="num">
-                    {i.stats ? i.stats.rows_reused + i.stats.files_reused : '—'}
-                  </td>
-                  <td className="num">{i.stats?.conflicts ?? '—'}</td>
-                  <td>
+                  <td className="gold-cell"><IngestStatsSummary compact stats={i.stats} /></td>
+                  <td className="check-cell">
                     {i.selfcheck_passed === true && <span className="stamp stamp-succeeded">passed</span>}
                     {i.selfcheck_passed === false && <span className="stamp stamp-failed">failed</span>}
-                    {i.selfcheck_passed == null && '—'}
+                    {i.selfcheck_passed == null && (
+                      <span className="empty-cell" title="no bank statement in this ingestion">—</span>
+                    )}
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         )}
       </div>
 
       <p className="footer-note">
-        Every ingestion is idempotent: re-uploading identical bytes dedups at the file level, and
-        a newer bills export updates existing bills in place instead of duplicating them. Bills
-        consumed by a LOCKED ledger match are never silently changed — attempted changes land in
-        conflicts.
+        Every ingestion is idempotent: an identical file is recognised and not ingested twice, and
+        a newer bills export updates existing bills in place instead of duplicating them — so an
+        export can carry thousands of bills and add none as new (they count as duplicates, not
+        added). Each file stays browsable as its own ingestion either way. Bills consumed by a
+        LOCKED ledger match are never silently changed — attempted changes land in conflicts.
       </p>
     </>
   )

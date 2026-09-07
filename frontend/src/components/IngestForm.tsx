@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { History, Undo2, Upload, UserPlus, X } from 'lucide-react'
-import type { AdapterOption, AdapterRegistry, CustomerInfo, Defaults, IngestResponse } from '../types'
+import { History, Upload, UserPlus, X } from 'lucide-react'
+import type { AdapterOption, AdapterRegistry, CustomerInfo, IngestResponse } from '../types'
 import { ApiError } from '../types'
 import {
-  createCustomer, fetchAdapters, fetchCustomerConfig, fetchDefaults,
-  ingestFiles, saveCustomerSources, type UploadFiles,
+  createCustomer, fetchAdapters, fetchCustomerConfig, ingestFiles,
+  saveCustomerSources, type UploadFiles,
 } from '../api'
 import { inr } from '../format'
 import { ErrorBanner } from './ErrorBanner'
 import { IngestionsView } from './IngestionsView'
+import { IngestStatsSummary, fileOutcomeLabel } from './IngestStatsSummary'
 
 interface Props {
   customers: CustomerInfo[]
@@ -34,15 +35,13 @@ const ERP_SLOTS: SlotSpec[] = [
 ]
 
 /** One document slot's file state: an explicit Upload button (hidden
- *  input), drag & drop onto the area, and a badge that says plainly
- *  whether the bundled default document or the user's own upload will
- *  be ingested. Removing an upload falls back to the default when one
- *  exists (that is exactly what clearing the file does server-side). */
-function SlotFileArea({ on, running, file, defaultDoc, accept, onFile }: {
+ *  input) and drag & drop onto the area. A slot is ingested only when it
+ *  holds a file — nothing is ever substituted for one, so an empty slot
+ *  is simply not part of the ingestion. */
+function SlotFileArea({ on, running, file, accept, onFile }: {
   on: boolean
   running: boolean
   file: File | null
-  defaultDoc: { name: string } | null
   accept?: string
   onFile: (f: File | null) => void
 }) {
@@ -61,6 +60,7 @@ function SlotFileArea({ on, running, file, defaultDoc, accept, onFile }: {
   return (
     <div
       className={`slot-file-area${dragging && !disabled ? ' dragover' : ''}`}
+      title={disabled ? undefined : 'Drag & drop a file here, or use Upload file'}
       onDragOver={(e) => { e.preventDefault(); if (!disabled) setDragging(true) }}
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => {
@@ -77,22 +77,10 @@ function SlotFileArea({ on, running, file, defaultDoc, accept, onFile }: {
         <>
           <span className="slot-badge upload">Your upload</span>
           <span className="slot-file" title={file.name}>{file.name}</span>
-          {defaultDoc
-            ? btn('Use default document', <Undo2 size={13} strokeWidth={1.75} />,
-                  () => onFile(null))
-            : btn('Remove', <X size={13} strokeWidth={1.75} />, () => onFile(null))}
-        </>
-      ) : defaultDoc ? (
-        <>
-          <span className="slot-badge default">Default document</span>
-          <span className="slot-file" title={defaultDoc.name}>{defaultDoc.name}</span>
-          {uploadBtn}
+          {btn('Remove', <X size={13} strokeWidth={1.75} />, () => onFile(null))}
         </>
       ) : (
-        <>
-          <span className="slot-file slot-empty">no file selected — drag &amp; drop or</span>
-          {uploadBtn}
-        </>
+        uploadBtn
       )}
       <input ref={inputRef} type="file" accept={accept} disabled={disabled}
              onChange={(e) => {
@@ -110,7 +98,6 @@ const acceptOf = (o?: AdapterOption): string | undefined =>
   o && o.file_kinds?.length ? o.file_kinds.join(',') : undefined
 
 const NO_FILES: UploadFiles = { statement: null, bills: null, rnote: null, crn: null }
-const NO_DEFAULTS: Defaults = { statement: null, bills: null, rnote: null, crn: null }
 const ALL_ON: Record<string, boolean> = { statement: true, bills: true, rnote: true, crn: true }
 
 /** "IREPS bill status" under system IREPS -> "Bill status". */
@@ -123,7 +110,6 @@ export function IngestForm({
   customers, customerId, onCustomerChange, onCustomersChanged, onIngested,
 }: Props) {
   const [files, setFiles] = useState<UploadFiles>(NO_FILES)
-  const [defaults, setDefaults] = useState<Defaults>(NO_DEFAULTS)
   const [enabled, setEnabled] = useState<Record<string, boolean>>(ALL_ON)
   const [adapters, setAdapters] = useState<AdapterRegistry>({})
   const [sources, setSources] = useState<Record<string, string>>({})
@@ -149,8 +135,6 @@ export function IngestForm({
   }, [])
 
   useEffect(() => {
-    // default-document prefills exist for the default customer only
-    fetchDefaults(customerId).then(setDefaults).catch(() => setDefaults(NO_DEFAULTS))
     fetchCustomerConfig(customerId)
       .then((c) => setSources(c.sources))
       .catch(() => setSources({}))
@@ -233,20 +217,26 @@ export function IngestForm({
     setFiles((prev) => ({ ...prev, [field]: f }))
 
   const extraEnabled = (st: string) => enabled[st] ?? true
-  const slots = [
-    ...activeSlots.filter((s) => enabled[s.field]).map((s) => s.field as string),
-    ...extraSlots.filter((st) => extraEnabled(st) && extraFiles[st]),
-  ]
-  const anyInput =
-    activeSlots.some((s) => enabled[s.field] && (files[s.field] || defaults[s.field]))
-    || extraSlots.some((st) => extraEnabled(st) && extraFiles[st])
+  // what actually gets posted: the files of enabled slots, nothing else.
+  // An unticked row's file is held in state (so re-ticking restores it)
+  // but never sent.
+  const outgoing: UploadFiles = {
+    ...NO_FILES,
+    ...Object.fromEntries(activeSlots
+      .filter((s) => enabled[s.field])
+      .map((s) => [s.field, files[s.field]])),
+  }
+  const outgoingExtras = Object.fromEntries(
+    extraSlots.filter(extraEnabled).map((st) => [st, extraFiles[st] ?? null]))
+  const anyInput = Object.values(outgoing).some(Boolean)
+    || Object.values(outgoingExtras).some(Boolean)
 
   const onIngest = async () => {
     setRunning(true)
     setError(null)
     setResult(null)
     try {
-      const res = await ingestFiles(files, customerId, slots, extraFiles)
+      const res = await ingestFiles(outgoing, customerId, outgoingExtras)
       setResult(res)
       setHistoryEpoch((n) => n + 1)
       onIngested(res)
@@ -305,8 +295,7 @@ export function IngestForm({
 
   const fileArea = (s: SlotSpec, on: boolean, accept?: string) => (
     <SlotFileArea on={on} running={running} file={files[s.field]}
-                  defaultDoc={defaults[s.field]} accept={accept}
-                  onFile={setFile(s.field)} />
+                  accept={accept} onFile={setFile(s.field)} />
   )
 
   const toggle = (field: keyof UploadFiles, on: boolean) => (
@@ -318,7 +307,7 @@ export function IngestForm({
   )
 
   const bankOn = enabled[BANK_SLOT.field]
-  const bankFilled = bankOn && Boolean(files.statement || defaults.statement)
+  const bankFilled = bankOn && Boolean(files.statement)
   // extensions follow the SELECTED adapter (fall back to the first option
   // before the customer's saved choice loads)
   const bankAccept = acceptOf(
@@ -378,9 +367,9 @@ export function IngestForm({
 
       <p className="hint">
         Raw files land in bronze (registered by content hash), parse into silver, and
-        transform into the gold layer every reconciliation runs on. Untick a row to skip
-        that document — ingest just a statement or just the ERP documents. Format
-        choices persist to the customer's configuration.
+        transform into the gold layer every reconciliation runs on. An ingestion is
+        exactly the files you attach — a slot you leave empty (or untick) is skipped,
+        never filled in for you. Format choices persist to the customer's configuration.
       </p>
 
       <div className="ingest-section">
@@ -421,7 +410,7 @@ export function IngestForm({
         <div className="slot-stack">
           {erpDocs.map(({ slot, opt }) => {
             const on = enabled[slot.field]
-            const filled = on && Boolean(files[slot.field] || defaults[slot.field])
+            const filled = on && Boolean(files[slot.field])
             return (
               <div key={slot.field}
                    className={`slot-row${on ? '' : ' slot-off'}${filled ? ' filled' : ''}`}>
@@ -461,7 +450,7 @@ export function IngestForm({
                     </select>
                   </label>
                   <SlotFileArea on={on} running={running} file={own}
-                                defaultDoc={null} accept={acceptOf(opt)}
+                                accept={acceptOf(opt)}
                                 onFile={(f) =>
                                   setExtraFiles((prev) => ({ ...prev, [st]: f }))} />
                   <button className="btn-reject" title="remove this slot"
@@ -501,7 +490,7 @@ export function IngestForm({
           <p className="explain">
             Extra upstream document kinds beyond the ERP's own reports — each slot
             parses with the chosen lineage adapter and joins into the same document
-            trail. These slots always use your uploaded files.
+            trail.
           </p>
         </div>
       )}
@@ -528,19 +517,21 @@ export function IngestForm({
             {result.files.map((f) => (
               <span key={f.bronze_file_id}
                     className={`chip${f.outcome === 'registered' ? ' chip-settled' : ''}`}>
-                {f.original_name} · {f.outcome}
+                {f.original_name} · {fileOutcomeLabel(f.outcome)}
               </span>
             ))}
           </div>
-          <div className="stat-chips">
-            <span className="chip">rows inserted {result.stats.rows_inserted}</span>
-            <span className="chip">bills updated {result.stats.bills_updated}</span>
-            <span className="chip">rows reused {result.stats.rows_reused}</span>
-            <span className="chip">files reused {result.stats.files_reused}</span>
-            <span className={`chip${result.stats.conflicts > 0 ? ' chip-attempts' : ''}`}>
-              conflicts {result.stats.conflicts}
-            </span>
-          </div>
+          <IngestStatsSummary stats={result.stats} />
+          {result.stats.rows_inserted === 0
+            && (result.stats.rows_reported ?? 0) > 0 && (
+            <p className="frame-note">
+              Nothing new was added — everything in this upload was already
+              in gold ({result.stats.bills_updated} updated in place,{' '}
+              {result.stats.rows_reused} duplicates left as they were). The
+              rows are still browsable as this ingestion: pick it in the Gold
+              data tabs' “Ingestion” filter.
+            </p>
+          )}
           {result.selfcheck && result.selfcheck.passed !== false && (
             <p className="selfcheck-line">
               <span className="tick">✓ parse verified</span> — statement states{' '}
@@ -548,9 +539,6 @@ export function IngestForm({
               parsed {result.selfcheck.parsed_count} / {inr(result.selfcheck.parsed_total)}
             </p>
           )}
-          <p className="footer-note">
-            Gold is updated — browse it under Gold data, or head to Reconcile to run against it.
-          </p>
         </div>
       )}
     </section>

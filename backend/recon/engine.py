@@ -39,7 +39,7 @@ EXCEPTION_COLS = [
     "deduction_amount", "net_payable_amount", "recovery_count",
     "return_reason", "LineageStatus", "PO", "PO_Date", "Receipt_Doc",
     "Receipt_Date", "Receipt_Qty", "DRR_or_Challan", "Bill_Reg_No",
-    "sheet", "data_row",
+    "operating_unit", "data_row",
 ]
 
 # SOURCE-NEUTRAL default advisory text, keyed by source-neutral codes
@@ -90,7 +90,7 @@ CANDIDATE_FIELDS = [
     "payment_order_date", "payment_advice_date",
     "org_unit", "LineageStatus", "PO", "PO_Date", "Receipt_Doc",
     "Receipt_Date", "DRR_or_Challan", "Bill_Reg_No", "return_reason",
-    "sheet", "data_row",
+    "operating_unit", "data_row",
 ]
 
 BILL_ACTIONS = {
@@ -224,7 +224,7 @@ UNGROUPABLE_KEYS = {"", "-", "----", "nan", "None"}
 ATTEMPT_FIELDS = ["bill_status", "submission_ref", "submission_date",
                   "payment_order_ref", "payment_order_date",
                   "net_payable_amount", "payment_advice_date",
-                  "return_reason", "sheet", "data_row"]
+                  "return_reason", "operating_unit", "data_row"]
 
 
 def group_bill_attempts(bills):
