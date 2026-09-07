@@ -1,17 +1,20 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Filter, History, RotateCw } from 'lucide-react'
+import { ChevronRight, Filter, RotateCw } from 'lucide-react'
 import {
-  acceptMatch, fetchLedger, fetchRun, rejectMatch, reopenMatch, unlockMatch,
+  acceptMatch, fetchLedger, fetchRun, fetchRuns, rejectMatch, reopenMatch, unlockMatch,
 } from '../api'
 import {
   ApiError,
   type LedgerException, type LedgerMatch, type LedgerViewData, type Row,
+  type RunListItem,
 } from '../types'
-import { fmtWhen, inr, parseUtc } from '../format'
+import { fmtWhen, inDayRange, inr, localDay } from '../format'
 import { BillLineage } from './BillLineage'
 import { ConfidenceBadge } from './ConfidenceBadge'
 import { MatchedEvidence, ReviewEvidence } from './ReviewEvidence'
-import { RunsView } from './RunsView'
+import {
+  EMPTY_RUN_FILTER, RunFilter, runFilterSet, runLabelFor, type RunFilterValue,
+} from './RunFilter'
 
 type Evidence = Row | 'loading' | 'missing'
 
@@ -19,14 +22,6 @@ type ExcFilter = 'OPEN' | 'RESOLVED' | 'ALL'
 type MatchStatusFilter = 'ALL' | 'OPEN' | 'LOCKED' | 'REJECTED'
 
 const CONFIDENCE_ORDER = ['HIGH', 'AMBIGUOUS', 'LOW', 'AMOUNT_ONLY', 'BATCHED']
-
-/** Local calendar date (yyyy-mm-dd) of a naive-UTC timestamp — the same
- *  day the WHEN column displays, so date filters match what users see. */
-function localDay(iso: string): string {
-  const d = parseUtc(iso)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
 
 /** In-header filter control: a funnel icon that opens a small popover.
  *  Invisible chrome until used — the funnel turns accent-colored while
@@ -70,9 +65,6 @@ interface Props {
   /** called once the arrival flash has played so the parent clears
    *  focusId — the highlight is transient, not a selection */
   onFocusHandled?: () => void
-  /** run history inset (⧉ Runs, top right) */
-  activeRunId: string | null
-  onOpenRun: (runId: string) => void
 }
 
 function txnLine(m: LedgerMatch): string {
@@ -93,10 +85,11 @@ function excLine(e: LedgerException): string {
   return '—'
 }
 
-export function LedgerView({ customerId, focusId, onFocusHandled,
-                             activeRunId, onOpenRun }: Props) {
-  const [showRuns, setShowRuns] = useState(false)
+export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
   const [data, setData] = useState<LedgerViewData | null>(null)
+  // the customer's runs: labels for run ids + the run filter's choices
+  const [runs, setRuns] = useState<RunListItem[]>([])
+  const [runFilter, setRunFilter] = useState<RunFilterValue>(EMPTY_RUN_FILTER)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [excFilter, setExcFilter] = useState<ExcFilter>('OPEN')
@@ -148,9 +141,15 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
     fetchLedger(customerId)
       .then(setData)
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
+    fetchRuns(customerId, 200).then(setRuns).catch(() => setRuns([]))
   }, [customerId])
 
   useEffect(load, [load])
+
+  // a run filter belongs to one customer's run history
+  useEffect(() => setRunFilter(EMPTY_RUN_FILTER), [customerId])
+
+  const runSet = useMemo(() => runFilterSet(runFilter, runs), [runFilter, runs])
 
   const decide = async (id: string,
                         action: 'accept' | 'reject' | 'unlock' | 'reopen',
@@ -182,8 +181,13 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
     }
   }
 
-  const exceptions = (data?.exceptions ?? []).filter(
-    (e) => excFilter === 'ALL' || e.status === excFilter,
+  // an exception belongs to the run that first saw it AND the run that
+  // resolved it — filtering by either run keeps it in view
+  const allExceptions = data?.exceptions ?? []
+  const exceptions = allExceptions.filter(
+    (e) => (excFilter === 'ALL' || e.status === excFilter)
+      && (!runSet || runSet.has(e.first_seen_run_id)
+          || (!!e.resolved_by_run_id && runSet.has(e.resolved_by_run_id))),
   )
 
   const confidences = useMemo(() => {
@@ -196,17 +200,20 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
     const rows = (data?.matches ?? []).filter((m) => {
       if (confFilter !== 'ALL' && m.confidence !== confFilter) return false
       if (matchStatusFilter !== 'ALL' && m.status !== matchStatusFilter) return false
-      if (dateFrom || dateTo) {
-        const day = localDay(m.created_at)
-        if (dateFrom && day < dateFrom) return false
-        if (dateTo && day > dateTo) return false
-      }
+      if (runSet && !runSet.has(m.run_id)) return false
+      if (!inDayRange(localDay(m.created_at), dateFrom, dateTo)) return false
       return true
     })
     return rows.sort((a, b) => sortAsc
       ? a.created_at.localeCompare(b.created_at)
       : b.created_at.localeCompare(a.created_at))
-  }, [data, confFilter, matchStatusFilter, dateFrom, dateTo, sortAsc])
+  }, [data, confFilter, matchStatusFilter, runSet, dateFrom, dateTo, sortAsc])
+
+  const matchesFiltered = confFilter !== 'ALL' || matchStatusFilter !== 'ALL'
+    || !!dateFrom || !!dateTo || runSet !== null
+  const runNote = data && runSet
+    ? `${visibleMatches.length} of ${data.matches.length} matches`
+    : undefined
 
   return (
     <>
@@ -217,19 +224,12 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
           <button className="btn-refresh btn-ic" onClick={load}>
             <RotateCw size={13} strokeWidth={1.75} /> refresh
           </button>
-          <button className={`btn-refresh new-customer-btn btn-ic${showRuns ? ' on' : ''}`}
-                  onClick={() => setShowRuns((v) => !v)}>
-            <History size={14} strokeWidth={1.75} /> Runs {showRuns ? '▴' : '▾'}
-          </button>
+          {runs.length > 0 && (
+            <RunFilter runs={runs} value={runFilter} onChange={setRunFilter}
+                       note={runNote} />
+          )}
         </span>
       </div>
-
-      {showRuns && (
-        <div className="config-inset">
-          <RunsView customerId={customerId} activeRunId={activeRunId}
-                    onOpenRun={onOpenRun} />
-        </div>
-      )}
 
       <div className="view-card">
         {error && <p className="frame-note">{error}</p>}
@@ -242,7 +242,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
 
         {data && data.matches.length > 0 && (
           <>
-            {(confFilter !== 'ALL' || matchStatusFilter !== 'ALL' || dateFrom || dateTo) && (
+            {matchesFiltered && (
               <p className="ledger-count-note">
                 {visibleMatches.length} of {data.matches.length} matches
               </p>
@@ -270,6 +270,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
                     </HeaderFilter>
                   </th>
                   <th>Match</th>
+                  <th>Run</th>
                   <th>
                     Confidence{confFilter !== 'ALL' && ` · ${confFilter}`}
                     <HeaderFilter active={confFilter !== 'ALL'}>
@@ -303,7 +304,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
               <tbody>
                 {visibleMatches.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="frame-note">
+                    <td colSpan={9} className="frame-note">
                       No matches for these filters.
                     </td>
                   </tr>
@@ -329,6 +330,9 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
                       </td>
                       <td title={`run-internal label: ${m.match_id}`}>
                         {m.seq !== null ? `M-${m.seq}` : m.match_id}
+                      </td>
+                      <td className="run-cell" title={m.run_id}>
+                        {runLabelFor(runs, m.run_id)}
                       </td>
                       <td><ConfidenceBadge label={m.confidence} /></td>
                       <td><span className={`stamp stamp-${m.status}`}>{m.status}</span></td>
@@ -407,7 +411,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
                     </tr>
                     {expanded[m.id] && (
                       <tr className="xq-detail">
-                        <td colSpan={8}>
+                        <td colSpan={9}>
                           {ev === 'loading' || ev === undefined ? (
                             <p className="frame-note"><span className="quill" /> loading evidence…</p>
                           ) : ev === 'missing' ? (
@@ -486,10 +490,13 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
           </>
         )}
 
-        {data && data.exceptions.length > 0 && (
+        {data && allExceptions.length > 0 && (
           <>
             <h3 className="ledger-h">
               Exceptions
+              {runSet && (
+                <span className="chip-note"> {exceptions.length} of {allExceptions.length} </span>
+              )}
               <span className="seg seg-inline">
                 {(['OPEN', 'RESOLVED', 'ALL'] as ExcFilter[]).map((f) => (
                   <button key={f} className={excFilter === f ? 'on' : ''} onClick={() => setExcFilter(f)}>
@@ -499,7 +506,10 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
               </span>
             </h3>
             {exceptions.length === 0 ? (
-              <p className="frame-note">Nothing with status {excFilter.toLowerCase()}.</p>
+              <p className="frame-note">
+                Nothing with status {excFilter.toLowerCase()}
+                {runSet ? ' for the selected runs' : ''}.
+              </p>
             ) : (
               <div className="ledger-wrap">
               <table className="ledger">
@@ -518,8 +528,12 @@ export function LedgerView({ customerId, focusId, onFocusHandled,
                       <td><span className={`stamp stamp-${e.exception_type}`}>{e.exception_type.replace('_', ' ')}</span></td>
                       <td><span className={`stamp stamp-${e.status}`}>{e.status}</span></td>
                       <td className="oneline">{excLine(e)}</td>
-                      <td>{e.first_seen_run_id.slice(0, 8)}</td>
-                      <td>{e.resolved_by_run_id ? e.resolved_by_run_id.slice(0, 8) : '—'}</td>
+                      <td className="run-cell" title={e.first_seen_run_id}>
+                        {runLabelFor(runs, e.first_seen_run_id)}
+                      </td>
+                      <td className="run-cell" title={e.resolved_by_run_id ?? undefined}>
+                        {runLabelFor(runs, e.resolved_by_run_id)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

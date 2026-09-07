@@ -93,6 +93,14 @@ interface Props {
   name: FrameName
 }
 
+/** Why a run's frozen frame can be empty, per frame. */
+const EMPTY_NOTES: Record<FrameName, (scope: string) => string> = {
+  bank: (s) => `No bank credits were reconciled ${s}.`,
+  bills: (s) => `No bills were reconciled ${s}.`,
+  bills_enriched: (s) => `No bills were reconciled ${s}, so there is nothing to enrich with lineage.`,
+  recoveries: (s) => `No recovery lines ${s} — none of the bills carried deductions.`,
+}
+
 // fetched frames, kept across tab switches (keyed by run so a new run
 // naturally misses the cache)
 const frameCache = new Map<string, Row[]>()
@@ -163,12 +171,14 @@ export function SourceTable({ runs, name }: Props) {
       : rows
 
   const { columns, hidden } = buildColumns(name, shown)
+  const scope = runs.length > 1 ? `in the ${runs.length} selected runs` : 'in this run'
   return (
     <DataTable
       rows={shown}
       columns={columns}
       numericIds={AMOUNT_COLS}
       initialHidden={hidden}
+      emptyNote={<p className="frame-note">{EMPTY_NOTES[name](scope)}</p>}
       renderDetail={
         name === 'bills_enriched'
           ? (row) => <BillTrailDetail row={row} title={`Bill ${row.bill_number ?? ''} — lineage`} />

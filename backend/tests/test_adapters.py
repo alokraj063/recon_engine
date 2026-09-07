@@ -41,3 +41,17 @@ def test_lineage_maps_match_gold_schema():
     for name, colmap in (("rnote", RNOTE_TO_GOLD), ("crn", CRN_TO_GOLD)):
         assert set(colmap.values()) == want, name
         assert not set(colmap) & set(GOLD_COLUMNS["lineage_docs"]), name
+
+
+def test_operating_unit_derived_from_party_code_suffix():
+    """Silver->Gold rule: the IREPS PartyCode's trailing digits name the
+    operating unit. Unknown / blank codes come back None, never a guess;
+    a numeric cell read back as a float ("...833.0") still resolves."""
+    from recon.sources.ireps_bills import operating_unit_for
+    assert operating_unit_for("MM04:1065309") == "Friction"
+    assert operating_unit_for("XX60828") == "Rohtak"
+    assert operating_unit_for("833") == "Hosur"
+    assert operating_unit_for("12345833.0") == "Hosur"
+    assert operating_unit_for("99999") is None
+    assert operating_unit_for(None) is None
+    assert operating_unit_for(float("nan")) is None

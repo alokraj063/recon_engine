@@ -9,6 +9,7 @@ import {
 import { inr } from '../format'
 import { ErrorBanner } from './ErrorBanner'
 import { IngestionsView } from './IngestionsView'
+import { IngestStatsSummary, fileOutcomeLabel } from './IngestStatsSummary'
 
 interface Props {
   customers: CustomerInfo[]
@@ -59,6 +60,7 @@ function SlotFileArea({ on, running, file, accept, onFile }: {
   return (
     <div
       className={`slot-file-area${dragging && !disabled ? ' dragover' : ''}`}
+      title={disabled ? undefined : 'Drag & drop a file here, or use Upload file'}
       onDragOver={(e) => { e.preventDefault(); if (!disabled) setDragging(true) }}
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => {
@@ -78,10 +80,7 @@ function SlotFileArea({ on, running, file, accept, onFile }: {
           {btn('Remove', <X size={13} strokeWidth={1.75} />, () => onFile(null))}
         </>
       ) : (
-        <>
-          <span className="slot-file slot-empty">no file selected — drag &amp; drop or</span>
-          {uploadBtn}
-        </>
+        uploadBtn
       )}
       <input ref={inputRef} type="file" accept={accept} disabled={disabled}
              onChange={(e) => {
@@ -518,32 +517,19 @@ export function IngestForm({
             {result.files.map((f) => (
               <span key={f.bronze_file_id}
                     className={`chip${f.outcome === 'registered' ? ' chip-settled' : ''}`}>
-                {f.original_name} · {f.outcome}
+                {f.original_name} · {fileOutcomeLabel(f.outcome)}
               </span>
             ))}
           </div>
-          <div className="stat-chips">
-            {result.stats.rows_reported !== undefined && (
-              <span className="chip chip-settled">
-                rows reported {result.stats.rows_reported}
-              </span>
-            )}
-            <span className="chip">rows inserted {result.stats.rows_inserted}</span>
-            <span className="chip">bills updated {result.stats.bills_updated}</span>
-            <span className="chip">rows reused {result.stats.rows_reused}</span>
-            <span className="chip">files reused {result.stats.files_reused}</span>
-            <span className={`chip${result.stats.conflicts > 0 ? ' chip-attempts' : ''}`}>
-              conflicts {result.stats.conflicts}
-            </span>
-          </div>
+          <IngestStatsSummary stats={result.stats} />
           {result.stats.rows_inserted === 0
             && (result.stats.rows_reported ?? 0) > 0 && (
             <p className="frame-note">
-              Nothing new to insert — every row this upload carried was
-              already in gold, so it updated {result.stats.bills_updated} and
-              left {result.stats.rows_reused} unchanged. The rows are still
-              browsable as this ingestion: pick it in the Gold data tabs'
-              “Ingestion” filter.
+              Nothing new was added — everything in this upload was already
+              in gold ({result.stats.bills_updated} updated in place,{' '}
+              {result.stats.rows_reused} duplicates left as they were). The
+              rows are still browsable as this ingestion: pick it in the Gold
+              data tabs' “Ingestion” filter.
             </p>
           )}
           {result.selfcheck && result.selfcheck.passed !== false && (
@@ -553,9 +539,6 @@ export function IngestForm({
               parsed {result.selfcheck.parsed_count} / {inr(result.selfcheck.parsed_total)}
             </p>
           )}
-          <p className="footer-note">
-            Gold is updated — browse it under Gold data, or head to Reconcile to run against it.
-          </p>
         </div>
       )}
     </section>

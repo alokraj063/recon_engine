@@ -44,7 +44,7 @@ BILLS_TO_GOLD = {
     "RecoverySum": "recovery_sum",
     "NetCheck": "net_check",
     "RecoveryCheck": "recovery_check",
-    "Sheet": "sheet",
+    "OperatingUnit": "operating_unit",
     "DataRow": "data_row",
 }
 
@@ -52,7 +52,7 @@ RECOVERIES_TO_GOLD = {
     "BillIndex": "bill_index",
     "BillNumber": "bill_number",
     "CO6No": "submission_ref",
-    "Sheet": "sheet",
+    "OperatingUnit": "operating_unit",
     "RecoveryHead": "recovery_head",
     "RecoveryAmt": "recovery_amt",
     "RecoveryText": "recovery_text",
@@ -79,6 +79,33 @@ def _to_amount(text):
         return float(text)
     except (TypeError, ValueError):
         return None
+
+
+# Operating unit (Friction / Rohtak / Hosur) is a Silver->Gold derivation
+# from the IREPS PartyCode's trailing digits — since 2026-09 every Bill
+# Status export is a single sheet, so the worksheet name that used to
+# fill this slot (gold `sheet`, now `operating_unit`) no longer says
+# which unit a bill belongs to. Longest suffix first so a future code
+# that happens to end in a shorter one can never be shadowed by it.
+OPERATING_UNIT_SUFFIXES = (
+    ("1065309", "Friction"),
+    ("60828", "Rohtak"),
+    ("833", "Hosur"),
+)
+
+
+def operating_unit_for(party_code) -> Optional[str]:
+    """PartyCode -> operating unit, or None when the code is blank or
+    ends in no known suffix (an unknown unit is NA, never a guess)."""
+    if party_code is None or (isinstance(party_code, float) and pd.isna(party_code)):
+        return None
+    code = str(party_code).strip()
+    if code.endswith(".0"):          # a numeric cell read back as float
+        code = code[:-2]
+    for suffix, unit in OPERATING_UNIT_SUFFIXES:
+        if code.endswith(suffix):
+            return unit
+    return None
 
 
 class IrepsBillsAdapter(SourceAdapter):
@@ -112,10 +139,17 @@ class IrepsBillsAdapter(SourceAdapter):
         bills["RecoveryCheck"] = (
             (bills["DeductedAmt"].fillna(0) - bills["RecoverySum"]).abs() < 1.0
         )
+        # PartyCode suffix -> Friction / Rohtak / Hosur (see
+        # OPERATING_UNIT_SUFFIXES). The worksheet name Silver records in
+        # `Sheet` is provenance only and stays in Silver.
+        bills["OperatingUnit"] = (bills["PartyCode"].map(operating_unit_for)
+                                  if "PartyCode" in bills.columns
+                                  else None)
+        bills = bills.drop(columns=["Sheet"], errors="ignore")
 
         recovery_rows = [
             {"BillIndex": idx, "BillNumber": bill.BillNumber,
-             "CO6No": bill.CO6No, "Sheet": getattr(bill, "Sheet", None),
+             "CO6No": bill.CO6No, "OperatingUnit": bill.OperatingUnit,
              "RecoveryHead": head, "RecoveryAmt": _to_amount(amt),
              "RecoveryText": amt}
             for idx, (bill, items) in enumerate(zip(bills.itertuples(), parsed))
@@ -148,8 +182,8 @@ class IrepsBillsAdapter(SourceAdapter):
                 "header row",
                 {"parsed_count": 0, "recovery_count": 0, "sheets": []},
             )
-        sheets = ([str(s) for s in bills["sheet"].dropna().unique()]
-                  if "sheet" in bills.columns else [])
+        units = ([str(u) for u in bills["operating_unit"].dropna().unique()]
+                 if "operating_unit" in bills.columns else [])
         return {"parsed_count": len(bills),
                 "recovery_count": len(gold["recoveries"]),
-                "sheets": sheets}
+                "operating_units": units}

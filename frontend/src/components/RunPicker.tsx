@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Layers } from 'lucide-react'
 import type { RunListItem } from '../types'
-import { fmtWhen } from '../format'
+import { fmtWhen, inDayRange, localDay } from '../format'
 
 interface Props {
   runs: RunListItem[]            // succeeded runs, newest first
@@ -24,13 +24,15 @@ export function runLabel(r: RunListItem): string {
 
 /**
  * Multi-select run filter for the reconciliation-result views: a mode
- * filter (all / snapshot / incremental) over a checkbox list, with an
- * "all shown" master that selects exactly the filtered set. At least
- * one run always stays selected.
+ * filter (all / snapshot / incremental) and a run-date range over a
+ * checkbox list, with an "all shown" master that selects exactly the
+ * filtered set. At least one run always stays selected.
  */
 export function RunPicker({ runs, selection, onChange }: Props) {
   const [open, setOpen] = useState(false)
   const [modeFilter, setModeFilter] = useState<ModeFilter>('all')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
   const wrap = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -43,7 +45,9 @@ export function RunPicker({ runs, selection, onChange }: Props) {
   }, [open])
 
   const selected = new Set(selection)
-  const visible = runs.filter((r) => modeFilter === 'all' || r.mode === modeFilter)
+  const visible = runs.filter((r) =>
+    (modeFilter === 'all' || r.mode === modeFilter)
+    && inDayRange(localDay(r.created_at), from, to))
   const visibleIds = visible.map((r) => r.run_id)
   const outsideCount = selection.filter((id) => !visibleIds.includes(id)).length
   // "all shown": every visible run selected and nothing beyond them
@@ -102,6 +106,23 @@ export function RunPicker({ runs, selection, onChange }: Props) {
               </button>
             ))}
           </div>
+          <div className="run-picker-dates">
+            <label>
+              <span className="chip-note">from</span>
+              <input type="date" value={from} aria-label="runs from date"
+                     max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
+            </label>
+            <label>
+              <span className="chip-note">to</span>
+              <input type="date" value={to} aria-label="runs to date"
+                     min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+            </label>
+            {(from || to) && (
+              <button className="link-btn" onClick={() => { setFrom(''); setTo('') }}>
+                clear
+              </button>
+            )}
+          </div>
           <label className="run-picker-row run-picker-all">
             <input
               type="checkbox"
@@ -111,12 +132,15 @@ export function RunPicker({ runs, selection, onChange }: Props) {
             />
             <span className="run-picker-when">
               {modeFilter === 'all' ? 'All runs' : `All ${modeFilter}`}
+              {(from || to) && ' in range'}
             </span>
             <span className="chip-note">{visible.length} shown</span>
           </label>
           <div className="run-picker-list">
             {visible.length === 0 && (
-              <p className="run-picker-empty">no {modeFilter} runs yet</p>
+              <p className="run-picker-empty">
+                {from || to ? 'no runs in this date range' : `no ${modeFilter} runs yet`}
+              </p>
             )}
             {visible.map((r) => (
               <label key={r.run_id} className="run-picker-row">

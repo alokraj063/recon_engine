@@ -107,6 +107,16 @@ def test_a_re_export_of_known_bills_is_still_its_own_ingestion(world):
     assert stats["rows_inserted"] == 0
     assert stats["bills_updated"] == 2
     assert stats["rows_reported"] == 2, "the file still reported two bills"
+    # the per-frame view the UI renders as "Total bills / New bills /
+    # Updated bills / Duplicate bills": only the bills frame took part,
+    # and its counts are the flat counters' share for that frame
+    assert set(stats["by_frame"]) == {"bills"}
+    per = stats["by_frame"]["bills"]
+    assert per["reported"] == stats["rows_reported"] == 2
+    assert per["inserted"] == stats["rows_inserted"] == 0
+    assert per["updated"] == stats["bills_updated"] == 2
+    assert per["unchanged"] + per["updated"] + per["inserted"] == per["reported"]
+    assert per["conflicts"] == 0
 
     with SessionLocal() as s:
         # the whole gold table is still four bills...

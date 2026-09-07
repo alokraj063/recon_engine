@@ -41,11 +41,11 @@ BILLS_MAP = {c: c for c in (
     "approved_amount", "deduction_amount", "net_payable_amount",
     "payment_order_ref", "payment_order_date", "recovery_count",
     "return_reason", "recovery_sum", "net_check", "recovery_check",
-    "sheet", "header_row", "data_row",
+    "operating_unit", "header_row", "data_row",
 )}
 
 RECOVERIES_MAP = {c: c for c in (
-    "bill_number", "submission_ref", "sheet", "recovery_head",
+    "bill_number", "submission_ref", "operating_unit", "recovery_head",
     "recovery_amt", "recovery_text",
 )}
 

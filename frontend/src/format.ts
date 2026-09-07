@@ -21,6 +21,22 @@ export function fmtWhen(iso: string): string {
   return WHEN.format(parseUtc(iso))
 }
 
+/** Local calendar date (yyyy-mm-dd) of a naive-UTC timestamp — the same
+ *  day fmtWhen displays, so date-range filters match what users see. */
+export function localDay(iso: string): string {
+  const d = parseUtc(iso)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+/** True when a yyyy-mm-dd day falls inside an optional [from, to] range
+ *  (either bound may be '' = unbounded). */
+export function inDayRange(day: string, from: string, to: string): boolean {
+  if (from && day < from) return false
+  if (to && day > to) return false
+  return true
+}
+
 /** Column names holding money, formatted with Indian grouping.
  *  The PascalCase entries are the pre-canonicalization vocabulary — kept
  *  so runs persisted before the gold-schema rename still show ₹. */

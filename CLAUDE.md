@@ -89,7 +89,17 @@ backend/recon/   the engine package (pure, DB-free; runs with backend/ as cwd)
                Details` stays ONE free-text cell in Silver ('<head>: <amt>
                <head>: <amt> ...') — splitting it into structured lines is
                a Gold-stage concern (sources/ireps_bills.py), not the
-               parser's. (An older BLOCK-per-bill export format existed
+               parser's. `Sheet`/`DataRow` stay Silver-only bookkeeping;
+               since 2026-09-07 the export is ONE worksheet, so the
+               worksheet name says nothing about which unit a bill belongs
+               to — gold `operating_unit` (Friction | Rohtak | Hosur; was
+               `sheet`, migration a9e4d7c2b301 renamed + backfilled) is
+               DERIVED in the IREPS bills adapter's to_gold from the
+               PartyCode suffix (OPERATING_UNIT_SUFFIXES: ...1065309 =
+               Friction, ...60828 = Rohtak, ...833 = Hosur, longest first,
+               anything else NA) and rides onto each bill's recovery lines;
+               it is not in ingest's BILL_MUTABLE because vendor_code is
+               immutable identity. (An older BLOCK-per-bill export format existed
                before 2026-08 and is no longer supported — this parser
                does not read it.) Accepts legacy .xls (BIFF) as well as
                .xlsx/.xlsm — `_open_workbook` dispatches by extension to
@@ -242,7 +252,15 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
                file REPORTED into gold.file_rows (_record_sightings, one row per
                gold row carried, inserted/updated/unchanged alike) and returns
                stats["rows_reported"] — without that an export whose rows all
-               already exist leaves no trace anywhere in gold
+               already exist leaves no trace anywhere in gold. stats["by_frame"]
+               breaks the same counters down per gold frame (bank_txns | bills |
+               recoveries | lineage_<slot>, each reported/inserted/updated/
+               unchanged/conflicts) — what the UI renders as "Total bills / New
+               bills / Duplicate bills (not added)" vs "New transactions"
+               (frontend IngestStatsSummary, the one place that vocabulary
+               lives); the flat keys stay for compat (tests + every persisted
+               ingestion.completed audit row), old rows lacking by_frame fall
+               back to the flat line
   incremental.py  Phase-6 runs: pool = new credits + open exceptions vs all
                unconsumed bills; UNCHANGED matcher; match_ledger (HIGH auto-LOCKs),
                exception lifecycle OPEN -> RESOLVED; one running run per customer
@@ -407,15 +425,33 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                the server stores only diffs from defaults) via GET/PUT
                /config, dropdowns fed by /api/gold/schema; there is NO
                per-run tunables panel — the UI sends no tunables so the
-               saved config governs) -> results.
+               saved config governs) -> results. The "Reconciliation
+               result" / "Run data" nav items are NEVER disabled: opened
+               with nothing loaded, App auto-loads the customer's latest
+               succeeded run (one attempt per run id, never while a
+               hash-named selection is still restoring), and the header's
+               RunPicker (mode + run-date range + checkbox list, at least
+               one run always selected) switches runs; with no runs at all
+               the empty state guides to Ingest/Reconcile.
                "Workspace": Analyst queue (LedgerView renamed in UI
-               ONLY — /api/ledger and DB names unchanged; RunsView opens
-               inline from its "⧉ Runs" button top right) + AR Reconciliation
-               (ARReconciliationView over GET /api/ar — db/overview.py
-               ar_view: the bill-centric AR working set (settled / in-review
-               from the match ledger, outstanding = open BILL_ONLY aged from
-               payment_advice/order/submission date, OVERDUE > 30d), KPIs +
-               aging buckets; settled rows cross-link into the Analyst queue
+               ONLY — /api/ledger and DB names unchanged; a Run column +
+               a RunFilter (components/RunFilter.tsx: mode + run-date range
+               + ticked runs, EMPTY = every run, the opposite of RunPicker's
+               "load these") narrows matches by run_id and exceptions by
+               first_seen OR resolved_by run; the old RunsView "Runs"/"Run
+               history" inset was REMOVED from this view and the component
+               deleted — it duplicated the RunFilter's list and its only
+               action, "Open", navigated away to the run's Summary, which
+               read as a broken filter) + AR
+               Reconciliation (ARReconciliationView over GET /api/ar —
+               db/overview.py ar_view: the bill-centric AR working set
+               (settled / in-review from the match ledger, outstanding =
+               open BILL_ONLY aged from payment_advice/order/submission
+               date, OVERDUE > 30d), KPIs + aging buckets; every row carries
+               run_id (match's run / exception's first-seen run) so the same
+               RunFilter narrows the table + status breakdown — KPI tiles and
+               aging stay whole-customer on purpose, they are the live AR
+               position; settled rows cross-link into the Analyst queue
                focus; recon-alpha's milestone tracker deliberately omitted —
                not an IREPS concept) + Audit trail
                (AuditTrailView over GET /api/audit — the real audit_log

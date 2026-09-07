@@ -14,7 +14,7 @@ export const BILL_IDENTITY: Array<[string, string]> = [
   ['org_unit', 'Org unit'],
   ['bill_status', 'Status'],
   ['ExpectedBasis', 'Expected basis'],
-  ['sheet', 'Export sheet'],
+  ['operating_unit', 'Operating unit'],
   ['data_row', 'Export row'],
 ]
 

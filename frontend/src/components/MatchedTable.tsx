@@ -63,13 +63,14 @@ function buildColumns(rows: Row[]): ColumnDef<Row>[] {
   return [...curatedKeys.map(([k, l]) => make(k, l)), ...rest.map((k) => make(k, k))]
 }
 
-export function MatchedTable({ rows }: { rows: Row[] }) {
+export function MatchedTable({ rows, emptyNote }: { rows: Row[]; emptyNote?: React.ReactNode }) {
   return (
     <DataTable
       rows={rows}
       columns={buildColumns(rows)}
       numericIds={AMOUNT_COLS}
       initialHidden={HIDDEN_BY_DEFAULT}
+      emptyNote={emptyNote}
     />
   )
 }

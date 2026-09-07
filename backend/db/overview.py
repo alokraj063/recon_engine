@@ -278,6 +278,8 @@ def ar_view(session, customer_pk: int,
             "match_ledger_id": m.id,
             "match_seq": m.seq,
             "exception_id": None,
+            # the run that produced this row — the AR view's run filter
+            "run_id": m.run_id,
         })
 
     # --- outstanding: open BILL_ONLY exceptions -------------------------
@@ -306,6 +308,7 @@ def ar_view(session, customer_pk: int,
             "match_ledger_id": None,
             "match_seq": None,
             "exception_id": exc.id,
+            "run_id": exc.first_seen_run_id,
         })
 
     rows.sort(key=lambda r: (_AR_STATUS_ORDER[r["status"]],

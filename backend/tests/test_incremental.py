@@ -230,6 +230,11 @@ def test_incremental_scenario(world):
         {"bills": bz["bills"], "recoveries": bz["bills"]})
     # one FILE reused (bills + recoveries frames share one bronze file)
     assert stats_re["files_reused"] == 1 and stats_re["rows_inserted"] == 0
+    # a whole-file duplicate still breaks down per frame: every bill it
+    # carried reads as "already in gold, not added", none as new
+    per = stats_re["by_frame"]["bills"]
+    assert per["inserted"] == 0 and per["reported"] > 0
+    assert per["unchanged"] == per["reported"]
     with SessionLocal() as s:
         after = len(list(s.execute(
             select(GoldBill.id).where(GoldBill.customer_id == cust)).scalars()))

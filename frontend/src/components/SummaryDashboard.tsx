@@ -1,6 +1,7 @@
 import type { ReconMeta, SummaryRow } from '../types'
 import { findAmount, sumAmount, sumCounts } from '../combineRuns'
 import { inr } from '../format'
+import { IngestStatsSummary } from './IngestStatsSummary'
 
 export interface SummaryRun {
   runId: string
@@ -114,21 +115,15 @@ export function SummaryDashboard({ runs, aggregate }: Props) {
       )}
 
       {!multi && meta.mode === 'incremental' && ingest && (
-        <div className="stat-chips reveal reveal-2">
-          <span className="chip">files reused {ingest.files_reused}</span>
-          <span className="chip">rows inserted {ingest.rows_inserted}</span>
-          <span className="chip">bills updated {ingest.bills_updated}</span>
-          <span className="chip">rows reused {ingest.rows_reused}</span>
-          <span className={`chip${conflicts > 0 ? ' chip-attempts' : ''}`}>
-            conflicts {conflicts}
-          </span>
+        <div className="reveal reveal-2">
+          <IngestStatsSummary stats={ingest} />
           {ledger && (
-            <>
+            <div className="stat-chips">
               <span className="chip">matches created {ledger.matches_created}</span>
               <span className="chip">auto-locked {ledger.auto_locked}</span>
               <span className="chip">exceptions opened {ledger.exceptions_opened}</span>
               <span className="chip">exceptions resolved {ledger.exceptions_resolved}</span>
-            </>
+            </div>
           )}
         </div>
       )}

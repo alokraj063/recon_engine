@@ -22,9 +22,17 @@ interface Props {
   toolbar?: React.ReactNode
   /** renders an extra <tr> under a row when it is expanded */
   renderDetail?: (row: Row) => React.ReactNode
+  /** denominator for the row counter when the caller pre-filters `rows`
+   *  (defaults to rows.length) */
+  totalRows?: number
+  /** shown INSTEAD of the table when `rows` is empty — the caller knows
+   *  why (an empty run, a segment with nothing in it); a typed filter
+   *  that matches nothing gets a built-in note, not this one */
+  emptyNote?: React.ReactNode
 }
 
-export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, renderDetail }: Props) {
+export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, renderDetail, totalRows,
+                            emptyNote }: Props) {
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
@@ -78,10 +86,19 @@ export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, r
           </div>
         </details>
         <span className="row-count">
-          {visible.length} of {rows.length} rows
+          {visible.length} of {totalRows ?? rows.length} rows
         </span>
       </div>
 
+      {visible.length === 0 ? (
+        // no bordered box around nothing: the note stands alone under
+        // the toolbar (kept, so a typed filter can still be cleared)
+        <div className="table-empty">
+          {rows.length > 0 && globalFilter
+            ? <p className="frame-note">no rows match “{globalFilter}”</p>
+            : (emptyNote ?? <p className="frame-note">no rows</p>)}
+        </div>
+      ) : (
       <div className="table-scroll">
         <table className="data">
           <thead>
@@ -129,6 +146,7 @@ export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, r
           </tbody>
         </table>
       </div>
+      )}
     </div>
   )
 }

@@ -38,7 +38,10 @@ BILL_MUTABLE = ["bill_status", "payment_order_ref", "payment_order_date",
                 "payment_advice_date", "gross_amount", "approved_amount",
                 "deduction_amount", "net_payable_amount", "recovery_count",
                 "recovery_sum", "return_reason", "net_check",
-                "recovery_check", "sheet", "header_row", "data_row"]
+                "recovery_check", "header_row", "data_row"]
+# operating_unit is deliberately NOT mutable: it is derived from
+# vendor_code (immutable identity), so a later export can never move a
+# bill between units
 
 _BLANK_KEYS = {"", "-", "----", "NAN", "NONE"}
 
@@ -77,8 +80,26 @@ def _consumed_bill_ids(session, customer_id, statuses=("LOCKED",)) -> set:
 
 
 def new_stats() -> dict:
+    """Flat accumulator across every frame in the ingestion (the keys the
+    API, tests and every persisted ingestion.completed audit row use) plus
+    `by_frame`: the same counts broken down per gold frame (bank_txns |
+    bills | recoveries | lineage_<slot>), each
+    {reported, inserted, updated, unchanged, conflicts} — what the UI
+    renders per entity kind ("new bills" vs "new transactions")."""
     return {"files_reused": 0, "rows_inserted": 0, "bills_updated": 0,
-            "rows_reused": 0, "conflicts": 0, "rows_reported": 0}
+            "rows_reused": 0, "conflicts": 0, "rows_reported": 0,
+            "by_frame": {}}
+
+
+_FLAT_TO_FRAME = {"rows_inserted": "inserted", "bills_updated": "updated",
+                  "rows_reused": "unchanged", "conflicts": "conflicts"}
+
+
+def _frame_delta(before: dict, after: dict) -> dict:
+    """One frame's share of the flat counters: what its _ingest_* call
+    added between the `before` snapshot and now."""
+    return {name: after[flat] - before[flat]
+            for flat, name in _FLAT_TO_FRAME.items()}
 
 
 def _record_sightings(session, customer_id: int, frame: str,
@@ -273,6 +294,7 @@ def ingest_gold_frames(session, customer_id: int,
     models = {frame: fixed_models.get(frame, GoldLineageDoc)
               for frame in gold_frames}
     ids: Dict[str, Dict[int, str]] = {}
+    by_frame: Dict[str, dict] = stats["by_frame"]
     reused_files = set()
     # {row_seq: id} already owned by this bronze file, per frame — kept
     # even when the whole-file shortcut below doesn't apply, so each
@@ -291,11 +313,17 @@ def ingest_gold_frames(session, customer_id: int,
         if rows and len(rows) == len(df):
             ids[frame] = rows
             reused_files.add(frame)
+            # the whole file is a duplicate: every row already in gold,
+            # nothing added — the flat counters don't see these rows
+            # (only rows_reported does), the per-frame view says so
+            by_frame[frame] = {"inserted": 0, "updated": 0,
+                               "unchanged": len(rows), "conflicts": 0}
     # count FILES, not frames — one bills upload yields two gold frames
     # (bills + recoveries) sharing a bronze file
     stats["files_reused"] += len({bronze_ids[f] for f in reused_files})
 
     if "bank_txns" in gold_frames and "bank_txns" not in reused_files:
+        before = dict(stats)
         ids["bank_txns"] = _ingest_keyed(
             session, GoldBankTxn, gold_frames["bank_txns"], BANK_MAP,
             base("bank_txns"),
@@ -304,14 +332,18 @@ def ingest_gold_frames(session, customer_id: int,
             key_cols_frame=bank_key,
             stats=stats,
             existing_file_rows=file_rows.get("bank_txns"))
+        by_frame["bank_txns"] = _frame_delta(before, stats)
 
     inserted_bill_ids: set = set()
     if "bills" in gold_frames and "bills" not in reused_files:
+        before = dict(stats)
         ids["bills"], inserted_bill_ids = _ingest_bills(
             session, gold_frames["bills"], base("bills"), stats,
             key_cols=bill_key, existing_file_rows=file_rows.get("bills"))
+        by_frame["bills"] = _frame_delta(before, stats)
 
     if "recoveries" in gold_frames and "recoveries" not in reused_files:
+        before = dict(stats)
         bill_ids = ids.get("bills", {})
         df = gold_frames["recoveries"]
         keep = []
@@ -334,12 +366,15 @@ def ingest_gold_frames(session, customer_id: int,
             stats["rows_inserted"] += len(keep)
         else:
             ids.setdefault("recoveries", {})
+        by_frame["recoveries"] = _frame_delta(before, stats)
 
     for frame in gold_frames:
         if frame.startswith("lineage") and frame not in reused_files:
+            before = dict(stats)
             ids[frame] = _ingest_lineage(
                 session, gold_frames[frame], LINEAGE_MAP, base(frame), stats,
                 existing_file_rows=file_rows.get(frame))
+            by_frame[frame] = _frame_delta(before, stats)
 
     # what this upload actually reported, per frame — the only record that
     # survives when every row it carried already existed. The stat counts
@@ -349,6 +384,9 @@ def ingest_gold_frames(session, customer_id: int,
         _record_sightings(session, customer_id, frame, bronze_ids[frame],
                           frame_ids)
         stats["rows_reported"] += len(frame_ids)
+        by_frame.setdefault(frame, {"inserted": 0, "updated": 0,
+                                    "unchanged": 0, "conflicts": 0})
+        by_frame[frame]["reported"] = len(frame_ids)
 
     record_event(session, logger, event_type="gold.ingest_completed",
                  customer_id=customer_id, run_id=run_id,
