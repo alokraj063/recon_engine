@@ -398,7 +398,9 @@ class MatchLedger(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_uuid)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
-    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)   # run that created it
+    # run that created it — NULL for a MANUAL match, which is a user
+    # decision with no creating run (db/incremental.py create_manual_match)
+    run_id: Mapped[Optional[str]] = mapped_column(ForeignKey("runs.id"), nullable=True, index=True)
     match_id: Mapped[str] = mapped_column(String(16))
     # durable per-customer match number shown in the UI as "M-{seq}" —
     # match_id (m0, m1, …) restarts every run, this never repeats.
@@ -411,6 +413,8 @@ class MatchLedger(Base):
     locked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     locked_by: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # AUTO_HIGH | USER
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # free text an analyst attaches to a MANUAL match (optional; never logged)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class MatchLedgerBill(Base):
@@ -431,10 +435,20 @@ class ExceptionLedger(Base):
     exception_type: Mapped[str] = mapped_column(String(16))   # BANK_ONLY | BILL_ONLY
     gold_bank_txn_id: Mapped[Optional[str]] = mapped_column(ForeignKey("gold.bank_txns.id"), nullable=True, index=True)
     gold_bill_id: Mapped[Optional[str]] = mapped_column(ForeignKey("gold.bills.id"), nullable=True, index=True)
-    first_seen_run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"))
+    # NULL only when the row was (re)opened by a user decision on a MANUAL
+    # match and no earlier row for the same credit/bill exists to inherit
+    # a run from (a rejected manual match has no run to point at)
+    first_seen_run_id: Mapped[Optional[str]] = mapped_column(ForeignKey("runs.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="OPEN")   # OPEN | RESOLVED
     resolved_by_run_id: Mapped[Optional[str]] = mapped_column(ForeignKey("runs.id"), nullable=True)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # HOW it was resolved: RUN (a later run matched it) | USER_ACCEPT (an
+    # analyst accepted the review match that pairs it) | USER_MANUAL (an
+    # analyst paired it by hand) | USER_REOPEN (a rejection was undone).
+    # resolved_by_run_id stays set for RUN only; the user kinds carry the
+    # match instead.
+    resolved_by: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    resolved_by_match_id: Mapped[Optional[str]] = mapped_column(ForeignKey("match_ledger.id"), nullable=True)
 
 
 class IngestConflict(Base):

@@ -6,8 +6,11 @@ Read-only (no audit events).
 
 from datetime import date
 
+from datetime import datetime, timedelta
+from sqlalchemy import false, or_, true
 from sqlalchemy import func, select
 
+from . import incremental
 from .models import (AuditLog, BronzeFile, ExceptionLedger, GoldBankTxn,
                      GoldBill, GoldLineageDoc, GoldRecovery, MatchLedger,
                      MatchLedgerBill, Run)
@@ -95,45 +98,177 @@ def _count(session, model, *where) -> int:
         select(func.count()).select_from(model).where(*where)).scalar() or 0
 
 
-def overview(session, customer_pk: int) -> dict:
+# the operating-unit token for what has NO unit: unmatched bank credits
+# (a credit only inherits a unit through the bill it settles) and bills
+# whose PartyCode named no known unit. Sent by the UI as a unit value so
+# hiding those rows is a visible choice, never a silent drop.
+UNASSIGNED_UNIT = "UNASSIGNED"
+
+
+def operating_units(session, customer_pk: int) -> list:
+    """Distinct non-null gold.bills.operating_unit values with bill counts —
+    per-customer data (derived from the IREPS PartyCode), not schema."""
+    return [{"unit": u, "bills": n} for u, n in session.execute(
+        select(GoldBill.operating_unit, func.count())
+        .where(GoldBill.customer_id == customer_pk,
+               GoldBill.operating_unit.isnot(None))
+        .group_by(GoldBill.operating_unit)
+        .order_by(GoldBill.operating_unit))]
+
+
+def _date_bounds(col, date_from, date_to, is_datetime=False):
+    """[from, to] inclusive on a Date column; a DateTime column gets the
+    half-open [from 00:00, to+1day 00:00) so the whole last day counts."""
+    cl = []
+    if date_from:
+        cl.append(col >= (datetime.combine(date_from, datetime.min.time())
+                          if is_datetime else date_from))
+    if date_to:
+        cl.append(col < datetime.combine(date_to + timedelta(days=1), datetime.min.time())
+                  if is_datetime else col <= date_to)
+    return cl
+
+
+def overview(session, customer_pk: int, date_from=None, date_to=None,
+             units=None) -> dict:
+    """Command Center aggregates. With no filter every query is the one it
+    always was (the payload stays identical); with a date window and/or
+    an operating-unit set, each figure narrows on the column the table
+    in improvement_7sept.md §2.1 names:
+
+      credits / bank_txns    value_date; unit = the settling bill's unit,
+                             UNASSIGNED = not matched to any bill
+      bills / recoveries     submission_date (fallback bill_date); unit
+      lineage_docs           doc_date (no unit)
+      match status counts    match created_at; unit via a picked bill
+      matched_credits/rate   the credit's value_date + unit (so the rate's
+                             numerator and denominator agree)
+      exceptions             BILL_ONLY: advice -> order -> submission date
+                             + unit; BANK_ONLY: value_date, always
+                             UNASSIGNED (a bank credit has no unit)
+    `filters_applied` echoes the window and reports how many open
+    BANK_ONLY rows fell in the UNASSIGNED bucket."""
+    units = list(dict.fromkeys(units)) if units else None
+    named = [u for u in units if u != UNASSIGNED_UNIT] if units else []
+    include_unassigned = units is None or UNASSIGNED_UNIT in units
+    filtered = bool(date_from or date_to or units)
+
+    # --- filter clauses (empty lists when unfiltered -> identical SQL) ---
+    txn_cl = _date_bounds(GoldBankTxn.value_date, date_from, date_to)
+    bill_cl = _date_bounds(func.coalesce(GoldBill.submission_date, GoldBill.bill_date),
+                           date_from, date_to)
+    bill_due_cl = _date_bounds(func.coalesce(GoldBill.payment_advice_date,
+                                             GoldBill.payment_order_date,
+                                             GoldBill.submission_date),
+                               date_from, date_to)
+    match_cl = _date_bounds(MatchLedger.created_at, date_from, date_to, is_datetime=True)
+    doc_cl = _date_bounds(GoldLineageDoc.doc_date, date_from, date_to)
+    unit_bill_cl = []
+    unit_txn_cl = []
+    unit_match_cl = []
+    bank_only_cl = []          # a BANK_ONLY row is always UNASSIGNED
+    if units is not None:
+        bill_in_units = or_(GoldBill.operating_unit.in_(named) if named else false(),
+                            GoldBill.operating_unit.is_(None) if include_unassigned else false())
+        unit_bill_cl = [bill_in_units]
+        # credits that settle a bill in the units (any non-rejected match)
+        credit_in_units = (select(MatchLedger.gold_bank_txn_id)
+                           .join(MatchLedgerBill, MatchLedgerBill.match_ledger_id == MatchLedger.id)
+                           .join(GoldBill, GoldBill.id == MatchLedgerBill.gold_bill_id)
+                           .where(MatchLedger.customer_id == customer_pk,
+                                  MatchLedger.status != "REJECTED",
+                                  MatchLedgerBill.role == "picked",
+                                  bill_in_units))
+        matched_any = (select(MatchLedger.gold_bank_txn_id)
+                       .where(MatchLedger.customer_id == customer_pk,
+                              MatchLedger.status != "REJECTED"))
+        unit_txn_cl = [or_(GoldBankTxn.id.in_(credit_in_units),
+                           GoldBankTxn.id.not_in(matched_any) if include_unassigned else false())]
+        unit_match_cl = [MatchLedger.id.in_(
+            select(MatchLedgerBill.match_ledger_id)
+            .join(GoldBill, GoldBill.id == MatchLedgerBill.gold_bill_id)
+            .where(MatchLedgerBill.role == "picked", bill_in_units))]
+        bank_only_cl = [true() if include_unassigned else false()]
+    bills_in_scope = (select(GoldBill.id)
+                      .where(GoldBill.customer_id == customer_pk, *bill_cl, *unit_bill_cl))
+
     gold = {
         "bank_txns": _count(session, GoldBankTxn,
-                            GoldBankTxn.customer_id == customer_pk),
+                            GoldBankTxn.customer_id == customer_pk,
+                            *txn_cl, *unit_txn_cl),
         "credits": _count(session, GoldBankTxn,
                           GoldBankTxn.customer_id == customer_pk,
-                          GoldBankTxn.used_in_recon.is_(True)),
-        "bills": _count(session, GoldBill, GoldBill.customer_id == customer_pk),
+                          GoldBankTxn.used_in_recon.is_(True),
+                          *txn_cl, *unit_txn_cl),
+        "bills": _count(session, GoldBill, GoldBill.customer_id == customer_pk,
+                        *bill_cl, *unit_bill_cl),
         "recoveries": _count(session, GoldRecovery,
-                             GoldRecovery.customer_id == customer_pk),
+                             GoldRecovery.customer_id == customer_pk,
+                             *([GoldRecovery.gold_bill_id.in_(bills_in_scope)]
+                               if filtered else [])),
         "lineage_docs": _count(session, GoldLineageDoc,
-                               GoldLineageDoc.customer_id == customer_pk),
+                               GoldLineageDoc.customer_id == customer_pk,
+                               *doc_cl),
     }
 
     matches = {status: 0 for status in ("OPEN", "LOCKED", "REJECTED")}
     for status, n in session.execute(
             select(MatchLedger.status, func.count())
-            .where(MatchLedger.customer_id == customer_pk)
+            .where(MatchLedger.customer_id == customer_pk, *match_cl, *unit_match_cl)
             .group_by(MatchLedger.status)):
         matches[status] = n
     locked_by = {"AUTO_HIGH": 0, "USER": 0}
     for by, n in session.execute(
             select(MatchLedger.locked_by, func.count())
             .where(MatchLedger.customer_id == customer_pk,
-                   MatchLedger.status == "LOCKED")
+                   MatchLedger.status == "LOCKED", *match_cl, *unit_match_cl)
             .group_by(MatchLedger.locked_by)):
         if by in locked_by:
             locked_by[by] = n
+    # matches an analyst created by hand (item 3.2): LOCKED by USER like an
+    # accepted review match, but told apart by the frozen MANUAL confidence
+    manual_matches = _count(session, MatchLedger,
+                            MatchLedger.customer_id == customer_pk,
+                            MatchLedger.confidence == incremental.MANUAL_CONFIDENCE,
+                            MatchLedger.status != "REJECTED",
+                            *match_cl, *unit_match_cl)
+
+    # exception rows in scope: BANK_ONLY through its credit, BILL_ONLY
+    # through its bill. Unfiltered keeps the plain (join-free) counts.
+    def exc_bank(*extra):
+        return (select(ExceptionLedger)
+                .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
+                .where(ExceptionLedger.customer_id == customer_pk,
+                       ExceptionLedger.exception_type == "BANK_ONLY",
+                       *txn_cl, *bank_only_cl, *extra))
+
+    def exc_bill(*extra):
+        return (select(ExceptionLedger)
+                .join(GoldBill, GoldBill.id == ExceptionLedger.gold_bill_id)
+                .where(ExceptionLedger.customer_id == customer_pk,
+                       ExceptionLedger.exception_type == "BILL_ONLY",
+                       *bill_due_cl, *unit_bill_cl, *extra))
+
+    def exc_count(q):
+        return session.execute(
+            select(func.count()).select_from(q.subquery())).scalar() or 0
 
     open_exc = {"BANK_ONLY": 0, "BILL_ONLY": 0}
-    for etype, n in session.execute(
-            select(ExceptionLedger.exception_type, func.count())
-            .where(ExceptionLedger.customer_id == customer_pk,
-                   ExceptionLedger.status == "OPEN")
-            .group_by(ExceptionLedger.exception_type)):
-        open_exc[etype] = n
-    resolved = _count(session, ExceptionLedger,
-                      ExceptionLedger.customer_id == customer_pk,
-                      ExceptionLedger.status == "RESOLVED")
+    if filtered:
+        open_exc["BANK_ONLY"] = exc_count(exc_bank(ExceptionLedger.status == "OPEN"))
+        open_exc["BILL_ONLY"] = exc_count(exc_bill(ExceptionLedger.status == "OPEN"))
+        resolved = (exc_count(exc_bank(ExceptionLedger.status == "RESOLVED"))
+                    + exc_count(exc_bill(ExceptionLedger.status == "RESOLVED")))
+    else:
+        for etype, n in session.execute(
+                select(ExceptionLedger.exception_type, func.count())
+                .where(ExceptionLedger.customer_id == customer_pk,
+                       ExceptionLedger.status == "OPEN")
+                .group_by(ExceptionLedger.exception_type)):
+            open_exc[etype] = n
+        resolved = _count(session, ExceptionLedger,
+                          ExceptionLedger.customer_id == customer_pk,
+                          ExceptionLedger.status == "RESOLVED")
 
     bank_open_value = session.execute(
         select(func.coalesce(func.sum(GoldBankTxn.amount), 0.0))
@@ -141,19 +276,30 @@ def overview(session, customer_pk: int) -> dict:
         .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
         .where(ExceptionLedger.customer_id == customer_pk,
                ExceptionLedger.status == "OPEN",
-               ExceptionLedger.exception_type == "BANK_ONLY")).scalar() or 0.0
+               ExceptionLedger.exception_type == "BANK_ONLY",
+               *txn_cl, *bank_only_cl)).scalar() or 0.0
     bill_open_value = session.execute(
         select(func.coalesce(func.sum(GoldBill.net_payable_amount), 0.0))
         .select_from(ExceptionLedger)
         .join(GoldBill, GoldBill.id == ExceptionLedger.gold_bill_id)
         .where(ExceptionLedger.customer_id == customer_pk,
                ExceptionLedger.status == "OPEN",
-               ExceptionLedger.exception_type == "BILL_ONLY")).scalar() or 0.0
+               ExceptionLedger.exception_type == "BILL_ONLY",
+               *bill_due_cl, *unit_bill_cl)).scalar() or 0.0
 
-    matched_credits = session.execute(
-        select(func.count(func.distinct(MatchLedger.gold_bank_txn_id)))
-        .where(MatchLedger.customer_id == customer_pk,
-               MatchLedger.status != "REJECTED")).scalar() or 0
+    if filtered:
+        # numerator on the same column set as the credits denominator
+        matched_credits = session.execute(
+            select(func.count(func.distinct(MatchLedger.gold_bank_txn_id)))
+            .join(GoldBankTxn, GoldBankTxn.id == MatchLedger.gold_bank_txn_id)
+            .where(MatchLedger.customer_id == customer_pk,
+                   MatchLedger.status != "REJECTED",
+                   *txn_cl, *unit_txn_cl)).scalar() or 0
+    else:
+        matched_credits = session.execute(
+            select(func.count(func.distinct(MatchLedger.gold_bank_txn_id)))
+            .where(MatchLedger.customer_id == customer_pk,
+                   MatchLedger.status != "REJECTED")).scalar() or 0
     match_rate = (matched_credits / gold["credits"]) if gold["credits"] else None
 
     # top open exceptions by absolute value (both sides in one list)
@@ -163,7 +309,8 @@ def overview(session, customer_pk: int) -> dict:
             .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
             .where(ExceptionLedger.customer_id == customer_pk,
                    ExceptionLedger.status == "OPEN",
-                   ExceptionLedger.exception_type == "BANK_ONLY")):
+                   ExceptionLedger.exception_type == "BANK_ONLY",
+                   *txn_cl, *bank_only_cl)):
         top.append({"id": e.id, "exception_type": "BANK_ONLY",
                     "ref": t.bank_ref, "zone": t.zone_guess,
                     "amount": t.amount, "date": str(t.value_date or "")})
@@ -172,12 +319,31 @@ def overview(session, customer_pk: int) -> dict:
             .join(GoldBill, GoldBill.id == ExceptionLedger.gold_bill_id)
             .where(ExceptionLedger.customer_id == customer_pk,
                    ExceptionLedger.status == "OPEN",
-                   ExceptionLedger.exception_type == "BILL_ONLY")):
+                   ExceptionLedger.exception_type == "BILL_ONLY",
+                   *bill_due_cl, *unit_bill_cl)):
         top.append({"id": e.id, "exception_type": "BILL_ONLY",
                     "ref": b.bill_number, "zone": b.zone,
                     "amount": b.net_payable_amount,
                     "date": str(b.payment_advice_date or b.payment_order_date or "")})
     top.sort(key=lambda x: abs(x["amount"] or 0), reverse=True)
+
+    filters_applied = None
+    if filtered:
+        # open BANK_ONLY credits in the window have no unit by definition:
+        # say so, so a unit filter that hides them is a visible choice
+        unassigned_bank_only = exc_count(
+            select(ExceptionLedger)
+            .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
+            .where(ExceptionLedger.customer_id == customer_pk,
+                   ExceptionLedger.status == "OPEN",
+                   ExceptionLedger.exception_type == "BANK_ONLY", *txn_cl))
+        filters_applied = {
+            "from": date_from.isoformat() if date_from else None,
+            "to": date_to.isoformat() if date_to else None,
+            "operating_units": units,
+            "unassigned_included": include_unassigned,
+            "bank_only_unassigned": unassigned_bank_only,
+        }
 
     last_run_row = session.execute(
         select(Run).where(Run.customer_id == customer_pk,
@@ -202,6 +368,7 @@ def overview(session, customer_pk: int) -> dict:
         "gold": gold,
         "matches": matches,
         "locked_by": locked_by,
+        "manual_matches": manual_matches,
         "open_exceptions": open_exc,
         "resolved_exceptions": resolved,
         "open_value": {"bank_only": bank_open_value,
@@ -212,6 +379,7 @@ def overview(session, customer_pk: int) -> dict:
         "top_exceptions": top[:8],
         "last_run": last_run,
         "last_ingestion": last_ingestion,
+        **({"filters_applied": filters_applied} if filtered else {}),
     }
 
 
@@ -265,6 +433,8 @@ def ar_view(session, customer_pk: int,
             "bill_number": bill.bill_number,
             "zone": bill.zone,
             "org_unit": bill.org_unit,
+            # gold operating_unit — the AR view's unit filter (item 2.2)
+            "org_unit_operating": bill.operating_unit,
             "bill_status": bill.bill_status,
             "gross_amount": bill.gross_amount,
             "net_payable_amount": net,
@@ -295,6 +465,8 @@ def ar_view(session, customer_pk: int,
             "bill_number": bill.bill_number,
             "zone": bill.zone,
             "org_unit": bill.org_unit,
+            # gold operating_unit — the AR view's unit filter (item 2.2)
+            "org_unit_operating": bill.operating_unit,
             "bill_status": bill.bill_status,
             "gross_amount": bill.gross_amount,
             "net_payable_amount": bill.net_payable_amount,
@@ -340,8 +512,21 @@ def ar_view(session, customer_pk: int,
     aging.append({"bucket": "undated", "count": len(undated),
                   "value": sum(r["net_payable_amount"] or 0 for r in undated)})
 
+    # per-run credit counts so the UI can compute a match rate for a run
+    # subset (item 2.2): the denominator of a filtered rate is the credits
+    # of the runs in scope, which no row carries
+    run_credits = []
+    for run in session.execute(
+            select(Run).where(Run.customer_id == customer_pk,
+                              Run.status == "succeeded")
+            .order_by(Run.created_at.desc())).scalars():
+        counts = ((run.payload or {}).get("meta") or {}).get("counts") or {}
+        run_credits.append({"run_id": run.id,
+                            "credits": counts.get("bank_credits")})
+
     return {
         "as_of": today.isoformat(),
+        "runs": run_credits,
         "kpis": {
             "outstanding": {"count": len(open_rows),
                             "value": sum(r["net_payable_amount"] or 0

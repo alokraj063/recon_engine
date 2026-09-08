@@ -1,9 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
 import { GitMerge, RotateCw, Upload } from 'lucide-react'
 import type { CustomerInfo, Overview } from '../types'
-import { fetchOverview } from '../api'
-import { fmtWhen, inr } from '../format'
+import { fetchOperatingUnits, fetchOverview } from '../api'
+import { inr } from '../format'
 import type { View } from './Sidebar'
+import {
+  DEFAULT_DATE_FILTER, DateFilter, resolveWindow, unitsLabel, windowLabel,
+  type DateFilterValue,
+} from './DateFilter'
+
+const FILTER_KEY = (customer: string) => `recon.cc.filter.${customer}`
+
+function loadFilter(customer: string): DateFilterValue {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY(customer))
+    if (raw) return { ...DEFAULT_DATE_FILTER, ...JSON.parse(raw) }
+  } catch { /* fall through */ }
+  return DEFAULT_DATE_FILTER
+}
 
 interface Props {
   customers: CustomerInfo[]
@@ -70,15 +84,39 @@ export function CommandCenter({
 }: Props) {
   const [data, setData] = useState<Overview | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // date window + operating units (item 2.1), remembered per customer
+  const [filter, setFilter] = useState<DateFilterValue>(() => loadFilter(customerId))
+  const [units, setUnits] = useState<string[]>([])
+  const [unitCounts, setUnitCounts] = useState<Record<string, number>>({})
+
+  useEffect(() => { setFilter(loadFilter(customerId)) }, [customerId])
+  useEffect(() => {
+    try { localStorage.setItem(FILTER_KEY(customerId), JSON.stringify(filter)) } catch { /* ignore */ }
+  }, [customerId, filter])
+  useEffect(() => {
+    fetchOperatingUnits(customerId)
+      .then((r) => {
+        setUnits(r.units.map((u) => u.unit))
+        setUnitCounts(Object.fromEntries(r.units.map((u) => [u.unit, u.bills])))
+      })
+      .catch(() => setUnits([]))
+  }, [customerId, refreshKey])
 
   const load = useCallback(() => {
     setError(null)
-    fetchOverview(customerId)
+    const win = resolveWindow(filter)
+    fetchOverview(customerId, {
+      from: win.from || undefined, to: win.to || undefined,
+      operating_units: filter.units ?? undefined,
+    })
       .then(setData)
       .catch((e) => setError(String(e.message ?? e)))
-  }, [customerId])
+  }, [customerId, filter])
 
   useEffect(load, [load, refreshKey])
+  const scope = `${windowLabel(filter)}${units.length ? ` · ${unitsLabel(filter, units)}` : ''}`
+  const filtered = !!data?.filters_applied
+  const quiet = filtered && data && data.gold.credits === 0 && data.gold.bills === 0
 
   const openTotal = data
     ? data.open_exceptions.BANK_ONLY + data.open_exceptions.BILL_ONLY
@@ -90,16 +128,10 @@ export function CommandCenter({
     <section className="intake cc">
       <div className="ingest-head">
         <div>
-          <h2>Command Center</h2>
-          <p className="strap-note">
-            {data?.last_run
-              ? `last run ${fmtWhen(data.last_run.created_at)} · ${data.last_run.mode}`
-              : 'no runs yet'}
-            {data?.last_ingestion &&
-              ` · last ingest ${fmtWhen(data.last_ingestion.at)}`}
-          </p>
+          <h2 className="page-title">Command Center</h2>
         </div>
         <span className="cc-head-right">
+          <DateFilter value={filter} onChange={setFilter} units={units} unitCounts={unitCounts} />
           <label className="ctx-field">
             <span className="slot-label">Customer</span>
             <select value={customerId} onChange={(e) => onCustomerChange(e.target.value)}>
@@ -119,38 +151,52 @@ export function CommandCenter({
 
       {data && (
         <>
+          {quiet && (
+            <p className="frame-note">
+              nothing in this window ({scope}) — widen the date range or switch to
+              “All time” in the filter to see the whole customer.
+            </p>
+          )}
+          {filtered && data.filters_applied && data.filters_applied.bank_only_unassigned > 0
+            && !data.filters_applied.unassigned_included && (
+            <p className="chip-note cc-filter-note">
+              {data.filters_applied.bank_only_unassigned} bank-only credit
+              {data.filters_applied.bank_only_unassigned === 1 ? ' has' : 's have'} no operating unit
+              and {data.filters_applied.bank_only_unassigned === 1 ? 'is' : 'are'} hidden by the unit filter — tick “Unassigned” to include them.
+            </p>
+          )}
           <div className="tiles cc-tiles">
             <div className="tile tone-neutral">
               <div className="tile-label">Gold pool</div>
               <div className="tile-count">{data.gold.bills.toLocaleString('en-IN')}</div>
               <div className="tile-amount">bills · {data.gold.credits} credits</div>
-              <div className="tile-delta">{data.gold.lineage_docs.toLocaleString('en-IN')} lineage docs</div>
+              <div className="tile-delta">{data.gold.lineage_docs.toLocaleString('en-IN')} lineage docs · {scope}</div>
             </div>
             <div className="tile">
               <div className="tile-label">Matched</div>
               <div className="tile-count">{data.matched_credits}</div>
-              <div className="tile-amount">{pct(data.match_rate)} of credits</div>
+              <div className="tile-amount">{pct(data.match_rate)} of credits · {windowLabel(filter)}</div>
               <div className="tile-delta">{data.matches.LOCKED} locked · {data.matches.REJECTED} rejected</div>
             </div>
             <div className="tile tone-review">
               <div className="tile-label">Analyst queue</div>
               <div className="tile-count">{data.matches.OPEN}</div>
               <div className="tile-amount">matches awaiting review</div>
-              <div className="tile-delta">accept or reject to settle</div>
+              <div className="tile-delta">accept or reject to settle · {scope}</div>
             </div>
             <div className="tile tone-bank">
               <div className="tile-label">Open exceptions</div>
               <div className="tile-count">{openTotal.toLocaleString('en-IN')}</div>
               <div className="tile-amount">{inr(data.open_value.total)}</div>
               <div className="tile-delta">
-                {data.open_exceptions.BANK_ONLY} bank only · {data.open_exceptions.BILL_ONLY.toLocaleString('en-IN')} bill only
+                {data.open_exceptions.BANK_ONLY} bank only · {data.open_exceptions.BILL_ONLY.toLocaleString('en-IN')} bill only · {scope}
               </div>
             </div>
             <div className="tile tone-bill">
               <div className="tile-label">Resolved</div>
               <div className="tile-count">{data.resolved_exceptions}</div>
-              <div className="tile-amount">exceptions closed by later runs</div>
-              <div className="tile-delta">&nbsp;</div>
+              <div className="tile-amount">exceptions closed by runs or decisions</div>
+              <div className="tile-delta">{scope}</div>
             </div>
           </div>
 
@@ -198,6 +244,8 @@ export function CommandCenter({
                        total={credits} tone="fill-green" />
                 <Meter label="Locked by user" count={data.locked_by.USER}
                        total={credits} tone="fill-green-soft" />
+                <Meter label="Matched by user (manual)" count={data.manual_matches ?? 0}
+                       total={credits} tone="fill-green-soft" />
                 <Meter label="Open review" count={data.matches.OPEN}
                        total={credits} tone="fill-gold" />
                 <Meter label="Unmatched credits" count={unmatched}
@@ -211,10 +259,10 @@ export function CommandCenter({
               <h3 className="ledger-h">Pipeline</h3>
               <span className="cc-actions">
                 <button className="btn-open btn-ic" onClick={() => onNavigate('ingest')}>
-                  <Upload size={13} strokeWidth={1.75} /> Ingest files
+                  <Upload size={13} strokeWidth={1.75} /> Ingest documents
                 </button>
                 <button className="btn-open btn-ic" onClick={() => onNavigate('reconcile')}>
-                  <GitMerge size={13} strokeWidth={1.75} /> Run reconciliation
+                  <GitMerge size={13} strokeWidth={1.75} /> Initiate Reconciliation
                 </button>
               </span>
             </div>

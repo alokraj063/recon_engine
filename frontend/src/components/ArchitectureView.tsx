@@ -27,7 +27,7 @@ export function ArchitectureView({ customerId, onNavigate }: Props) {
     <section className="intake">
       <div className="ingest-head">
         <div>
-          <h2>Architecture</h2>
+          <h2 className="page-title">Architecture</h2>
           <p className="strap-note">
             the real stack — sources → medallion store → matching engine → ledger →
             governance → interface · live figures for customer {customerId}

@@ -145,6 +145,7 @@ export interface LedgerBillInfo {
   gold_bill_id: string
   role: 'picked' | 'candidate'
   bill_number: string | null
+  submission_ref?: string | null
   net_payable_amount: number | null
   zone: string | null
   bill_status: string | null
@@ -152,7 +153,8 @@ export interface LedgerBillInfo {
 
 export interface LedgerMatch {
   id: string
-  run_id: string
+  /** creating run — null for a MANUAL match (a user decision, no run) */
+  run_id: string | null
   /** per-run engine label (m0, m1, …) — repeats across runs */
   match_id: string
   /** durable per-customer match number, shown as "M-{seq}"; never reused */
@@ -162,9 +164,14 @@ export interface LedgerMatch {
   locked_by: 'AUTO_HIGH' | 'USER' | null
   created_at: string
   locked_at: string | null
+  /** analyst's free-text note (MANUAL matches only; optional) */
+  note?: string | null
   txn: LedgerTxnInfo | null
   bills: LedgerBillInfo[]
 }
+
+/** How an exception_ledger row was closed (frozen codes). */
+export type ExceptionResolvedBy = 'RUN' | 'USER_ACCEPT' | 'USER_MANUAL' | 'USER_REOPEN'
 
 export interface LedgerException {
   id: string
@@ -172,8 +179,15 @@ export interface LedgerException {
   status: 'OPEN' | 'RESOLVED'
   gold_bank_txn_id: string | null
   gold_bill_id: string | null
-  first_seen_run_id: string
+  /** null only for a row re-opened by rejecting a MANUAL match when no
+   *  earlier row for the same side ever named a run */
+  first_seen_run_id: string | null
   resolved_by_run_id: string | null
+  resolved_by?: ExceptionResolvedBy | null
+  resolved_by_match_id?: string | null
+  /** the resolving match's durable number (UI "M-{seq}") */
+  resolved_by_match_seq?: number | null
+  resolved_at?: string | null
   txn?: LedgerTxnInfo | null
   bill?: Omit<LedgerBillInfo, 'gold_bill_id' | 'role'> | null
 }
@@ -181,6 +195,18 @@ export interface LedgerException {
 export interface LedgerViewData {
   matches: LedgerMatch[]
   exceptions: LedgerException[]
+}
+
+/** POST /api/matches/manual response. */
+export interface ManualMatchResult {
+  id: string
+  seq: number | null
+  status: string
+  locked_by: string | null
+  confidence: string
+  /** credit amount − Σ picked bills' net payable */
+  variance: number
+  exceptions_resolved: number
 }
 
 /** Gold-layer browse frames served by GET /api/gold/{frame}. */
@@ -256,6 +282,8 @@ export interface Overview {
           recoveries: number; lineage_docs: number }
   matches: { OPEN: number; LOCKED: number; REJECTED: number }
   locked_by: { AUTO_HIGH: number; USER: number }
+  /** non-rejected matches with the frozen MANUAL confidence (item 3.2) */
+  manual_matches?: number
   open_exceptions: { BANK_ONLY: number; BILL_ONLY: number }
   resolved_exceptions: number
   open_value: { bank_only: number; bill_only: number; total: number }
@@ -265,6 +293,28 @@ export interface Overview {
   last_run: { run_id: string; mode: string; created_at: string
               counts: ReconMeta['counts'] | null } | null
   last_ingestion: { at: string; original_name: string; source_type: string } | null
+  /** present only when the request carried a filter (item 2.1) */
+  filters_applied?: {
+    from: string | null
+    to: string | null
+    operating_units: string[] | null
+    unassigned_included: boolean
+    /** open BANK_ONLY credits in the window — none of them has a unit */
+    bank_only_unassigned: number
+  }
+}
+
+/** GET /api/overview query filters. */
+export interface OverviewFilters {
+  from?: string
+  to?: string
+  operating_units?: string[]
+}
+
+/** GET /api/customers/{key}/operating-units */
+export interface OperatingUnits {
+  units: Array<{ unit: string; bills: number }>
+  unassigned: string
 }
 
 // --- AR reconciliation -------------------------------------------------
@@ -275,6 +325,8 @@ export interface ArRow {
   bill_number: string | null
   zone: string | null
   org_unit: string | null
+  /** gold operating_unit (Friction | Rohtak | Hosur | null) — the AR unit filter */
+  org_unit_operating?: string | null
   bill_status: string | null
   gross_amount: number | null
   net_payable_amount: number | null
@@ -293,6 +345,9 @@ export interface ArRow {
 
 export interface ArView {
   as_of: string
+  /** succeeded runs with their statement credit count — the denominator
+   *  of a match rate over a run subset (item 2.2) */
+  runs: Array<{ run_id: string; credits: number | null }>
   kpis: {
     outstanding: { count: number; value: number }
     received: { count: number; value: number; mtd_value: number }

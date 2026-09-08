@@ -17,6 +17,9 @@ import {
   type ReconcileParams,
   type ReconResponse,
   type Row,
+  type ManualMatchResult,
+  type OperatingUnits,
+  type OverviewFilters,
   type RunListItem,
 } from './types'
 import { normalizeRows, normalizeRun } from './normalizeLegacy'
@@ -127,13 +130,29 @@ export async function fetchCustomers(): Promise<CustomerInfo[]> {
   return getJson('/api/customers')
 }
 
+/** GET /api/ledger/workbook — the durable ledger as Excel (Matches incl.
+ *  manual, Manual_Matches, Exceptions with how each was resolved). */
+export function ledgerWorkbookUrl(customerId: string): string {
+  return `/api/ledger/workbook?customer_id=${encodeURIComponent(customerId)}`
+}
+
 export async function fetchLedger(customerId: string): Promise<LedgerViewData> {
   return getJson(`/api/ledger?customer_id=${encodeURIComponent(customerId)}`)
 }
 
-/** Command Center aggregates (gold pool, ledger state, open exposure). */
-export async function fetchOverview(customerId: string): Promise<Overview> {
-  return getJson(`/api/overview?customer_id=${encodeURIComponent(customerId)}`)
+/** Command Center aggregates (gold pool, ledger state, open exposure),
+ *  optionally narrowed to a date window / operating units (item 2.1). */
+export async function fetchOverview(customerId: string, filters?: OverviewFilters): Promise<Overview> {
+  const q = new URLSearchParams({ customer_id: customerId })
+  if (filters?.from) q.set('from', filters.from)
+  if (filters?.to) q.set('to', filters.to)
+  for (const u of filters?.operating_units ?? []) q.append('operating_unit', u)
+  return getJson(`/api/overview?${q.toString()}`)
+}
+
+/** The customer's operating units (from its gold bills). */
+export async function fetchOperatingUnits(customerId: string): Promise<OperatingUnits> {
+  return getJson(`/api/customers/${encodeURIComponent(customerId)}/operating-units`)
 }
 
 /** The customer's audit_log event stream, newest first. */
@@ -239,6 +258,18 @@ export async function unlockMatch(
   id: string,
 ): Promise<{ id: string; status: string; locked_by: string | null }> {
   return postJson(`/api/matches/${id}/unlock`)
+}
+
+/** Pair an open credit with open bill(s) by hand. No tolerance applies;
+ *  the response carries the variance. 409 ALREADY_CONSUMED when a side is
+ *  held by another match. The row is LOCKED by USER, confidence MANUAL. */
+export async function createManualMatch(
+  customerId: string, goldBankTxnId: string, goldBillIds: string[], note?: string,
+): Promise<ManualMatchResult> {
+  return postJson('/api/matches/manual', {
+    customer_id: customerId, gold_bank_txn_id: goldBankTxnId,
+    gold_bill_ids: goldBillIds, note: note ?? null,
+  })
 }
 
 /** Undo a REJECTED match — back to OPEN, re-claiming its credit and bills.

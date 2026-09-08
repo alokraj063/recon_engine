@@ -51,7 +51,8 @@
   --fs-ui: 13px;      /* primary buttons, emphasis */
   --fs-h4: 14px;      /* detail/section subheads */
   --fs-h3: 15px;      /* panel headings */
-  --fs-h2: 18px;      /* page headings */
+  --fs-h2: 18px;      /* panel headings, donut value */
+  --fs-h1: 28px;      /* PAGE title (.page-title) — the one heading per view */
   --fs-kpi: 24px;     /* tile-count headline numbers */
   --fs-kpi-sm: 21px;  /* tile-count where long rupee amounts must fit (AR) */
 }
@@ -321,27 +322,6 @@ html, body {
   margin-left: auto;
 }
 
-/* second line under the result head: run-specific file context, never
-   allowed to push the picker around */
-.head-sub {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--font-mono);
-  font-size: var(--fs-note);
-  color: var(--ink-faint);
-  margin: -12px 0 14px;
-}
-
-.head-sub .head-sub-files {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.head-sub .chip { flex-shrink: 0; }
-
 .btn-download {
   font-family: var(--font-body);
   font-weight: 600;
@@ -514,6 +494,8 @@ table.data td.date, .ledger td.date {
 
 .seg button:last-child { border-right: none; }
 .seg button.on { background: var(--ink); color: var(--paper); }
+/* scope switch in a Data page head: compact, sits with the stamps */
+.seg-scope button { font-size: var(--fs-note); padding: 4px 10px; font-weight: 600; }
 
 .table-scroll { overflow-x: auto; border: 1px solid var(--rule); }
 
@@ -570,6 +552,8 @@ table.data tbody tr:hover { background: #f1ead7; }
 .stamp-LOW { color: var(--gold); border-color: var(--gold); background: rgba(148, 102, 12, 0.08); }
 .stamp-AMOUNT_ONLY, .stamp-AMBIGUOUS { color: var(--sienna); border-color: var(--sienna); background: rgba(164, 74, 36, 0.08); }
 .stamp-BATCHED { color: var(--violet); border-color: var(--violet); background: rgba(91, 74, 134, 0.08); }
+/* MANUAL — a match an analyst created by hand (frozen code, item 3.2) */
+.stamp-MANUAL { color: var(--success); border-color: var(--success); background: hsl(142 55% 31% / 0.08); }
 .stamp-BANK_ONLY { color: var(--sienna); border-color: var(--sienna); background: rgba(164, 74, 36, 0.08); }
 .stamp-BILL_ONLY { color: var(--gold); border-color: var(--gold); background: rgba(148, 102, 12, 0.08); }
 .stamp-MATCH_REVIEW { color: var(--blue); border-color: var(--blue); background: rgba(43, 90, 120, 0.08); }
@@ -1236,15 +1220,6 @@ tr.active-run td { background: rgba(44, 115, 80, 0.06); }
 
 .ctx-wide { flex: 1; min-width: 340px; }
 .ctx-wide select { width: 100%; }
-
-.nav-sub-label {
-  font-family: var(--font-mono);
-  font-size: var(--fs-micro);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--rule-strong);
-  padding: 8px 18px 2px;
-}
 
 .link-btn {
   background: none;
@@ -1940,6 +1915,10 @@ table.data tbody tr:hover { background: hsl(220 16% 96%); }
   to   { background: transparent; }
 }
 .decide-link { margin-left: 10px; }
+/* Exception queue: live ledger stamp + the shared MatchDecision buttons
+   sit on the same line as the "weak match" sentence */
+.live-decision { display: inline-flex; align-items: center; gap: 10px; margin-left: 10px; vertical-align: middle; }
+.seg-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
 /* Bills cell in the Durable-matches table: chips flow with real gaps
    instead of fusing edge-to-edge or colliding across wrapped lines */
@@ -2192,6 +2171,16 @@ table.data tbody tr:hover { background: hsl(220 16% 96%); }
 
 .content { padding: 20px 24px 48px; }
 .intake h2, .section-title { font-size: var(--fs-h3); }
+/* the page title is the exception to the density pass: one per view,
+   set once here so every view's heading is the same size */
+h2.page-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-h1);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  margin: 0;
+}
 .seg button { font-size: var(--fs-note); padding: 5px 12px; }
 table.data th { padding: 6px 8px; }
 table.data td { padding: 6px 8px; }
@@ -2204,3 +2193,33 @@ table.data td { padding: 6px 8px; }
    longest needs so the row reads uniformly (FitText still guards narrower).
    Must sit after the .tile .tile-count override earlier in this block. */
 .ar-tiles .tile .tile-count { font-size: var(--fs-kpi-sm); }
+
+/* manual match picker (ManualMatchPicker) — Analyst queue + Exception queue */
+.mm-picker { display: flex; flex-direction: column; gap: 8px; padding: 6px 0 2px; }
+.mm-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mm-head .detail-section { margin: 0; }
+.mm-search, .mm-note {
+  font-family: var(--font-mono); font-size: var(--fs-note);
+  border: 1px solid var(--rule-strong); border-radius: 4px; padding: 4px 8px;
+  background: var(--paper-card); color: var(--ink); min-width: 220px;
+}
+.mm-note { flex: 1 1 260px; }
+.mm-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; border: 1px solid var(--rule); border-radius: 4px; padding: 4px; }
+.mm-row { display: grid; grid-template-columns: 18px 120px minmax(0, 1fr) 110px; align-items: center; gap: 10px; padding: 3px 6px; border-radius: 3px; cursor: pointer; font-size: var(--fs-note); }
+.mm-row:hover { background: var(--paper-deep); }
+.mm-row.on { background: hsl(175 70% 34% / 0.08); }
+.mm-amt { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.mm-text { font-family: var(--font-mono); color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mm-diff { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--ink-faint); text-align: right; }
+.mm-diff.exact { color: var(--green-bright); font-weight: 600; }
+.mm-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mm-variance { font-size: var(--fs-note); color: var(--ink-soft); }
+.mm-variance.warn { color: var(--gold); }
+
+/* date + operating-unit filter (DateFilter) */
+.date-filter-panel { min-width: 320px; }
+.date-filter-units { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.date-filter-units .stat-chips { margin: 0; }
+.unit-chip { cursor: pointer; color: var(--ink-faint); background: var(--paper-card); }
+.unit-chip.on { color: var(--ink); background: var(--paper-deep); border-color: var(--ink-soft); }
+.cc-filter-note { display: block; margin: 0 0 10px; color: var(--gold); }

@@ -65,7 +65,7 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
     ],
     flowsIn: ['Raw files uploaded on the Ingest page (or bundled default documents)'],
     flowsOut: ['Parsed source-native rows → silver', 'Canonical frames → gold'],
-    linksTo: [{ label: 'Ingest files', view: 'ingest' }],
+    linksTo: [{ label: 'Ingest documents', view: 'ingest' }],
   },
   {
     id: 'medallion',
@@ -90,15 +90,15 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
     ],
     kpis: [
       { label: 'Bills', live: (o) => n(o?.gold.bills) },
-      { label: 'Bank txns', live: (o) => n(o?.gold.bank_txns) },
+      { label: 'Bank Transactions', live: (o) => n(o?.gold.bank_txns) },
       { label: 'Lineage docs', live: (o) => n(o?.gold.lineage_docs) },
     ],
     flowsIn: ['Adapter output (canonical frames)'],
-    flowsOut: ['Reconciliation pools (engine)', 'Gold browse tabs'],
+    flowsOut: ['Reconciliation pools (engine)', 'Data pages (Current scope)'],
     linksTo: [
-      { label: 'Gold — Bills', view: 'gold_bills' },
-      { label: 'Gold — Bank txns', view: 'gold_bank' },
-      { label: 'Gold — Lineage docs', view: 'gold_lineage' },
+      { label: 'Bills', view: 'gold_bills' },
+      { label: 'Bank Transactions', view: 'gold_bank' },
+      { label: 'Lineage docs', view: 'gold_lineage' },
     ],
   },
   {
@@ -129,7 +129,7 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
     ],
     flowsIn: ['Gold pools (credits + eligible bills)', 'Customer matching config'],
     flowsOut: ['Matched frame + exception queue → results', 'Durable matches → ledger (incremental)'],
-    linksTo: [{ label: 'Run reconciliation', view: 'reconcile' }],
+    linksTo: [{ label: 'Reconcile', view: 'reconcile' }],
   },
   {
     id: 'ledger',
@@ -145,8 +145,8 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
       'run and flip to RESOLVED when their counterpart arrives. A locked match\'s credit and bills never ' +
       're-enter any pool, and its bills are shielded from newer exports.',
     components: [
-      { name: 'Match ledger', detail: 'OPEN / LOCKED / REJECTED, auto-lock on HIGH, unlock undo', code: 'db/incremental.py' },
-      { name: 'Exception lifecycle', detail: 'OPEN → RESOLVED across runs, carried in every pool', code: 'exception_ledger' },
+      { name: 'Match ledger', detail: 'OPEN / LOCKED / REJECTED, auto-lock on HIGH, unlock undo; MANUAL matches an analyst pairs by hand (no run)', code: 'db/incremental.py' },
+      { name: 'Exception lifecycle', detail: 'OPEN → RESOLVED by a run, an accept, a manual match or an undone rejection (resolved_by)', code: 'exception_ledger' },
       { name: 'Decision evidence', detail: 'Signals + candidate cards pulled from the creating run', code: 'Analyst queue expand' },
     ],
     kpis: [
@@ -191,7 +191,7 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
     oneLiner:
       'A JSON API over the whole engine, and this SPA — plus an Excel workbook for everyone else.',
     description:
-      'FastAPI exposes the two-step flow (ingest → reconcile-from-gold) plus configuration, ledger ' +
+      'FastAPI exposes the two-step flow (ingest documents → initiate reconciliation against gold) plus configuration, ledger ' +
       'decisions, browse endpoints and the Command Center aggregates. The React app is one vocabulary ' +
       'end-to-end with the gold schema — the column you configure is the column you see. Results are also ' +
       'written as a formatted Excel workbook per run for people who live in spreadsheets. Layers depend ' +

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Download } from 'lucide-react'
-import { fetchCustomers, fetchRun, fetchRuns, reconcileFromGold, workbookUrl } from './api'
+import {
+  fetchCustomers, fetchLedger, fetchRun, fetchRuns, reconcileFromGold, workbookUrl,
+} from './api'
 import {
   ApiError,
   type CustomerInfo, type FrameName, type GoldFrameName, type IngestResponse,
-  type ReconResponse, type RunListItem, type RunMode,
+  type LedgerViewData, type ReconResponse, type RunListItem, type RunMode,
 } from './types'
 import { amountsFromRows, combinedRows, countsFromRows,
          type SelectedRun } from './combineRuns'
@@ -21,6 +23,10 @@ import { MatchedTable } from './components/MatchedTable'
 import { ReconcileForm } from './components/ReconcileForm'
 import { RunPicker, runLabel } from './components/RunPicker'
 import { Sidebar, type View } from './components/Sidebar'
+import {
+  type DataPage, type DataScope, dataPageOf, readScopePref, scopeOf, viewForScope,
+  writeScopePref,
+} from './dataPages'
 import { SourceTable } from './components/SourceTable'
 import { SummaryDashboard } from './components/SummaryDashboard'
 
@@ -42,17 +48,17 @@ const VIEW_TITLES: Record<
   summary: 'Summary',
   matched: 'Matched',
   exceptions: 'Exception queue',
-  bank: 'Bank statement — as reconciled in this run',
-  bills: 'Bills — as reconciled in this run',
-  bills_enriched: 'Bills — enriched with lineage',
-  recoveries: 'Recovery detail',
+  bank: 'Bank Transactions',
+  bills: 'Bills',
+  bills_enriched: 'Bills',
+  recoveries: 'Recoveries',
 }
 
 const GOLD_TITLES: Record<GoldFrameName, string> = {
-  bank: 'Gold — bank transactions',
-  bills: 'Gold — bills',
-  recoveries: 'Gold — recoveries',
-  lineage: 'Gold — lineage documents',
+  bank: 'Bank Transactions',
+  bills: 'Bills',
+  recoveries: 'Recoveries',
+  lineage: 'Lineage docs',
 }
 
 const CUSTOMER_KEY = 'recon.customer'
@@ -62,8 +68,8 @@ const FALLBACK_CUSTOMERS: CustomerInfo[] = [
 
 // views whose ROWS are selection-filtered/combined across runs
 const FILTERED_VIEWS = new Set<View>(['summary', 'matched', 'exceptions'])
-// views that carry the run picker — Run data tabs included, but their
-// frames stay single-run (always the selection's primary run)
+// views that carry the run picker — the Data pages' run scope included
+// (their frames render the deduped union of the whole selection)
 const PICKER_VIEWS = new Set<View>([...FILTERED_VIEWS, ...FRAME_VIEWS])
 
 // loaded run payloads, kept across selections (payloads are immutable)
@@ -129,8 +135,8 @@ const sameIds = (a: string[], b: string[]) =>
 
 const PAGE_TITLES: Record<string, string> = {
   command: 'Command Center',
-  ingest: 'Ingest files',
-  reconcile: 'Run reconciliation',
+  ingest: 'Ingest documents',
+  reconcile: 'Initiate Reconciliation',
   ledger: 'Analyst queue',
   ar: 'AR Reconciliation',
   audit: 'Audit trail',
@@ -150,8 +156,23 @@ export default function App() {
   const [customerId, setCustomerIdState] = useState<string>(
     () => localStorage.getItem(CUSTOMER_KEY) ?? 'default',
   )
+  // which scope a Data-group sidebar click opens (Current | As of run);
+  // the ACTIVE scope is always derived from the view itself (scopeOf)
+  const [dataScope, setDataScope] = useState<DataScope>(readScopePref)
+  const setScope = (page: DataPage, scope: DataScope) => {
+    setDataScope(scope)
+    writeScopePref(scope)
+    setView(viewForScope(page, scope))
+  }
   // bumped after every successful ingest so gold-fed dropdowns/lists refetch
   const [ingestEpoch, setIngestEpoch] = useState(0)
+  // bumped after every ledger decision taken OUTSIDE the Analyst queue
+  // (the Exception queue's MatchDecision) so every ledger-fed view —
+  // Command Center tiles, AR, Audit trail, the overlay below — refetches
+  const [ledgerEpoch, setLedgerEpoch] = useState(0)
+  // live match_ledger state overlaid on the frozen Exception queue frame:
+  // fetched only while that view is open, keyed by the same epochs
+  const [ledger, setLedger] = useState<LedgerViewData | null>(null)
   // run filter: succeeded runs for the picker + the loaded selection
   const [runList, setRunList] = useState<RunListItem[]>([])
   const [selectedRuns, setSelectedRuns] = useState<SelectedRun[] | null>(null)
@@ -170,6 +191,15 @@ export default function App() {
   }, [customerId])
 
   useEffect(refreshRunList, [refreshRunList, ingestEpoch])
+
+  useEffect(() => {
+    if (view !== 'exceptions') return
+    let live = true
+    fetchLedger(customerId)
+      .then((d) => { if (live) setLedger(d) })
+      .catch(() => { if (live) setLedger(null) })
+    return () => { live = false }
+  }, [view, customerId, ingestEpoch, ledgerEpoch])
 
   const setCustomerId = (key: string) => {
     if (key !== customerId) {
@@ -336,6 +366,48 @@ export default function App() {
   }, [labelFor])
 
   const goldFrame = GOLD_VIEWS[view]
+  const dataPage = dataPageOf(view)
+  const activeScope = scopeOf(view)
+
+  // Head row shared by BOTH scopes of a Data page (and by the no-run
+  // empty state in run scope, so switching back is one click): title,
+  // the scope switch, then the scope's own context — run stamp + picker
+  // in run scope, the customer stamp in current scope.
+  const dataHead = (page: DataPage, withPicker: boolean) => (
+    <div className="result-head">
+      <h2 className="page-title">{page.label}</h2>
+      <span className="file-note">
+        {page.run ? (
+          <span className="seg seg-scope">
+            <button className={activeScope === 'current' ? 'on' : ''}
+                    onClick={() => setScope(page, 'current')}>Current</button>
+            <button className={activeScope === 'run' ? 'on' : ''}
+                    onClick={() => setScope(page, 'run')}>As of run</button>
+          </span>
+        ) : (
+          <span className="chip-note">current data only — runs keep no lineage snapshot</span>
+        )}
+        {activeScope === 'run' && page.runTrail && page.run && (
+          <span className="seg seg-scope">
+            <button className={view === page.run ? 'on' : ''}
+                    onClick={() => setView(page.run as View)}>Table</button>
+            <button className={view === page.runTrail ? 'on' : ''}
+                    onClick={() => setView(page.runTrail as View)}>With lineage trail</button>
+          </span>
+        )}
+        {activeScope === 'current' && <span className="stamp head-stamp">customer: {customerId}</span>}
+        {activeScope === 'run' && primary?.meta.mode && !multi && (
+          <span className="stamp head-stamp">{primary.meta.mode}</span>
+        )}
+        {activeScope === 'run' && restoring && <span className="chip-note">loading runs…</span>}
+        {activeScope === 'run' && withPicker && (
+          <RunPicker runs={runList} selection={selection}
+                     onChange={(ids) => void applySelection(ids)} />
+        )}
+      </span>
+    </div>
+  )
+
   const showResult =
     primary && (view === 'summary' || view === 'matched' || view === 'exceptions'
       || FRAME_VIEWS.includes(view as FrameName))
@@ -415,7 +487,8 @@ export default function App() {
 
   return (
     <div className="layout">
-      <Sidebar view={view} onNavigate={setView} result={displayResult} />
+      <Sidebar view={view} onNavigate={setView} result={displayResult}
+               dataScope={dataScope} />
 
       <main className="content">
         {/* Always mounted, never destroyed by a view switch — unlike every
@@ -437,14 +510,14 @@ export default function App() {
         </div>
 
         {/* keyed on the view so every navigation replays the entrance */}
-        <div key={view} className="view-enter">
+        <div key={dataPageOf(view)?.id ?? view} className="view-enter">
         {view === 'command' && (
           <CommandCenter
             customers={customers}
             customerId={customerId}
             onCustomerChange={setCustomerId}
             onNavigate={setView}
-            refreshKey={ingestEpoch + (selectedRuns?.length ?? 0)}
+            refreshKey={ingestEpoch + ledgerEpoch + (selectedRuns?.length ?? 0)}
           />
         )}
 
@@ -479,7 +552,7 @@ export default function App() {
         {view === 'ar' && (
           <ARReconciliationView
             customerId={customerId}
-            refreshKey={ingestEpoch + (selectedRuns?.length ?? 0)}
+            refreshKey={ingestEpoch + ledgerEpoch + (selectedRuns?.length ?? 0)}
             onOpenInQueue={(id) => {
               setLedgerFocus(id)
               setView('ledger')
@@ -496,7 +569,7 @@ export default function App() {
             customers={customers}
             customerId={customerId}
             onCustomerChange={setCustomerId}
-            refreshKey={ingestEpoch + (selectedRuns?.length ?? 0)}
+            refreshKey={ingestEpoch + ledgerEpoch + (selectedRuns?.length ?? 0)}
             onOpenMatch={(id) => {
               setLedgerFocus(id)
               setView('ledger')
@@ -504,12 +577,9 @@ export default function App() {
           />
         )}
 
-        {goldFrame && (
+        {goldFrame && dataPage && (
           <>
-            <div className="result-head">
-              <h2>{GOLD_TITLES[goldFrame]}</h2>
-              <span className="file-note">customer: {customerId}</span>
-            </div>
+            {dataHead(dataPage, false)}
             <div className="view-card">
               <GoldTable key={`${customerId}:${goldFrame}:${ingestEpoch}`}
                          customerId={customerId} frame={goldFrame} />
@@ -522,18 +592,23 @@ export default function App() {
         {!showResult
           && (FILTERED_VIEWS.has(view) || FRAME_VIEWS.includes(view as FrameName))
           && (restoring ? (
-            <p className="footer-note">Restoring run…</p>
+            <>
+              {dataPage && dataHead(dataPage, false)}
+              <p className="footer-note">Restoring run…</p>
+            </>
           ) : (
+            <>
+            {dataPage && dataHead(dataPage, false)}
             <div className="view-card empty-state">
               <h3>{runList.length ? 'No run loaded' : 'No runs yet'}</h3>
               <p>
                 {runList.length
                   ? 'This view shows a reconciliation result. Pick a past run, or run a new one.'
-                  : 'This view shows a reconciliation result. Ingest files, then run a reconciliation for this customer.'}
+                  : 'This view shows a reconciliation result. Ingest documents, then initiate a reconciliation for this customer.'}
               </p>
               <div className="empty-state-actions">
                 <button className="btn-run" onClick={() => setView('reconcile')}>
-                  Run reconciliation
+                  Initiate reconciliation
                 </button>
                 {runList.length > 0 && (
                   <RunPicker runs={runList} selection={selection}
@@ -542,12 +617,14 @@ export default function App() {
               </div>
               {error && <ErrorBanner error={error} />}
             </div>
+            </>
           ))}
 
         {showResult && primary && selectedRuns && (
           <>
+            {dataPage ? dataHead(dataPage, true) : (
             <div className="result-head">
-              <h2>{VIEW_TITLES[view as keyof typeof VIEW_TITLES]}</h2>
+              <h2 className="page-title">{VIEW_TITLES[view as keyof typeof VIEW_TITLES]}</h2>
               <span className="file-note">
                 {FILTERED_VIEWS.has(view) && (
                   <a className="btn-download btn-ic"
@@ -571,16 +648,6 @@ export default function App() {
                 )}
               </span>
             </div>
-
-            {FRAME_VIEWS.includes(view as FrameName) && (
-              <p className="head-sub">
-                <span className="head-sub-files">
-                  {primary.meta.filenames.statement} ✕ {primary.meta.filenames.bills}
-                </span>
-                {multi && (
-                  <span className="chip">deduped across {selectedRuns.length} runs</span>
-                )}
-              </p>
             )}
 
             {error && PICKER_VIEWS.has(view) && <ErrorBanner error={error} />}
@@ -606,6 +673,9 @@ export default function App() {
                   rows={exceptionRows}
                   emptyNote={exceptionsEmptyNote}
                   primaryRunId={primary?.run_id ?? null}
+                  ledger={ledger}
+                  customerId={customerId}
+                  onLedgerChanged={() => setLedgerEpoch((n) => n + 1)}
                   onOpenInQueue={(id) => {
                     setLedgerFocus(id)
                     setView('ledger')

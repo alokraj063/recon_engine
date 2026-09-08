@@ -38,7 +38,7 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
         {error && <p className="frame-note">Could not load ingestions: {error}</p>}
         {items && items.length === 0 && (
           <p className="frame-note">
-            No ingestions yet for this customer — use the Ingest files view to load source
+            No ingestions yet for this customer — use the Ingest documents view to load source
             documents into the gold layer.
           </p>
         )}

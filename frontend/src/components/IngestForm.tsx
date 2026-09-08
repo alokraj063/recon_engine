@@ -316,7 +316,7 @@ export function IngestForm({
   return (
     <section className="intake">
       <div className="ingest-head">
-        <h2>Ingest source documents</h2>
+        <h2 className="page-title">Ingest documents</h2>
         {!creating ? (
           <span className="cc-actions">
             <button className={`btn-refresh new-customer-btn btn-ic${showHistory ? ' on' : ''}`}
@@ -498,7 +498,7 @@ export function IngestForm({
       <div className="run-row">
         <button className="btn-run" disabled={!anyInput || !registryReady || running}
                 onClick={onIngest}>
-          Ingest files
+          Ingest documents
         </button>
         {running && (
           <span className="running-note">

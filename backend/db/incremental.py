@@ -52,6 +52,19 @@ class LedgerConflict(Exception):
     """A ledger transition would double-claim a credit or a bill."""
 
 
+class LedgerConsumed(Exception):
+    """A manual match names a credit or bill already claimed by a
+    non-REJECTED match (409 ALREADY_CONSUMED, naming the blocking M-{seq})."""
+
+
+
+# Confidence code of a match an analyst created by hand (item 3.2).
+# FROZEN like every other confidence label: it lives in ledger rows, API
+# payloads and the frontend's stamp CSS. Not a REVIEW confidence — a
+# manual match is born LOCKED by USER, never awaiting review.
+MANUAL_CONFIDENCE = "MANUAL"
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -111,6 +124,84 @@ def _open_exceptions(session, customer_id, exception_type) -> Dict[str, str]:
                ExceptionLedger.exception_type == exception_type,
                ExceptionLedger.status == "OPEN"))
         if gid is not None}
+
+
+def _picked_bill_ids(session, match_ledger_id: str) -> set:
+    return set(session.execute(
+        select(MatchLedgerBill.gold_bill_id)
+        .where(MatchLedgerBill.match_ledger_id == match_ledger_id,
+               MatchLedgerBill.role == "picked")).scalars())
+
+
+def _resolve_exceptions_for_match(session, row: MatchLedger, resolved_by: str,
+                                  now: Optional[datetime] = None) -> int:
+    """A match that now claims its credit and picked bills makes any OPEN
+    BANK_ONLY / BILL_ONLY row for them a lie — close them, recording HOW
+    (USER_ACCEPT | USER_MANUAL | USER_REOPEN) and by WHICH match. Run-time
+    resolution (finalize_ledger) stamps RUN + resolved_by_run_id instead.
+    Returns how many rows it closed."""
+    now = now or utcnow()
+    n = 0
+    targets = (("BANK_ONLY", {row.gold_bank_txn_id}),
+               ("BILL_ONLY", _picked_bill_ids(session, row.id)))
+    for exc_type, gids in targets:
+        open_rows = _open_exceptions(session, row.customer_id, exc_type)
+        for gid in gids:
+            eid = open_rows.get(gid)
+            if eid is None:
+                continue
+            exc = session.get(ExceptionLedger, eid)
+            exc.status = "RESOLVED"
+            exc.resolved_at = now
+            exc.resolved_by = resolved_by
+            exc.resolved_by_match_id = row.id
+            exc.resolved_by_run_id = None
+            n += 1
+    return n
+
+
+def _reopen_exceptions_for_match(session, row: MatchLedger,
+                                 bills: bool) -> int:
+    """The opposite: a match that no longer claims its sides puts them
+    back as OPEN exceptions (deduped against still-open rows). The credit
+    always; the picked bills only when asked — a run-created match's
+    bills will be re-reported by the next run anyway, a MANUAL match may
+    have no run coming. first_seen_run_id is the match's run (a manual
+    match has none: the exception's original first-seen row is reused if
+    still present, else NULL)."""
+    n = 0
+
+    def first_seen(col, gid):
+        if row.run_id is not None:
+            return row.run_id
+        # a MANUAL match has no run: inherit the run that first reported
+        # this credit/bill as an exception, if any row ever did
+        return session.execute(
+            select(ExceptionLedger.first_seen_run_id)
+            .where(ExceptionLedger.customer_id == row.customer_id,
+                   col == gid, ExceptionLedger.first_seen_run_id.isnot(None))
+            .order_by(ExceptionLedger.resolved_at.desc())
+            .limit(1)).scalar()
+
+    with session.no_autoflush:
+        if row.gold_bank_txn_id not in _open_exceptions(
+                session, row.customer_id, "BANK_ONLY"):
+            session.add(ExceptionLedger(
+                customer_id=row.customer_id, exception_type="BANK_ONLY",
+                gold_bank_txn_id=row.gold_bank_txn_id,
+                first_seen_run_id=first_seen(ExceptionLedger.gold_bank_txn_id,
+                                             row.gold_bank_txn_id)))
+            n += 1
+        if bills:
+            open_bill = _open_exceptions(session, row.customer_id, "BILL_ONLY")
+            for gid in _picked_bill_ids(session, row.id):
+                if gid not in open_bill:
+                    session.add(ExceptionLedger(
+                        customer_id=row.customer_id, exception_type="BILL_ONLY",
+                        gold_bill_id=gid,
+                        first_seen_run_id=first_seen(ExceptionLedger.gold_bill_id, gid)))
+                    n += 1
+    return n
 
 
 def build_pool(session, customer_id: int, statement_bronze_id: int) -> dict:
@@ -287,7 +378,9 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
             if gid in matched_ids:
                 row = session.get(ExceptionLedger, eid)
                 row.status = "RESOLVED"
+                row.resolved_by = "RUN"
                 row.resolved_by_run_id = run_id
+                row.resolved_by_match_id = None
                 row.resolved_at = now
                 stats["exceptions_resolved"] += 1
 
@@ -349,11 +442,18 @@ def accept_match(match_ledger_id: str,
             row.status = "LOCKED"
             row.locked_by = "USER"
             row.locked_at = utcnow()
+            # the credit and the settling bill(s) are now claimed for good:
+            # any OPEN exception still carrying them is closed, by this
+            # accept (see item 3.1 — the Exception queue must agree with
+            # the Matches panel without waiting for the next run)
+            resolved = _resolve_exceptions_for_match(session, row, "USER_ACCEPT",
+                                                     row.locked_at)
             record_event(session, logger, event_type="ledger.match_accepted",
                         customer_id=row.customer_id, run_id=row.run_id,
                         entity_type="match_ledger", entity_id=row.id,
                         details={"confidence": row.confidence,
-                                 "user_overrode_pick": overrode})
+                                 "user_overrode_pick": overrode,
+                                 "exceptions_resolved": resolved})
             session.commit()
         return {"id": row.id, "status": row.status, "locked_by": row.locked_by}
 
@@ -417,20 +517,15 @@ def reopen_match(match_ledger_id: str) -> Optional[dict]:
             row.status = "OPEN"
             row.locked_by = None
             row.locked_at = None
-            # the credit is consumed again, so an OPEN BANK_ONLY row for it
-            # would be a lie (mirrors finalize_ledger's resolve block)
-            eid = _open_exceptions(session, row.customer_id, "BANK_ONLY").get(
-                row.gold_bank_txn_id)
-            if eid is not None:
-                exc = session.get(ExceptionLedger, eid)
-                exc.status = "RESOLVED"
-                exc.resolved_by_run_id = row.run_id
-                exc.resolved_at = utcnow()
+            # the credit and bills are consumed again, so OPEN exception
+            # rows for them would be a lie (mirrors finalize_ledger's
+            # resolve block; the reject re-opened them)
+            resolved = _resolve_exceptions_for_match(session, row, "USER_REOPEN")
             record_event(session, logger, event_type="ledger.match_reopened",
                         customer_id=row.customer_id, run_id=row.run_id,
                         entity_type="match_ledger", entity_id=row.id,
                         details={"confidence": row.confidence,
-                                 "exception_resolved": eid is not None})
+                                 "exceptions_resolved": resolved})
             session.commit()
         return {"id": row.id, "status": row.status, "locked_by": row.locked_by}
 
@@ -444,18 +539,107 @@ def reject_match(match_ledger_id: str) -> Optional[dict]:
             return None
         if row.status == "OPEN":
             row.status = "REJECTED"
-            if row.gold_bank_txn_id not in _open_exceptions(
-                    session, row.customer_id, "BANK_ONLY"):
-                session.add(ExceptionLedger(
-                    customer_id=row.customer_id, exception_type="BANK_ONLY",
-                    gold_bank_txn_id=row.gold_bank_txn_id,
-                    first_seen_run_id=row.run_id))
+            # a run-created match's bills come back via the next run's
+            # pool; a MANUAL match has no run coming, so its bills are
+            # re-opened as BILL_ONLY exceptions here
+            reopened = _reopen_exceptions_for_match(
+                session, row, bills=(row.confidence == MANUAL_CONFIDENCE))
             record_event(session, logger, event_type="ledger.match_rejected",
                         customer_id=row.customer_id, run_id=row.run_id,
                         entity_type="match_ledger", entity_id=row.id,
-                        details={"confidence": row.confidence})
+                        details={"confidence": row.confidence,
+                                 "exceptions_reopened": reopened})
             session.commit()
         return {"id": row.id, "status": row.status}
+
+
+MANUAL_NOTE_MAX = 500
+
+
+def create_manual_match(customer_id: int, gold_bank_txn_id: str,
+                        gold_bill_ids: List[str],
+                        note: Optional[str] = None) -> dict:
+    """An analyst pairs an open bank credit with one or more open bills
+    by hand (item 3.2). A ledger row created by a USER, not a run:
+    run_id NULL, match_id "manual", confidence MANUAL, born LOCKED by
+    USER with the next durable seq. No amount tolerance is enforced —
+    that is the point — but the variance (credit − Σ net payable) is
+    returned so the UI can show it and the workbook can flag it.
+
+    Both sides must be free: the credit not held by any OPEN/LOCKED match
+    and none of the bills picked by one, else LedgerConsumed naming the
+    blocking match. The credit's OPEN BANK_ONLY row and each bill's OPEN
+    BILL_ONLY row are RESOLVED (USER_MANUAL) exactly like an accept.
+    Later runs exclude all of it through _consumed with no engine change.
+    """
+    bill_ids = list(dict.fromkeys(gold_bill_ids))   # dedupe, keep order
+    if not bill_ids:
+        raise ValueError("a manual match needs at least one bill")
+    if note is not None:
+        note = note.strip() or None
+        if note and len(note) > MANUAL_NOTE_MAX:
+            raise ValueError(f"note is longer than {MANUAL_NOTE_MAX} characters")
+    with SessionLocal() as session:
+        txn = session.get(GoldBankTxn, gold_bank_txn_id)
+        if txn is None or txn.customer_id != customer_id:
+            raise ValueError(f"no bank transaction {gold_bank_txn_id} for this customer")
+        bills = {b.id: b for b in session.execute(
+            select(GoldBill).where(GoldBill.id.in_(bill_ids),
+                                   GoldBill.customer_id == customer_id)).scalars()}
+        missing = [b for b in bill_ids if b not in bills]
+        if missing:
+            raise ValueError(f"no bill(s) {', '.join(missing)} for this customer")
+
+        # who already holds either side?
+        active = list(session.execute(
+            select(MatchLedger).where(
+                MatchLedger.customer_id == customer_id,
+                MatchLedger.status.in_(("OPEN", "LOCKED")))).scalars())
+        holder_by_txn = {m.gold_bank_txn_id: m for m in active}
+        if gold_bank_txn_id in holder_by_txn:
+            m = holder_by_txn[gold_bank_txn_id]
+            raise LedgerConsumed(
+                f"credit {txn.bank_ref} is already held by match M-{m.seq}")
+        if active:
+            held = list(session.execute(
+                select(MatchLedgerBill.match_ledger_id, MatchLedgerBill.gold_bill_id)
+                .where(MatchLedgerBill.match_ledger_id.in_([m.id for m in active]),
+                       MatchLedgerBill.role == "picked",
+                       MatchLedgerBill.gold_bill_id.in_(bill_ids))))
+            if held:
+                seq = {m.id: m.seq for m in active}
+                names = ", ".join(
+                    f"{bills[b].bill_number or b} (M-{seq[mid]})" for mid, b in held)
+                raise LedgerConsumed(f"bill(s) already picked by a match: {names}")
+
+        now = utcnow()
+        next_seq = (session.execute(
+            select(func.max(MatchLedger.seq))
+            .where(MatchLedger.customer_id == customer_id)).scalar() or 0) + 1
+        row = MatchLedger(
+            customer_id=customer_id, run_id=None, match_id="manual",
+            seq=next_seq, gold_bank_txn_id=gold_bank_txn_id,
+            confidence=MANUAL_CONFIDENCE, status="LOCKED",
+            locked_at=now, locked_by="USER", note=note, created_at=now)
+        session.add(row)
+        session.flush()
+        for b in bill_ids:
+            session.add(MatchLedgerBill(match_ledger_id=row.id,
+                                        gold_bill_id=b, role="picked"))
+        session.flush()
+        resolved = _resolve_exceptions_for_match(session, row, "USER_MANUAL", now)
+        total = sum((bills[b].net_payable_amount or 0.0) for b in bill_ids)
+        variance = round((txn.amount or 0.0) - total, 2)
+        record_event(session, logger, event_type="ledger.match_created_manual",
+                     customer_id=customer_id, run_id=None,
+                     entity_type="match_ledger", entity_id=row.id,
+                     details={"bill_count": len(bill_ids), "variance": variance,
+                              "exceptions_resolved": resolved,
+                              "has_note": bool(note)})
+        session.commit()
+        return {"id": row.id, "seq": row.seq, "status": row.status,
+                "locked_by": row.locked_by, "confidence": row.confidence,
+                "variance": variance, "exceptions_resolved": resolved}
 
 
 def _txn_info(t: Optional[GoldBankTxn]) -> Optional[dict]:
@@ -471,6 +655,7 @@ def _bill_info(b: Optional[GoldBill]) -> Optional[dict]:
     if b is None:
         return None
     return {"bill_number": b.bill_number,
+            "submission_ref": b.submission_ref,
             "net_payable_amount": b.net_payable_amount,
             "zone": b.zone, "bill_status": b.bill_status}
 
@@ -505,6 +690,7 @@ def ledger_view(customer_id: int) -> dict:
         links_by_match: Dict[str, list] = {}
         for l in link_rows:
             links_by_match.setdefault(l.match_ledger_id, []).append(l)
+        seq_by_match = {m.id: m.seq for m in match_rows}
 
         matches = [{
             "id": m.id, "run_id": m.run_id, "match_id": m.match_id,
@@ -513,6 +699,7 @@ def ledger_view(customer_id: int) -> dict:
             "locked_by": m.locked_by,
             "created_at": m.created_at.isoformat(),
             "locked_at": m.locked_at.isoformat() if m.locked_at else None,
+            "note": m.note,
             "txn": _txn_info(txns.get(m.gold_bank_txn_id)),
             "bills": [{"gold_bill_id": l.gold_bill_id, "role": l.role,
                        **(_bill_info(bills.get(l.gold_bill_id))
@@ -527,6 +714,10 @@ def ledger_view(customer_id: int) -> dict:
             "gold_bill_id": e.gold_bill_id,
             "first_seen_run_id": e.first_seen_run_id,
             "resolved_by_run_id": e.resolved_by_run_id,
+            "resolved_by": e.resolved_by,
+            "resolved_by_match_id": e.resolved_by_match_id,
+            "resolved_by_match_seq": seq_by_match.get(e.resolved_by_match_id),
+            "resolved_at": e.resolved_at.isoformat() if e.resolved_at else None,
             "txn": _txn_info(txns.get(e.gold_bank_txn_id))
             if e.gold_bank_txn_id else None,
             "bill": _bill_info(bills.get(e.gold_bill_id))

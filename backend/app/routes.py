@@ -14,13 +14,17 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from datetime import date
+
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel
 from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
 from db import SessionLocal, incremental, reconcile_gold
+from db import ledger_export
 from db import overview as db_overview
 from db.audit import record_event
 from db.bronze import register_file
@@ -33,6 +37,7 @@ from recon import (REGISTRY, MatchRuleSet, PipelineSinks, SelfCheckError,
                    get_adapter, run_pipeline, write_workbook)
 from recon.engine import DEFAULT_COPY, DEFAULT_LABELS, resolve_copy
 from recon.pipeline import check_signal_coverage
+from recon.report import append_ledger_sheets, write_ledger_workbook
 from recon.gold import GOLD_COLUMNS
 from recon.rules import COPY_SECTIONS, FieldMapping
 from recon.sources import resolve_adapter, role_of
@@ -604,8 +609,31 @@ def read_frame(run_id: str, name: str):
     return {"name": name, "count": len(rows), "rows": rows}
 
 
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _tmp_xlsx(prefix: str) -> Path:
+    fd, name = tempfile.mkstemp(prefix=prefix, suffix=".xlsx")
+    import os
+    os.close(fd)
+    return Path(name)
+
+
+def _cleanup(path: Path):
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
 @router.get("/runs/{run_id}/workbook")
 def download_workbook(run_id: str):
+    """The run's stored workbook — plus, composed at download time from
+    the ledger, `Decisions` (live status of every match this run
+    created) and `Manual_Matches` (analyst-made matches touching this
+    run's credits or bills). The stored file is never modified: a
+    snapshot run, or one with nothing in the ledger, streams it
+    unchanged (byte-identical)."""
     rec = runs.get_run(run_id)
     if (rec is None or rec.workbook_path is None
             or not Path(rec.workbook_path).exists()):
@@ -613,11 +641,30 @@ def download_workbook(run_id: str):
     stem = Path((rec.payload or {}).get("meta", {})
                 .get("filenames", {}).get("statement") or "statement").stem
     safe = re.sub(r"[^\w. -]", "_", stem)[:60]
-    return FileResponse(
-        rec.workbook_path,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=f"Recon_{safe}.xlsx",
-    )
+    filename = f"Recon_{safe}.xlsx"
+    extra = ledger_export.run_ledger_frames(run_id)
+    if not extra:
+        return FileResponse(rec.workbook_path, media_type=XLSX, filename=filename)
+    out = _tmp_xlsx("recon_run_")
+    append_ledger_sheets(rec.workbook_path, extra, out)
+    return FileResponse(str(out), media_type=XLSX, filename=filename,
+                        background=BackgroundTask(_cleanup, out))
+
+
+@router.get("/ledger/workbook")
+def download_ledger_workbook(customer_id: str = "default"):
+    """The durable ledger as Excel: Matches (all non-rejected, manual
+    included), Manual_Matches, Exceptions (open + resolved with how)."""
+    with SessionLocal() as session:
+        customer = _get_customer(session, customer_id)
+        customer_pk, key = customer.id, customer.key
+    frames = ledger_export.customer_ledger_frames(customer_pk)
+    out = _tmp_xlsx("recon_ledger_")
+    write_ledger_workbook(frames, out)
+    safe = re.sub(r"[^\w. -]", "_", key)[:60]
+    return FileResponse(str(out), media_type=XLSX,
+                        filename=f"Ledger_{safe}.xlsx",
+                        background=BackgroundTask(_cleanup, out))
 
 
 # --- ledger (incremental mode) -----------------------------------------
@@ -625,6 +672,30 @@ def download_workbook(run_id: str):
 class AcceptBody(BaseModel):
     # override an ambiguous pick: must be one of the match's bills
     gold_bill_id: Optional[str] = None
+
+
+class ManualMatchBody(BaseModel):
+    customer_id: str = "default"
+    gold_bank_txn_id: str
+    gold_bill_ids: list[str]
+    note: Optional[str] = None
+
+
+@router.post("/matches/manual")
+def create_manual_match(body: ManualMatchBody):
+    """Pair an open bank credit with open bill(s) by hand. No amount
+    tolerance applies; the response carries the variance. Both sides
+    must be free: 409 ALREADY_CONSUMED names the match holding them.
+    The new row is LOCKED by USER with confidence MANUAL and no run."""
+    with SessionLocal() as session:
+        customer_pk = _get_customer(session, body.customer_id).id
+    try:
+        return incremental.create_manual_match(
+            customer_pk, body.gold_bank_txn_id, body.gold_bill_ids, body.note)
+    except incremental.LedgerConsumed as e:
+        _fail(409, "ALREADY_CONSUMED", str(e))
+    except ValueError as e:
+        _fail(400, "INVALID_INPUT", str(e))
 
 
 @router.post("/matches/{match_ledger_id}/accept")
@@ -683,13 +754,45 @@ def ledger(customer_id: str = "default"):
     return incremental.ledger_view(customer_pk)
 
 
+def _parse_day(value: Optional[str], name: str) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        _fail(400, "INVALID_INPUT", f"{name} must be an ISO date (yyyy-mm-dd), got {value!r}")
+
+
 @router.get("/overview")
-def customer_overview(customer_id: str = "default"):
+def customer_overview(customer_id: str = "default",
+                      from_: Optional[str] = Query(None, alias="from"),
+                      to: Optional[str] = None,
+                      operating_unit: Optional[list[str]] = Query(None)):
     """Command Center aggregates: gold pool, ledger state, open exposure,
-    match rate, top open exceptions, last run/ingestion. Read-only."""
+    match rate, top open exceptions, last run/ingestion. Read-only.
+    Optional `from`/`to` (inclusive ISO dates) and repeatable
+    `operating_unit` (a unit value, or UNASSIGNED for rows with none —
+    every unmatched bank credit) narrow the figures; see
+    db/overview.py:overview for which column each figure uses. The
+    unfiltered payload is unchanged; a filtered one echoes
+    `filters_applied`."""
+    d_from, d_to = _parse_day(from_, "from"), _parse_day(to, "to")
+    if d_from and d_to and d_from > d_to:
+        _fail(400, "INVALID_INPUT", "from must not be after to")
     with SessionLocal() as session:
         customer_pk = _get_customer(session, customer_id).id
-        return db_overview.overview(session, customer_pk)
+        return db_overview.overview(session, customer_pk, d_from, d_to,
+                                    operating_unit or None)
+
+
+@router.get("/customers/{key}/operating-units")
+def customer_operating_units(key: str):
+    """Distinct operating units present in the customer's gold bills
+    (derived from the IREPS PartyCode; per-customer data, not schema)."""
+    with SessionLocal() as session:
+        customer_pk = _get_customer(session, key).id
+        return {"units": db_overview.operating_units(session, customer_pk),
+                "unassigned": db_overview.UNASSIGNED_UNIT}
 
 
 @router.get("/ar")

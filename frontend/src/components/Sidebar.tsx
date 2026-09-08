@@ -1,11 +1,14 @@
 import type { ComponentType } from 'react'
 import {
-  ArrowDownLeft, Boxes, FileSearch, FileStack, Gauge, GitBranch, GitMerge,
+  ArrowDownLeft, Boxes, FileSearch, FileStack, Gauge, GitMerge,
   Landmark, LayoutDashboard, Link2, ListChecks, ListMinus, ReceiptText,
   TriangleAlert, Upload, Download,
 } from 'lucide-react'
 import type { ReconResponse } from '../types'
 import { workbookUrl } from '../api'
+import {
+  DATA_PAGES, type DataPage, type DataScope, dataPageOf, scopeOf, viewForScope,
+} from '../dataPages'
 import logo from '../assets/jouletowatts_logo.png'
 
 export type View =
@@ -41,6 +44,12 @@ interface Props {
   view: View
   onNavigate: (v: View) => void
   result: ReconResponse | null
+  /** which scope a Data-group click opens (the user's last choice) */
+  dataScope: DataScope
+}
+
+const DATA_ICONS: Record<DataPage['id'], IconType> = {
+  bank: Landmark, bills: ReceiptText, recoveries: ListMinus, lineage: FileStack,
 }
 
 function NavIcon({ icon: Icon }: { icon: IconType }) {
@@ -51,7 +60,7 @@ function NavIcon({ icon: Icon }: { icon: IconType }) {
   )
 }
 
-export function Sidebar({ view, onNavigate, result }: Props) {
+export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
   const counts = result?.meta.counts
 
   const resultItems: NavItem[] = [
@@ -64,19 +73,33 @@ export function Sidebar({ view, onNavigate, result }: Props) {
       count: counts ? counts.bank_only + counts.bill_only + (counts.match_review ?? 0) : undefined,
     },
   ]
-  // frozen per-run evidence of the loaded (primary) run
-  const runDataItems: NavItem[] = [
-    { view: 'bank', label: 'Bank statement', icon: Landmark, count: counts?.bank_txns },
-    { view: 'bills', label: 'Bills', icon: ReceiptText, count: counts?.bills },
-    { view: 'bills_enriched', label: 'Bills + lineage', icon: GitBranch, count: counts?.bills_grouped },
-    { view: 'recoveries', label: 'Recoveries', icon: ListMinus, count: counts?.recoveries },
-  ]
-  const goldItems: NavItem[] = [
-    { view: 'gold_bank', label: 'Bank txns', icon: Landmark },
-    { view: 'gold_bills', label: 'Bills', icon: ReceiptText },
-    { view: 'gold_recoveries', label: 'Recoveries', icon: ListMinus },
-    { view: 'gold_lineage', label: 'Lineage docs', icon: FileStack },
-  ]
+  // one Data page per kind; a click opens the user's preferred scope,
+  // active in EITHER scope. Row badges exist only in run scope (a run
+  // payload carries its frame counts; the live gold total is only known
+  // once its table loads).
+  const runCount = (page: DataPage): number | undefined => {
+    if (!counts || scopeOf(view) !== 'run' || dataPageOf(view) !== page) return undefined
+    switch (page.id) {
+      case 'bank': return counts.bank_txns
+      case 'bills': return view === page.runTrail ? counts.bills_grouped : counts.bills
+      case 'recoveries': return counts.recoveries
+      default: return undefined
+    }
+  }
+  const dataItem = (page: DataPage) => {
+    const active = dataPageOf(view) === page
+    const count = runCount(page)
+    return (
+      <button
+        key={page.id}
+        className={`nav-item${active ? ' active' : ''}`}
+        onClick={() => onNavigate(viewForScope(page, dataScope))}
+      >
+        <span className="nav-main"><NavIcon icon={DATA_ICONS[page.id]} />{page.label}</span>
+        {count !== undefined && <span className="nav-count">{count}</span>}
+      </button>
+    )
+  }
 
   // result views are always reachable: with no run loaded they open on
   // the latest run (App auto-loads it) or, with no runs yet, on a guide
@@ -117,8 +140,8 @@ export function Sidebar({ view, onNavigate, result }: Props) {
       <nav className="sidebar-nav">
         <div className="nav-group-label">Operate</div>
         {openItem({ view: 'command', label: 'Command Center', icon: LayoutDashboard })}
-        {openItem({ view: 'ingest', label: 'Ingest files', icon: Upload })}
-        {openItem({ view: 'reconcile', label: 'Run reconciliation', icon: GitMerge })}
+        {openItem({ view: 'ingest', label: 'Ingest documents', icon: Upload })}
+        {openItem({ view: 'reconcile', label: 'Reconcile', icon: GitMerge })}
 
         <div className="nav-group-label">Workspace</div>
         {openItem({ view: 'ledger', label: 'Analyst queue', icon: ListChecks })}
@@ -127,11 +150,9 @@ export function Sidebar({ view, onNavigate, result }: Props) {
 
         <div className="nav-group-label">Reconciliation result</div>
         {resultItems.map(item)}
-        <div className="nav-sub-label">Run data</div>
-        {runDataItems.map(item)}
 
-        <div className="nav-group-label">Gold data</div>
-        {goldItems.map(openItem)}
+        <div className="nav-group-label">Data</div>
+        {DATA_PAGES.map(dataItem)}
 
         <div className="nav-group-label">Platform</div>
         {openItem({ view: 'architecture', label: 'Architecture', icon: Boxes })}
@@ -144,7 +165,7 @@ export function Sidebar({ view, onNavigate, result }: Props) {
           </a>
         ) : (
           <p className="sidebar-note">
-            Ingest files, then run a reconciliation — or open a result view to
+            Ingest documents, then initiate a reconciliation — or open a result view to
             pick a past run.
           </p>
         )}

@@ -71,17 +71,12 @@ export function ReconcileForm({
   return (
     <section className="intake">
       <div className="ingest-head">
-        <h2>Reconcile from gold</h2>
+        <h2 className="page-title">Initiate Reconciliation</h2>
         <button className={`btn-refresh new-customer-btn btn-ic${showConfig ? ' on' : ''}`}
                 onClick={() => setShowConfig((v) => !v)}>
           <Settings2 size={14} strokeWidth={1.75} /> Matching config {showConfig ? '▴' : '▾'}
         </button>
       </div>
-      <p className="hint">
-        Runs purely against the ingested gold layer — no uploads, no re-parsing. Pick which
-        statement's credits to reconcile; bills are always the current gold state.
-      </p>
-
       {showConfig && (
         <div className="config-inset">
           <MatchingConfigPanel customerId={customerId} />
@@ -106,7 +101,7 @@ export function ReconcileForm({
           ) : statements.length === 0 ? (
             <span className="frame-note">
               No statements ingested yet —{' '}
-              <button className="link-btn" onClick={onGoToIngest}>ingest files first</button>
+              <button className="link-btn" onClick={onGoToIngest}>ingest documents first</button>
             </span>
           ) : (
             <select value={statementId ?? ''} disabled={running}
@@ -141,7 +136,7 @@ export function ReconcileForm({
       <div className="run-row">
         <button className="btn-run" disabled={statementId === null || running}
                 onClick={() => statementId !== null && onReconcile(statementId, mode)}>
-          Run reconciliation
+          Initiate reconciliation
         </button>
         {running && (
           <span className="running-note">

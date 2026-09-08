@@ -151,13 +151,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
   return (
     <section className="intake">
       <div className="ingest-head">
-        <div>
-          <h2>Audit trail</h2>
-          <p className="strap-note">
-            every ingest, run, decision and config change — written in the same
-            transaction as the action itself
-          </p>
-        </div>
+        <h2 className="page-title">Audit trail</h2>
         <span className="cc-head-right">
           <label className="ctx-field">
             <span className="slot-label">Customer</span>

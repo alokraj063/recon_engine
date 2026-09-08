@@ -43,7 +43,7 @@ cd frontend && npx tsc -b           # typecheck
 cd frontend && npm run build        # production build
 ```
 
-The sample documents folder contains real input files (gitignored, as are the golden CSVs derived from them; filenames contain spaces; `~$...` files are Excel lock files — ignore them). `backend/tests/golden/*.csv` must exist locally for the tests — run `scripts/make_golden.py` once after cloning.
+The sample documents folder contains real input files (gitignored, as are the golden CSVs derived from them; filenames contain spaces; `~$...` files are Excel lock files — ignore them). `backend/tests/golden/*.csv` must exist locally for the tests — run `scripts/make_golden.py` once after cloning. KNOWN STATE since 2026-09-07: the local sample `BILL STATUS 20032026.xlsx` is the retired multi-sheet block format, so the golden gate, `test_incremental_scenario`, `test_snapshot_from_gold_matches_legacy_pipeline` and `test_real_export_smoke` (9 items) fail with `BillStatusFormatError` on every branch until a current single-table export replaces it and the snapshots are regenerated; the ledger/overview tests build synthetic customers instead and do not depend on it.
 
 ## Architecture
 
@@ -174,7 +174,10 @@ backend/recon/   the engine package (pure, DB-free; runs with backend/ as cwd)
                on_selfcheck sink + meta.signal_coverage in run payloads) when a
                mapped exact-signal column is missing/all-NA — the silent
                LOW/AMOUNT_ONLY degradation a misconfigured new adapter causes
-  report.py    write_workbook — formatting only, decides nothing
+  report.py    write_workbook — formatting only, decides nothing;
+               append_ledger_sheets(path_in, frames, path_out) and
+               write_ledger_workbook(frames, path) take plain DataFrames
+               built by db/ledger_export.py (recon never imports db)
 backend/db/      persistence — imports recon, never the reverse. Real per-layer schema
                separation, not a naming convention: every model declares
                schema="bronze"|"silver"|"gold" (app/control-plane tables omit it).
@@ -208,8 +211,15 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
                runs, run_frames,
                run_match_bills, match_ledger(+bills — `seq` is the durable
                per-customer match number, UI "M-{n}"; the engine's match_id
-               m0/m1/… restarts per run and stays run-internal),
-               exception_ledger, ingest_conflicts,
+               m0/m1/… restarts per run and stays run-internal; run_id is
+               NULLABLE since b2d7e9f4c1a8 — a confidence=MANUAL match is
+               created by a user, not a run, match_id "manual", born
+               LOCKED/USER, optional `note` ≤500 chars; every join on
+               MatchLedger.run_id must tolerate NULL),
+               exception_ledger (`resolved_by` = RUN | USER_ACCEPT |
+               USER_MANUAL | USER_REOPEN + `resolved_by_match_id`;
+               first_seen_run_id nullable for the same reason),
+               ingest_conflicts,
                audit_log (general-purpose event stream, app schema — NOT a
                replacement for match_ledger/exception_ledger/ingest_conflicts,
                which stay the detailed domain-specific trails for their own concerns)
@@ -264,7 +274,27 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
   incremental.py  Phase-6 runs: pool = new credits + open exceptions vs all
                unconsumed bills; UNCHANGED matcher; match_ledger (HIGH auto-LOCKs),
                exception lifecycle OPEN -> RESOLVED; one running run per customer
-               (partial unique index -> 409 RUN_IN_PROGRESS)
+               (partial unique index -> 409 RUN_IN_PROGRESS). User decisions
+               also move the exception ledger: accept_match / reopen_match
+               RESOLVE the OPEN BANK_ONLY + BILL_ONLY rows behind the match
+               (_resolve_exceptions_for_match, stamped USER_ACCEPT /
+               USER_REOPEN); unlock never re-opens them (an OPEN match still
+               claims both sides); reject re-opens the credit, and for a
+               MANUAL match the bills too (no run is coming to re-report
+               them). create_manual_match(customer, txn, bill_ids, note):
+               both sides must be unconsumed (else ValueError -> 409
+               ALREADY_CONSUMED naming the holder), NO amount tolerance —
+               the response carries `variance` — and the pool machinery
+               excludes it from every later run via _consumed with zero
+               engine change.
+  ledger_export.py  ledger -> DataFrames for Excel, composed at DOWNLOAD
+               time (a manual match belongs to no run and decisions happen
+               after a run's workbook was written): run_ledger_frames(run)
+               = Manual_Matches (touching this run's credits/bills) +
+               Decisions (live status of the run's matches), EMPTY for a
+               snapshot run so the stored file streams back byte-identical;
+               customer_ledger_frames = Matches / Manual_Matches /
+               Exceptions for GET /api/ledger/workbook
   runs_store.py  persisted runs (payload/frames/workbook survive restarts)
   seeds.py     idempotent default customer wired to hsbc/ireps adapters;
                DEFAULT_SOURCES rows are (source_type, role, adapter_key, params)
@@ -331,8 +361,19 @@ backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/inge
   routes.py    legacy POST /api/runs (multipart one-shot) KEPT for compat/tests
                but retired from the UI; GET /api/runs/{id}[/frames/{name}|
                /workbook], GET /api/customers, GET /api/runs, GET /api/ledger,
-               GET /api/overview, GET /api/ar, GET /api/audit,
-               POST /api/matches/{id}/accept|reject; errors map to
+               GET /api/overview (optional ?from=&to=&operating_unit=
+               repeatable; "UNASSIGNED" is the bucket for bank-only credits,
+               which have no unit — a unit filter without it HIDES them and
+               filters_applied.bank_only_unassigned says how many),
+               GET /api/customers/{key}/operating-units (distinct gold
+               bills units + counts), GET /api/ar, GET /api/audit,
+               GET /api/ledger/workbook (customer ledger export),
+               POST /api/matches/{id}/accept|reject|unlock|reopen,
+               POST /api/matches/manual (customer_id, gold_bank_txn_id,
+               gold_bill_ids[], note -> 409 ALREADY_CONSUMED / 400
+               INVALID_INPUT); GET /api/runs/{id}/workbook appends the
+               ledger sheets on the fly (stored file never rewritten);
+               errors map to
                BANK_SELFCHECK_FAILED (422) / PARSE_FAILED (422) / INVALID_INPUT (400)
                / RUN_IN_PROGRESS (409); /api/runs requires a real statement +
                bills upload (400 otherwise) — there is no GET /api/defaults and
@@ -408,7 +449,13 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                tree-shaken per import; the only other runtime dep);
                IA: "Operate" group — Command Center (default landing; real
                KPIs/donut/pipeline from GET /api/overview, top exceptions
-               click through to Analyst queue) -> Ingest files (IngestForm:
+               click through to Analyst queue; DateFilter — quick picks
+               Today / Yesterday / This month (default) / All / custom +
+               operating-unit chips incl. "Unassigned", persisted per
+               customer in localStorage, sent as /overview query params;
+               the "last run · last ingest" strap was removed on request)
+               -> Ingest documents (IngestForm; page heading and nav label
+               both say "Ingest documents":
                per-slot include toggles + File-format dropdowns that PUT
                /sources; a slot shows either your upload or "no file selected"
                — there is no default-document prefill, and only the files of
@@ -416,8 +463,11 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                customer's extra lineage_* slots — add ("+ add lineage
                source"), remove (null adapter), upload under the slot key —
                "+ new customer" and "⧉ All ingestions" both top
-               right — IngestionsView renders inline) -> Reconcile
-               (ReconcileForm: statement picker from gold/files + mode;
+               right — IngestionsView renders inline) -> Reconcile (nav
+               label stays "Reconcile"; ReconcileForm's page heading is
+               "Initiate Reconciliation", renamed from "Reconcile from
+               gold", and its explanatory hint was removed on request:
+               statement picker from gold/files + mode;
                MatchingConfigPanel opens inline from the "⚙ Matching config"
                button top right — edits the customer's full rule set incl.
                field_map, the new scalar knobs and the "Terminology &
@@ -426,15 +476,40 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                /config, dropdowns fed by /api/gold/schema; there is NO
                per-run tunables panel — the UI sends no tunables so the
                saved config governs) -> results. The "Reconciliation
-               result" / "Run data" nav items are NEVER disabled: opened
-               with nothing loaded, App auto-loads the customer's latest
-               succeeded run (one attempt per run id, never while a
-               hash-named selection is still restoring), and the header's
-               RunPicker (mode + run-date range + checkbox list, at least
-               one run always selected) switches runs; with no runs at all
-               the empty state guides to Ingest/Reconcile.
+               result" nav items and the Data pages' run scope are NEVER
+               disabled: opened with nothing loaded, App auto-loads the
+               customer's latest succeeded run (one attempt per run id,
+               never while a hash-named selection is still restoring), and
+               the header's RunPicker (mode + run-date range + checkbox
+               list, at least one run always selected) switches runs; with
+               no runs at all the empty state guides to Ingest/Reconcile
+               (on a Data page the head with its scope switch still renders
+               above that card, so "Current" is one click away).
+               Every page heading is `<h2 className="page-title">`
+               (--fs-h1 token); panel headings stay at --fs-h2.
+               The run-scoped Exception queue KEEPS its MATCH_REVIEW rows
+               and decides them in place: components/MatchDecision.tsx
+               (accept incl. pick-list / reject / unlock / reopen +
+               useMatchDecision) is shared with the Analyst queue, both
+               hitting the same /api/matches/{id}/* routes on the same
+               match_ledger row; the frozen frame rows are overlaid with
+               the LIVE ledger row (App fetches /api/ledger, keyed by
+               match_ledger_id) into a "Ledger status" spine column, and
+               any decision bumps ledgerEpoch so every ledger-reading view
+               refetches — that is how a decision in one page is the state
+               of the other. Rows without match_ledger_id (snapshot runs)
+               keep the "no durable match to decide" note. OPEN BANK_ONLY /
+               BILL_ONLY rows offer "Match to bill… / Match to credit…"
+               (ManualMatchPicker: open exceptions of the other side, sorted
+               by |amount difference|, multi-select for batches, running
+               variance, note optional with a WARNING — not a block — when
+               |variance| > amount_tolerance) -> POST /api/matches/manual.
                "Workspace": Analyst queue (LedgerView renamed in UI
-               ONLY — /api/ledger and DB names unchanged; a Run column +
+               ONLY — /api/ledger and DB names unchanged; hosts the same
+               MatchDecision + ManualMatchPicker, shows MANUAL matches as
+               "Matched by user" with their note, exceptions carry a
+               "Resolved by" column, and "⬇ Export ledger" downloads
+               /api/ledger/workbook; a Run column +
                a RunFilter (components/RunFilter.tsx: mode + run-date range
                + ticked runs, EMPTY = every run, the opposite of RunPicker's
                "load these") narrows matches by run_id and exceptions by
@@ -449,9 +524,12 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                open BILL_ONLY aged from payment_advice/order/submission
                date, OVERDUE > 30d), KPIs + aging buckets; every row carries
                run_id (match's run / exception's first-seen run) so the same
-               RunFilter narrows the table + status breakdown — KPI tiles and
-               aging stay whole-customer on purpose, they are the live AR
-               position; settled rows cross-link into the Analyst queue
+               RunFilter narrows the table + status breakdown AND (since
+               2026-09-07, on request) the four KPI tiles + aging buckets,
+               recomputed client-side over the in-scope rows; the same
+               DateFilter (default All) applies to the aging anchor date
+               of outstanding rows and the credit value_date of settled
+               rows; settled rows cross-link into the Analyst queue
                focus; recon-alpha's milestone tracker deliberately omitted —
                not an IREPS concept) + Audit trail
                (AuditTrailView over GET /api/audit — the real audit_log
@@ -462,15 +540,30 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                overview; keep its statements factually in sync with this
                file when the architecture changes). There is NO silver tab
                (a "Parsed source rows" view existed briefly and was removed —
-               silver is a write-only audit layer, see db/silver.py). Gold data
-               tabs (GoldTable, shared presets in framePresets.ts,
-               refetch-on-mount — no cache, gold
-               mutates on ingest) browse the live gold layer with a per-
-               ingestion filter (per-file rows come from the file's
-               gold.file_rows sightings, so a re-export of known bills still
-               filters to its own rows); the four per-run frozen frames live under
-               Reconciliation result -> Run data (SourceTable, cached — frames
-               are immutable per run). UploadForm/runRecon are deleted;
+               silver is a write-only audit layer, see db/silver.py). ONE
+               "Data" sidebar group (since 2026-09-07; replaced the twin
+               "Run data" + "Gold data" groups): four pages — Bank
+               Transactions / Bills / Recoveries / Lineage docs — each with
+               a scope switch in its head. "Current" = GoldTable (shared
+               presets in framePresets.ts, refetch-on-mount — no cache,
+               gold mutates on ingest) browsing the live gold layer with a
+               per-ingestion filter (per-file rows come from the file's
+               gold.file_rows sightings, so a re-export of known bills
+               still filters to its own rows); "As of run" = SourceTable
+               (cached — frames are immutable per run) over the frozen run
+               frame, with the RunPicker. The pairing lives in
+               src/dataPages.ts (DATA_PAGES) over the UNCHANGED internal
+               view keys — gold_* IS the Current scope, the run frame name
+               IS the run scope — so the hash format, VALID_VIEWS, the
+               auto-load gate and every legacy link are untouched.
+               bills_enriched is the "With lineage trail" toggle inside
+               Bills in run scope (a run artifact, no gold counterpart);
+               Lineage docs is Current-only (a run persists no lineage
+               frame — routes._frame_records writes exactly four). The
+               scope a sidebar click opens is the user's last choice
+               (localStorage recon.dataScope); the ACTIVE scope is always
+               derived from the view (scopeOf). Row badges show in run
+               scope only. UploadForm/runRecon are deleted;
                unchanged by the medallion refactor — same API contract, frame names
                (bank/bills/bills_enriched/recoveries), column names, summary
                Category strings. Do NOT rename any of those server-side silently.
@@ -490,7 +583,7 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
 - **`window_days` (default 0)** bounds which bills are "expected" in a snapshot statement; money cannot arrive before IREPS advises the bank. Incremental mode ignores it (the open pool replaces the window).
 - **`paid_statuses`** default `{"PAYMENT MADE", "CO7 DONE"}` — CO7 DONE counts because the payment order goes out before the export refreshes. Now a real config: `MatchRuleSet.paid_statuses`, per-customer row in `match_rule_sets`, threaded through `reconcile()` to the matcher.
 - **Matching fields are per-customer config** (`FieldMapping` in `rules.py`, stored as JSON in `match_rule_sets.field_map`, edited in the UI's Matching config view). Only *signals* are configurable — display columns, gap_type literals, and the legacy-named MatchResult columns (`zone_from_narrative`/`bill_zone`/`zone_check` carry the FIRST exact signal's values; `date_source` stays `"advice"`/`"co7"` meaning primary/fallback) are gold-canonical and hardcoded. Two traps: (1) `engine.reconcile()` is called directly by `db/reconcile_gold.py` and `db/incremental.py` — the golden gate does NOT cover those two call sites, so any new rule knob must be threaded there by hand (`meta.rules_effective` is the guard); (2) with zero exact signals `all([])` is vacuously True — `exact_ok = bool(mapping.exact_signals) and all(checks)` guards it (regression-tested in `tests/test_field_mapping.py`). A NULL/`{}` `field_map` row means defaults; the default mapping is byte-identical to the historical hardcoded behavior under the golden gate.
-- **Advisory copy is per-customer config, codes are not.** `MatchRuleSet.copy_overrides` swaps the human text mapped onto `gap_type`/`ExpectedBasis`/review-confidence codes (`engine.DEFAULT_COPY` + `resolve_copy`); the codes themselves (`NON_IREPS_OR_UNRECOGNISED`, `CO7_ISSUED_NO_ADVICE`, `"advice"`/`"co7"`, `LineageStatus` values, MatchedVia literals) are FROZEN — they live in golden CSVs, persisted payloads, ledger rows and the frontend. Never rename a code; change its display text (or add a `labels` entry) instead.
+- **Advisory copy is per-customer config, codes are not.** `MatchRuleSet.copy_overrides` swaps the human text mapped onto `gap_type`/`ExpectedBasis`/review-confidence codes (`engine.DEFAULT_COPY` + `resolve_copy`); the codes themselves (`NON_IREPS_OR_UNRECOGNISED`, `CO7_ISSUED_NO_ADVICE`, `"advice"`/`"co7"`, `LineageStatus` values, MatchedVia literals, the confidence labels incl. `MANUAL` — a user-made match, LOCKED from birth, deliberately NOT in `REVIEW_CONFIDENCE`) are FROZEN — they live in golden CSVs, persisted payloads, ledger rows and the frontend. Never rename a code; change its display text (or add a `labels` entry) instead.
 - **Display paths read canonical ROLES, not the field_map — by design.** `exception_queue` (`amount`=net_payable_amount, `value_date`=payment_advice_date), `summarise`'s bank-side `amount`, and the AR view's advice→order→submission aging chain are deliberately hardcoded to the canonical columns. A custom `field_map` may only point at columns that still MEAN the canonical role; a new source's adapter must map onto the roles, not around them.
 - **IREPS data is dirty in specific ways** the code already handles — don't regress: four spellings of "nothing here" (`None`, `nan`, `"nan"`, `"----"`) via `scoring.norm_text`; int/str ID drift via `lineage._key`; quantities like `"3 Set"` (why `gold_lineage_docs.receipt_qty` is a String); recovery amounts packed several to a cell (summed); Net Amt rounded to whole rupees (₹1 slack).
 - **Bill Status is a plain table** (one header row, one row per bill — see `parsers/bill_status.py`), columns located by header TEXT never by position, and the set of columns is assumed to keep changing: only `REQUIRED_HEADERS` (Bill Number, CO6 No, Status, Net Amt) are load-bearing, a dropped known column NA-fills, and an ADDED column is extracted under its own header text and rides to gold `extras` untouched — nothing here knows what a new IREPS column means, and guessing its dtype would be an invention. Silver stays source-native and single-cell: `RecoveryDetails` is the raw `'<head>: <amt> <head>: <amt> ...'` string IREPS writes, never split in the parser. The IREPS bills adapter's `to_gold()` (`sources/ireps_bills.py`) is where that string becomes the structured `recoveries`/`recovery_count`/`recovery_sum`/`net_check`/`recovery_check` gold fields and the long-format `recoveries` gold frame — Silver→Gold derivation belongs in the adapter, not the parser. `----` is IREPS's "CO7 not issued yet" placeholder on `CO7No`/`CO7Date` only; other placeholder tokens (`NA`, `-`, blank) on date columns are absorbed by `pd.to_datetime(errors="coerce")` rather than an enumerated list. Identifier columns (`ContractNo`, `BillNumber`, `CO6No`, `CO7No`) are never coerced to numeric — a bill number is not an amount, and some rows legitimately carry non-numeric placeholders (`BillNumber="-"`) that downstream code already treats as "no bill number" (`engine.group_bill_attempts.UNGROUPABLE_KEYS`, `db/ingest._BLANK_KEYS`) without the parser needing to null them. `Sheet`/`DataRow` are Silver bookkeeping fields (not literal IREPS columns) — `data_row` in particular is a real dependency of `group_bill_attempts`' resubmission tie-break, not decoration. `header_row`/`unparsed_header` (artifacts of a pre-2026-08 block-per-bill export this parser no longer reads) come back NA via `ensure_schema` — nothing feeds them any more. The IREPS bills adapter's `selfcheck()` raises when a workbook yields ZERO bill rows — an upload that isn't this format fails loud instead of ingesting an empty layer.

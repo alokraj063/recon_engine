@@ -1,8 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Filter, RotateCw } from 'lucide-react'
-import {
-  acceptMatch, fetchLedger, fetchRun, fetchRuns, rejectMatch, reopenMatch, unlockMatch,
-} from '../api'
+import { ChevronRight, Download, Filter, RotateCw } from 'lucide-react'
+import { fetchLedger, fetchRun, fetchRuns, ledgerWorkbookUrl } from '../api'
 import {
   ApiError,
   type LedgerException, type LedgerMatch, type LedgerViewData, type Row,
@@ -13,15 +11,19 @@ import { BillLineage } from './BillLineage'
 import { ConfidenceBadge } from './ConfidenceBadge'
 import { MatchedEvidence, ReviewEvidence } from './ReviewEvidence'
 import {
+  MatchDecision, PickList, billByNumber, useMatchDecision, type DecisionResult,
+} from './MatchDecision'
+import { ManualMatchPicker } from './ManualMatchPicker'
+import {
   EMPTY_RUN_FILTER, RunFilter, runFilterSet, runLabelFor, type RunFilterValue,
 } from './RunFilter'
 
-type Evidence = Row | 'loading' | 'missing'
+type Evidence = Row | 'loading' | 'missing' | 'manual'
 
 type ExcFilter = 'OPEN' | 'RESOLVED' | 'ALL'
 type MatchStatusFilter = 'ALL' | 'OPEN' | 'LOCKED' | 'REJECTED'
 
-const CONFIDENCE_ORDER = ['HIGH', 'AMBIGUOUS', 'LOW', 'AMOUNT_ONLY', 'BATCHED']
+const CONFIDENCE_ORDER = ['HIGH', 'MANUAL', 'AMBIGUOUS', 'LOW', 'AMOUNT_ONLY', 'BATCHED']
 
 /** In-header filter control: a funnel icon that opens a small popover.
  *  Invisible chrome until used — the funnel turns accent-colored while
@@ -73,6 +75,20 @@ function txnLine(m: LedgerMatch): string {
   return [t.bank_ref, inr(t.amount), t.value_date, t.zone].filter(Boolean).join(' · ')
 }
 
+/** "Resolved by" for the Exceptions panel: the run that matched it, or
+ *  the analyst decision (accept / manual pairing / undo of a rejection)
+ *  and the match it points at. */
+function resolvedBy(e: LedgerException, runs: RunListItem[]): string {
+  if (e.status !== 'RESOLVED') return '—'
+  const m = e.resolved_by_match_seq != null ? `M-${e.resolved_by_match_seq}` : null
+  switch (e.resolved_by) {
+    case 'USER_ACCEPT': return `accepted${m ? ` ${m}` : ''}`
+    case 'USER_MANUAL': return `matched by user${m ? ` (${m})` : ''}`
+    case 'USER_REOPEN': return `reopened${m ? ` ${m}` : ''}`
+    default: return e.resolved_by_run_id ? `run ${runLabelFor(runs, e.resolved_by_run_id)}` : '—'
+  }
+}
+
 function excLine(e: LedgerException): string {
   if (e.txn) {
     return [e.txn.bank_ref, inr(e.txn.amount), e.txn.value_date, e.txn.zone]
@@ -91,7 +107,6 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
   const [runs, setRuns] = useState<RunListItem[]>([])
   const [runFilter, setRunFilter] = useState<RunFilterValue>(EMPTY_RUN_FILTER)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [excFilter, setExcFilter] = useState<ExcFilter>('OPEN')
   const [confFilter, setConfFilter] = useState<string>('ALL')
   const [matchStatusFilter, setMatchStatusFilter] = useState<MatchStatusFilter>('ALL')
@@ -101,11 +116,19 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
   const scrolled = useRef<string | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [evidence, setEvidence] = useState<Record<string, Evidence>>({})
+  // the OPEN exception an analyst is pairing by hand (one picker at a time)
+  const [picking, setPicking] = useState<string | null>(null)
 
   /** Pull the match's evidence row from its creating run's persisted
    *  payload (fetchRun is cached + legacy-normalized). Review matches
    *  live in the queue; HIGH auto-locked ones only in matched. */
   const loadEvidence = useCallback((m: LedgerMatch) => {
+    // a MANUAL match has no creating run and therefore no engine
+    // evidence: the ledger summary + the analyst's note IS its evidence
+    if (!m.run_id) {
+      setEvidence((ev) => ({ ...ev, [m.id]: 'manual' }))
+      return
+    }
     setEvidence((ev) => (ev[m.id] ? ev : { ...ev, [m.id]: 'loading' }))
     fetchRun(m.run_id)
       .then((p) => {
@@ -151,42 +174,31 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
 
   const runSet = useMemo(() => runFilterSet(runFilter, runs), [runFilter, runs])
 
-  const decide = async (id: string,
-                        action: 'accept' | 'reject' | 'unlock' | 'reopen',
-                        goldBillId?: string) => {
-    setBusy((b) => ({ ...b, [id]: true }))
-    try {
-      const res = action === 'accept' ? await acceptMatch(id, goldBillId)
-        : action === 'unlock' ? await unlockMatch(id)
-        : action === 'reopen' ? await reopenMatch(id)
-        : await rejectMatch(id)
-      // apply the authoritative response locally...
-      setData((d) => d && {
-        ...d,
-        matches: d.matches.map((m) =>
-          m.id === id
-            ? {
-                ...m,
-                status: res.status as LedgerMatch['status'],
-                locked_by: ('locked_by' in res ? res.locked_by : m.locked_by) as LedgerMatch['locked_by'],
-              }
-            : m),
-      })
-      // ...then refetch: a reject also opens a BANK_ONLY exception
-      load()
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
-    } finally {
-      setBusy((b) => ({ ...b, [id]: false }))
-    }
-  }
+  // decisions go through the shared MatchDecision hook (the Exception
+  // queue uses the same one): apply the authoritative response locally,
+  // then refetch — a reject also opens a BANK_ONLY exception
+  const onDecided = useCallback((id: string, res: DecisionResult) => {
+    setData((d) => d && {
+      ...d,
+      matches: d.matches.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              status: res.status as LedgerMatch['status'],
+              locked_by: ('locked_by' in res ? res.locked_by : m.locked_by) as LedgerMatch['locked_by'],
+            }
+          : m),
+    })
+    load()
+  }, [load])
+  const { decide, busy } = useMatchDecision(onDecided, setError)
 
   // an exception belongs to the run that first saw it AND the run that
   // resolved it — filtering by either run keeps it in view
   const allExceptions = data?.exceptions ?? []
   const exceptions = allExceptions.filter(
     (e) => (excFilter === 'ALL' || e.status === excFilter)
-      && (!runSet || runSet.has(e.first_seen_run_id)
+      && (!runSet || (!!e.first_seen_run_id && runSet.has(e.first_seen_run_id))
           || (!!e.resolved_by_run_id && runSet.has(e.resolved_by_run_id))),
   )
 
@@ -200,7 +212,8 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
     const rows = (data?.matches ?? []).filter((m) => {
       if (confFilter !== 'ALL' && m.confidence !== confFilter) return false
       if (matchStatusFilter !== 'ALL' && m.status !== matchStatusFilter) return false
-      if (runSet && !runSet.has(m.run_id)) return false
+      // a MANUAL match belongs to no run: a run filter hides it
+      if (runSet && (!m.run_id || !runSet.has(m.run_id))) return false
       if (!inDayRange(localDay(m.created_at), dateFrom, dateTo)) return false
       return true
     })
@@ -218,12 +231,16 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
   return (
     <>
       <div className="result-head">
-        <h2>Analyst queue</h2>
+        <h2 className="page-title">Analyst queue</h2>
         <span className="file-note">
           customer: {customerId}
           <button className="btn-refresh btn-ic" onClick={load}>
             <RotateCw size={13} strokeWidth={1.75} /> refresh
           </button>
+          <a className="btn-download btn-ic" href={ledgerWorkbookUrl(customerId)} download
+             title="Ledger as Excel — Matches (incl. manual), Manual_Matches, Exceptions">
+            <Download size={13} strokeWidth={1.75} /> Export ledger
+          </a>
           {runs.length > 0 && (
             <RunFilter runs={runs} value={runFilter} onChange={setRunFilter}
                        note={runNote} />
@@ -331,8 +348,8 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
                       <td title={`run-internal label: ${m.match_id}`}>
                         {m.seq !== null ? `M-${m.seq}` : m.match_id}
                       </td>
-                      <td className="run-cell" title={m.run_id}>
-                        {runLabelFor(runs, m.run_id)}
+                      <td className="run-cell" title={m.run_id ?? 'matched by user — no creating run'}>
+                        {m.run_id ? runLabelFor(runs, m.run_id) : <span className="chip-note">manual</span>}
                       </td>
                       <td><ConfidenceBadge label={m.confidence} /></td>
                       <td><span className={`stamp stamp-${m.status}`}>{m.status}</span></td>
@@ -365,48 +382,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
                         )}
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
-                        {m.status === 'OPEN' && (
-                          <span className="decide">
-                            <button
-                              className="btn-accept"
-                              disabled={busy[m.id]}
-                              onClick={() => decide(m.id, 'accept')}
-                            >
-                              Accept
-                            </button>
-                            <button
-                              className="btn-reject"
-                              disabled={busy[m.id]}
-                              onClick={() => decide(m.id, 'reject')}
-                            >
-                              Reject
-                            </button>
-                          </span>
-                        )}
-                        {m.status === 'LOCKED' && (
-                          <span className="decide">
-                            <button
-                              className="btn-open"
-                              title="Reopen this decision — the match returns to OPEN for review"
-                              disabled={busy[m.id]}
-                              onClick={() => decide(m.id, 'unlock')}
-                            >
-                              Unlock
-                            </button>
-                          </span>
-                        )}
-                        {m.status === 'REJECTED' && (
-                          <span className="decide">
-                            <button
-                              className="btn-reopen"
-                              title="Undo this rejection — the match returns to OPEN and re-claims its credit and bills"
-                              disabled={busy[m.id]}
-                              onClick={() => decide(m.id, 'reopen')}
-                            >
-                              Reopen
-                            </button>
-                          </span>
-                        )}
+                        <MatchDecision match={m} busy={!!busy[m.id]} decide={decide} />
                       </td>
                     </tr>
                     {expanded[m.id] && (
@@ -414,12 +390,19 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
                         <td colSpan={9}>
                           {ev === 'loading' || ev === undefined ? (
                             <p className="frame-note"><span className="quill" /> loading evidence…</p>
-                          ) : ev === 'missing' ? (
+                          ) : ev === 'missing' || ev === 'manual' ? (
                             <div className="detail-grid">
                               <div className="detail-section">
-                                Evidence unavailable — the creating run's payload could not
-                                be read. Ledger summary:
+                                {ev === 'manual'
+                                  ? 'Matched by user — no engine evidence; the analyst paired this credit and bill(s) by hand.'
+                                  : "Evidence unavailable — the creating run's payload could not be read. Ledger summary:"}
                               </div>
+                              {ev === 'manual' && (
+                                <div>
+                                  <div className="dt-label">Note</div>
+                                  <div className="dt-value">{m.note || '—'}</div>
+                                </div>
+                              )}
                               <div>
                                 <div className="dt-label">Credit</div>
                                 <div className="dt-value">{txnLine(m)}</div>
@@ -438,40 +421,15 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
                               {/* MatchedEvidence has no candidate cards to carry
                                   per-bill accept buttons — keep the pick-list
                                   for that path only */}
-                              {m.status === 'OPEN' && m.bills.length > 0
-                                && ev.exception_type !== 'MATCH_REVIEW' && (
-                                <>
-                                  <div className="detail-section">
-                                    Pick the settling bill — accepting locks the credit
-                                    to YOUR choice
-                                  </div>
-                                  <div className="pick-list">
-                                    {m.bills.map((b) => (
-                                      <span key={b.gold_bill_id} className="pick-row">
-                                        <span className="chip chip-bill">
-                                          {b.bill_number ?? b.gold_bill_id.slice(0, 8)}
-                                          {' · '}{inr(b.net_payable_amount)}
-                                          {b.zone ? ` · ${b.zone}` : ''}
-                                        </span>
-                                        {b.role === 'picked' && (
-                                          <span className="chip-note">matcher's pick</span>
-                                        )}
-                                        <button className="btn-accept" disabled={busy[m.id]}
-                                                onClick={() => decide(m.id, 'accept', b.gold_bill_id)}>
-                                          Accept this bill
-                                        </button>
-                                      </span>
-                                    ))}
-                                  </div>
-                                </>
+                              {ev.exception_type !== 'MATCH_REVIEW' && (
+                                <PickList match={m} busy={!!busy[m.id]} decide={decide} />
                               )}
                               {ev.exception_type === 'MATCH_REVIEW'
                                 ? <ReviewEvidence row={ev} runId={m.run_id}
                                     busy={!!busy[m.id]}
                                     onAcceptBill={m.status === 'OPEN'
                                       ? (no) => {
-                                          const b = m.bills.find(
-                                            (x) => String(x.bill_number) === String(no))
+                                          const b = billByNumber(m, no)
                                           if (b) decide(m.id, 'accept', b.gold_bill_id)
                                         }
                                       : undefined} />
@@ -519,22 +477,52 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
                     <th>Status</th>
                     <th>Detail</th>
                     <th>First seen (run)</th>
-                    <th>Resolved by (run)</th>
+                    <th>Resolved by</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
                   {exceptions.map((e) => (
-                    <tr key={e.id}>
+                    <Fragment key={e.id}>
+                    <tr>
                       <td><span className={`stamp stamp-${e.exception_type}`}>{e.exception_type.replace('_', ' ')}</span></td>
                       <td><span className={`stamp stamp-${e.status}`}>{e.status}</span></td>
                       <td className="oneline">{excLine(e)}</td>
-                      <td className="run-cell" title={e.first_seen_run_id}>
+                      <td className="run-cell" title={e.first_seen_run_id ?? undefined}>
                         {runLabelFor(runs, e.first_seen_run_id)}
                       </td>
-                      <td className="run-cell" title={e.resolved_by_run_id ?? undefined}>
-                        {runLabelFor(runs, e.resolved_by_run_id)}
+                      <td className="run-cell"
+                          title={[e.resolved_by, e.resolved_by_run_id ?? e.resolved_by_match_id,
+                                  e.resolved_at ? fmtWhen(e.resolved_at) : null]
+                                   .filter(Boolean).join(' · ') || undefined}>
+                        {resolvedBy(e, runs)}
+                      </td>
+                      <td>
+                        {e.status === 'OPEN' && (
+                          <button className="btn-open"
+                                  title={e.exception_type === 'BANK_ONLY'
+                                    ? 'pair this credit with open bill(s) by hand'
+                                    : 'pair this bill with an open credit by hand'}
+                                  onClick={() => setPicking(picking === e.id ? null : e.id)}>
+                            {e.exception_type === 'BANK_ONLY' ? 'Match to bill…' : 'Match to credit…'}
+                          </button>
+                        )}
                       </td>
                     </tr>
+                    {picking === e.id && (
+                      <tr className="xq-detail">
+                        <td colSpan={6}>
+                          <ManualMatchPicker
+                            customerId={customerId}
+                            anchor={e}
+                            candidates={allExceptions.filter((x) => x.status === 'OPEN'
+                              && x.exception_type === (e.exception_type === 'BANK_ONLY' ? 'BILL_ONLY' : 'BANK_ONLY'))}
+                            onDone={() => { setPicking(null); load() }}
+                            onCancel={() => setPicking(null)} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
