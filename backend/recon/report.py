@@ -20,13 +20,17 @@ def write_workbook(out, path):
     the deduction detail."""
     with pd.ExcelWriter(path, engine="openpyxl") as xl:
         out["summary"].to_excel(xl, sheet_name="Summary", index=False)
-        (out["matched"].drop(columns=["bill_indices", "candidate_indices"],
+        (out["matched"].drop(columns=["bill_indices", "candidate_indices",
+                                      "candidate_gaps",
+                                      "candidate_date_sources"],
                              errors="ignore")
             .to_excel(xl, sheet_name="Matched", index=False))
         # Candidates is structured (list of dicts) for the API; Excel gets
         # the flat CandidateSummary string instead.
         (out["queue"].drop(columns=["Candidates", "bill_indices",
-                                    "candidate_indices"], errors="ignore")
+                                    "candidate_indices", "candidate_gaps",
+                                    "candidate_date_sources"],
+                           errors="ignore")
             .to_excel(xl, sheet_name="Exception_Queue", index=False))
         if "recoveries" in out:
             out["recoveries"].to_excel(xl, sheet_name="Recovery_Detail", index=False)

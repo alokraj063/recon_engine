@@ -34,6 +34,7 @@ from .audit import record_event
 from .base import SessionLocal
 from .gold import (BANK_MAP, BILLS_MAP, RECOVERIES_MAP, frame_from_gold,
                    lineage_frame, reported_by_file)
+from .reconcile_gold import statement_ids
 from .models import (ExceptionLedger, GoldBankTxn, GoldBill,
                      GoldRecovery, MatchLedger, MatchLedgerBill, Run)
 
@@ -204,14 +205,17 @@ def _reopen_exceptions_for_match(session, row: MatchLedger,
     return n
 
 
-def build_pool(session, customer_id: int, statement_bronze_id: int) -> dict:
-    """Engine-shaped frames + positional gold-id lists for the matcher."""
+def build_pool(session, customer_id: int, statement_bronze_ids) -> dict:
+    """Engine-shaped frames + positional gold-id lists for the matcher.
+    `statement_bronze_ids`: one id or several — the new credits are the
+    union of the statements' credits (each gold row once)."""
     consumed_txns, consumed_bills = _consumed(session, customer_id)
     open_bank_only = _open_exceptions(session, customer_id, "BANK_ONLY")
 
     txn_rows = list(session.execute(
         select(GoldBankTxn)
-        .where(reported_by_file(session, GoldBankTxn, statement_bronze_id,
+        .where(reported_by_file(session, GoldBankTxn,
+                                statement_ids(statement_bronze_ids),
                                 customer_id),
                GoldBankTxn.used_in_recon.is_(True))
         # the statement's credits can span files: one it re-reports is
@@ -250,12 +254,12 @@ def build_pool(session, customer_id: int, statement_bronze_id: int) -> dict:
             "lineage_df": lineage_df, "recoveries_df": recoveries_df}
 
 
-def run_matching(session, customer_id: int, statement_bronze_id: int,
+def run_matching(session, customer_id: int, statement_bronze_ids,
                  rules: MatchRuleSet) -> Tuple[dict, List[str], List[str]]:
     """Reconcile the pool through the unchanged engine. Returns
     (out frames dict, bank_ids, bill_ids) — ids positional like the
     matcher's indices."""
-    pool = build_pool(session, customer_id, statement_bronze_id)
+    pool = build_pool(session, customer_id, statement_bronze_ids)
     out = reconcile(
         pool["bank_df"], pool["bills_df"], pool["lineage_df"],
         window_days=WIDE_OPEN_DAYS,          # pool replaces the window
@@ -360,7 +364,11 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
                                             role="picked"))
                 links.append({"match_id": r.match_id,
                               "gold_bill_id": bill_ids[pos], "role": "picked"})
-            for pos in {int(x) for x in r.candidate_indices} - picked:
+            # in the matcher's order (closest-dated first), not set order,
+            # so the ledger lists candidates the way the review cards do
+            for pos in [int(x) for x in r.candidate_indices]:
+                if pos in picked:
+                    continue
                 session.add(MatchLedgerBill(match_ledger_id=ledger.id,
                                             gold_bill_id=bill_ids[pos],
                                             role="candidate"))
@@ -387,13 +395,25 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
     # append new OPEN exceptions (dedup against still-open rows)
     open_bank = _open_exceptions(session, customer_id, "BANK_ONLY")
     if not out["bank_only"].empty:
+        gaps = (out["bank_only"]["gap_type"]
+                if "gap_type" in out["bank_only"].columns else None)
         for pos in out["bank_only"].index:
             gid = bank_ids[int(pos)]
+            gap = (str(gaps.loc[pos]) if gaps is not None
+                   and pd.notna(gaps.loc[pos]) else None)
             if gid not in open_bank:
                 session.add(ExceptionLedger(
                     customer_id=customer_id, exception_type="BANK_ONLY",
-                    gold_bank_txn_id=gid, first_seen_run_id=run_id))
+                    gold_bank_txn_id=gid, first_seen_run_id=run_id,
+                    gap_type=gap))
                 stats["exceptions_opened"] += 1
+            elif gap:
+                # a carried credit re-reported by this run: keep its gap
+                # code current (a zone backfilled since its first sighting
+                # turns an unrecognised receipt into a signal-not-found)
+                row = session.get(ExceptionLedger, open_bank[gid])
+                if row is not None and row.gap_type != gap:
+                    row.gap_type = gap
     open_bill = _open_exceptions(session, customer_id, "BILL_ONLY")
     if not out["bill_only"].empty:
         for pos in out["bill_only"].index:
@@ -669,7 +689,8 @@ def ledger_view(customer_id: int) -> dict:
         link_rows = list(session.execute(
             select(MatchLedgerBill)
             .where(MatchLedgerBill.match_ledger_id.in_(
-                [m.id for m in match_rows]))).scalars()) if match_rows else []
+                [m.id for m in match_rows]))
+            .order_by(MatchLedgerBill.id)).scalars()) if match_rows else []
         exc_rows = list(session.execute(
             select(ExceptionLedger)
             .where(ExceptionLedger.customer_id == customer_id)
@@ -718,6 +739,7 @@ def ledger_view(customer_id: int) -> dict:
             "resolved_by_match_id": e.resolved_by_match_id,
             "resolved_by_match_seq": seq_by_match.get(e.resolved_by_match_id),
             "resolved_at": e.resolved_at.isoformat() if e.resolved_at else None,
+            "gap_type": e.gap_type,
             "txn": _txn_info(txns.get(e.gold_bank_txn_id))
             if e.gold_bank_txn_id else None,
             "bill": _bill_info(bills.get(e.gold_bill_id))

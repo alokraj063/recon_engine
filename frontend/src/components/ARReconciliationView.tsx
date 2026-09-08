@@ -4,6 +4,10 @@ import type { ArRow, ArStatus, ArView, RunListItem } from '../types'
 import { fetchAr, fetchOperatingUnits, fetchRuns } from '../api'
 import { inDayRange, inr } from '../format'
 import { FitText } from './FitText'
+import { ColumnFilter } from './filters/ColumnFilter'
+import { FilterChips } from './filters/FilterChips'
+import { buildOptions } from './filters/facets'
+import { SnapshotNotice } from './SnapshotNotice'
 import {
   EMPTY_RUN_FILTER, RunFilter, runFilterSet, runLabelFor, type RunFilterValue,
 } from './RunFilter'
@@ -34,17 +38,9 @@ interface Props {
   refreshKey: number
   /** settled / in-review rows link into the Analyst queue */
   onOpenInQueue: (matchLedgerId: string) => void
+  /** the empty-ledger notice links back to Reconcile */
+  onGoToReconcile: () => void
 }
-
-type Filter = 'ALL' | ArStatus
-
-const FILTERS: Array<[Filter, string]> = [
-  ['ALL', 'All'],
-  ['OVERDUE', 'Overdue'],
-  ['AWAITING', 'Awaiting'],
-  ['IN_REVIEW', 'In review'],
-  ['SETTLED', 'Settled'],
-]
 
 const STATUS_LABEL: Record<ArStatus, string> = {
   SETTLED: 'SETTLED',
@@ -60,10 +56,13 @@ const BUCKET_TONE: Record<string, string> = {
   '90+': 'fill-sienna', undated: 'fill-green-soft',
 }
 
-export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: Props) {
+export function ARReconciliationView({
+  customerId, refreshKey, onOpenInQueue, onGoToReconcile,
+}: Props) {
   const [data, setData] = useState<ArView | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState<Filter>('ALL')
+  // status column filter (multi-select; empty = every status)
+  const [statusFilter, setStatusFilter] = useState<string[]>([])
   const [runs, setRuns] = useState<RunListItem[]>([])
   const [runFilter, setRunFilter] = useState<RunFilterValue>(EMPTY_RUN_FILTER)
   const [dateFilter, setDateFilter] = useState<DateFilterValue>(AR_DEFAULT_FILTER)
@@ -98,7 +97,13 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
     }
     return inUnits(r, dateFilter.units)
   })
-  const rows = inScope.filter((r) => filter === 'ALL' || r.status === filter)
+  const rows = inScope.filter((r) => statusFilter.length === 0 || statusFilter.includes(r.status))
+  const statusChips = [{
+    key: 'status', label: 'Status', values: statusFilter,
+    format: (v: string) => STATUS_LABEL[v as ArStatus] ?? v,
+    onRemove: (v?: string) =>
+      setStatusFilter(v === undefined ? [] : statusFilter.filter((x) => x !== v)),
+  }]
   const statusCounts = inScope.reduce<Record<string, number>>(
     (acc, r) => ({ ...acc, [r.status]: (acc[r.status] ?? 0) + 1 }), {})
   const scoped = !!runSet || win.from !== '' || win.to !== '' || dateFilter.units !== null
@@ -122,7 +127,10 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
     // denominator: statement credits of the runs in scope (all runs when
     // no run filter), from the per-run counts the payload carries
     const runsInScope = (data?.runs ?? []).filter((r) => !runSet || runSet.has(r.run_id))
-    const credits = runsInScope.reduce<number>((s, r) => s + (r.credits ?? 0), 0)
+    // unrecognised receipts (no match signal) are excluded from the
+    // denominator: the rate is over recognised credits only
+    const credits = runsInScope.reduce<number>(
+      (s, r) => s + Math.max(0, (r.credits ?? 0) - (r.unrecognised ?? 0)), 0)
     return {
       outstanding: { count: open.length, value: sum(open.map((r) => r.net_payable_amount)) },
       overdue: { count: overdue.length, value: sum(overdue.map((r) => r.net_payable_amount)) },
@@ -173,10 +181,7 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
       {!data && !error && <p className="frame-note"><span className="quill" /> loading…</p>}
 
       {data && data.rows.length === 0 && (
-        <p className="frame-note">
-          The AR working set fills up when you run in incremental mode — settled matches and
-          outstanding bills will appear here.
-        </p>
+        <SnapshotNotice runs={runs} what="AR Reconciliation" onGoToReconcile={onGoToReconcile} />
       )}
 
       {data && data.rows.length > 0 && (
@@ -197,7 +202,7 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
             <div className="tile tone-neutral">
               <div className="tile-label">Match rate</div>
               <div className="tile-count"><FitText>{pct(kpis.match_rate)}</FitText></div>
-              <div className="tile-amount">of statement credits{runSet ? ' in the selected runs' : ''}</div>
+              <div className="tile-amount">of recognised statement credits{runSet ? ' in the selected runs' : ''}</div>
               <div className="tile-delta">{scopeLabel}</div>
             </div>
             <div className="tile tone-bank">
@@ -215,18 +220,12 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
                   Bills ↔ payments
                   {scoped && <span className="chip-note"> {runNote}</span>}
                 </h3>
-                <span className="seg">
-                  {FILTERS.map(([f, label]) => (
-                    <button key={f} className={filter === f ? 'on' : ''}
-                            onClick={() => setFilter(f)}>
-                      {label}
-                    </button>
-                  ))}
-                </span>
+                <FilterChips chips={statusChips} />
               </div>
               {rows.length === 0 ? (
                 <p className="frame-note">
-                  nothing with this status{scoped ? ' in this scope' : ''}
+                  nothing with this status{scoped ? ' in this scope' : ''} —{' '}
+                  <button className="link-btn" onClick={() => setStatusFilter([])}>show all</button>
                 </p>
               ) : (
                 <div className="ledger-wrap ar-table-wrap">
@@ -239,7 +238,14 @@ export function ARReconciliationView({ customerId, refreshKey, onOpenInQueue }: 
                         <th style={{ textAlign: 'right' }}>Paid amt</th>
                         <th>Value date</th>
                         <th style={{ textAlign: 'right' }}>Variance</th>
-                        <th>Match</th><th>Run</th><th>Status</th><th>Age</th>
+                        <th>Match</th><th>Run</th>
+                        <th>
+                          Status
+                          <ColumnFilter label="Status" value={statusFilter} onApply={setStatusFilter}
+                                        format={(v) => STATUS_LABEL[v as ArStatus] ?? v}
+                                        options={buildOptions(inScope, (r) => r.status)} />
+                        </th>
+                        <th>Age</th>
                       </tr>
                     </thead>
                     <tbody>

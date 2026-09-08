@@ -359,7 +359,7 @@ class Run(Base):
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
     rule_set_id: Mapped[Optional[int]] = mapped_column(ForeignKey("match_rule_sets.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="running")  # running | succeeded | failed
-    mode: Mapped[str] = mapped_column(String(16), default="snapshot")   # snapshot | incremental
+    mode: Mapped[str] = mapped_column(String(16), default="incremental")   # incremental (default) | snapshot
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     params: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)     # effective config
     payload: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)    # exact POST response body
@@ -449,6 +449,11 @@ class ExceptionLedger(Base):
     # match instead.
     resolved_by: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     resolved_by_match_id: Mapped[Optional[str]] = mapped_column(ForeignKey("match_ledger.id"), nullable=True)
+    # BANK_ONLY only: the frozen gap code the engine assigned
+    # (SIGNAL_BILL_NOT_FOUND | UNRECOGNISED_RECEIPT), refreshed by every run
+    # that re-reports the credit. NULL on pre-c3f8a1d27e64 rows — readers
+    # derive it from the credit's zone_guess (db/overview.unrecognised_clause).
+    gap_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
 
 class IngestConflict(Base):

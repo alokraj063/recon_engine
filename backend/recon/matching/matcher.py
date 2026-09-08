@@ -55,6 +55,21 @@ class MatchResult:
     # ties for a single match, all covered bills for a batched one. This is
     # the evidence the review queue shows behind an AMBIGUOUS/LOW flag.
     candidate_indices: list = field(default_factory=list)
+    # parallel to candidate_indices: each candidate's gap (days) to the
+    # credit's date and which bill date it was compared on ("advice" /
+    # "co7" / None). Empty for batched matches.
+    candidate_gaps: list = field(default_factory=list)
+    candidate_date_sources: list = field(default_factory=list)
+
+
+def _tie_key(p):
+    """Order among pairs tied at the same score: the bill whose compared
+    date lies CLOSEST to the credit's date wins (pure smallest gap — a bill
+    compared on its fallback date competes on that gap on equal terms),
+    undated bills last, bill-frame index as the final, explicit tiebreak
+    (the legacy implicit order, so equal gaps behave as before)."""
+    gap = p["date_gap"]
+    return (gap is None, gap if gap is not None else 0, p["bill_idx"])
 
 
 def _build_amount_index(candidates, mapping=DEFAULT_MAPPING, decimals=2):
@@ -125,23 +140,26 @@ def _ceilings(pairs):
     The tie counter and index list reset whenever a new maximum appears,
     so they describe the final ceiling rather than ties anywhere.
     """
-    top_score, tied, top_idx = {}, {}, {}
+    top_score, tied, top_pairs = {}, {}, {}
     for p in pairs:
         bp = p["bank_pos"]
         if bp not in top_score or p["score"] > top_score[bp]:
             top_score[bp] = p["score"]
             tied[bp] = 1
-            top_idx[bp] = [p["bill_idx"]]
+            top_pairs[bp] = [p]
         elif p["score"] == top_score[bp]:
             tied[bp] += 1
-            top_idx[bp].append(p["bill_idx"])
-    return top_score, tied, top_idx
+            top_pairs[bp].append(p)
+    # closest-dated first: this is the order candidates are reported in
+    for bp in top_pairs:
+        top_pairs[bp].sort(key=_tie_key)
+    return top_score, tied, top_pairs
 
 
 # --------------------------------------------------------------------- #
 # Pass 2
 # --------------------------------------------------------------------- #
-def _assign(bank_df, candidates, pairs, top_score, tied, top_idx,
+def _assign(bank_df, candidates, pairs, top_score, tied, top_pairs,
             mapping=DEFAULT_MAPPING):
     """
     Claim best first. One credit per bill, one bill per credit.
@@ -153,8 +171,10 @@ def _assign(bank_df, candidates, pairs, top_score, tied, top_idx,
     # the legacy zone_* result columns carry the FIRST exact signal's
     # values (identical to zone under the default mapping)
     sig = mapping.exact_signals[0] if mapping.exact_signals else None
-    # -score for descending, bank_pos so reruns are identical
-    pairs = sorted(pairs, key=lambda p: (-p["score"], p["bank_pos"]))
+    # -score for descending, bank_pos so reruns are identical, then the
+    # tie key so a credit whose ceiling is shared settles on the bill
+    # whose date lies closest to it (see _tie_key)
+    pairs = sorted(pairs, key=lambda p: (-p["score"], p["bank_pos"]) + _tie_key(p))
     used_bills, used_bank, results = set(), set(), []
 
     for p in pairs:
@@ -171,12 +191,25 @@ def _assign(bank_df, candidates, pairs, top_score, tied, top_idx,
 
         conf = confidence_label(p["zone_check"], p["date_check"], p["date_source"])
         n_tied = tied[bp]
+        # the pick first, then the other tied bills closest-dated first —
+        # the order the review UI shows the candidate cards in
+        others = [q for q in top_pairs[bp] if q["bill_idx"] != p["bill_idx"]]
+        ordered = [p] + others
         flags = []
         if n_tied > 1:
-            flags.append(
-                f"AMBIGUOUS - {n_tied} bills share this amount and score "
-                f"the same; picked bill {row.get('bill_number')} arbitrarily"
-            )
+            head = (f"AMBIGUOUS - {n_tied} bills share this amount and score "
+                    f"the same; picked bill {row.get('bill_number')}")
+            if p["date_gap"] is None:
+                # no tied bill has a date to compare — genuinely arbitrary
+                flags.append(f"{head} arbitrarily (no bill dates to compare)")
+            else:
+                date_word = ("advice date" if p["date_source"] == "advice"
+                             else "pay order date")
+                rest = ", ".join(
+                    f"{q['date_gap']}d" if q["date_gap"] is not None else "no date"
+                    for q in others)
+                flags.append(f"{head} — closest {date_word} to the credit "
+                             f"({p['date_gap']}d; others {rest})")
             conf = "AMBIGUOUS"
         elif conf != "HIGH":
             # name the exact root cause with the CUSTOMER'S field names —
@@ -201,7 +234,17 @@ def _assign(bank_df, candidates, pairs, top_score, tied, top_idx,
                               else mapping.bill_date_fallback)
                 date_why = (f"date unconfirmed (gap {p['date_gap']}d vs "
                             f"{date_field}, over tolerance)")
-            if p["zone_check"] and not p["date_check"]:
+            if p["zone_check"] and p["date_check"]:
+                # MEDIUM: everything agreed, but the date was confirmed
+                # against the FALLBACK field — pick_bill_date only falls
+                # back when the primary date is missing, so say exactly
+                # that instead of the generic "amount matched only"
+                flags.append(
+                    f"REVIEW - amount, {all_sigs} and date matched; date "
+                    f"confirmed against {mapping.bill_date_fallback} because "
+                    f"the bill has no {mapping.bill_date_primary} yet — accept "
+                    f"if the payment order is trusted")
+            elif p["zone_check"] and not p["date_check"]:
                 flags.append(f"REVIEW - amount and {all_sigs} matched; {date_why}")
             elif p["date_check"] and not p["zone_check"]:
                 flags.append(
@@ -235,7 +278,9 @@ def _assign(bank_df, candidates, pairs, top_score, tied, top_idx,
             tied_candidates=n_tied,
             flag="; ".join(flags),
             bill_indices=[p["bill_idx"]],
-            candidate_indices=list(top_idx[bp]),
+            candidate_indices=[q["bill_idx"] for q in ordered],
+            candidate_gaps=[q["date_gap"] for q in ordered],
+            candidate_date_sources=[q["date_source"] for q in ordered],
         ))
 
     return results, used_bills, used_bank
@@ -364,9 +409,9 @@ def match_bank_to_billstatus(
     pairs, no_candidate = _score_all_pairs(
         bank_df, candidates, amt_index, date_tolerance_days, amount_tolerance,
         weights, mapping, amount_decimals)
-    top_score, tied, top_idx = _ceilings(pairs)
+    top_score, tied, top_pairs = _ceilings(pairs)
     results, used_bills, used_bank = _assign(
-        bank_df, candidates, pairs, top_score, tied, top_idx, mapping)
+        bank_df, candidates, pairs, top_score, tied, top_pairs, mapping)
 
     leftover = [i for i in bank_df.index if i not in used_bank and i not in no_candidate]
     if allow_batched:

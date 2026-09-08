@@ -47,7 +47,7 @@ function MatchDonut({ rate }: { rate: number | null }) {
       </svg>
       <div className="cc-donut-label">
         <span className="cc-donut-value">{pct(rate)}</span>
-        <span className="cc-donut-sub">credits settled</span>
+        <span className="cc-donut-sub">recognised credits settled</span>
       </div>
     </div>
   )
@@ -122,7 +122,16 @@ export function CommandCenter({
     ? data.open_exceptions.BANK_ONLY + data.open_exceptions.BILL_ONLY
     : 0
   const credits = data?.gold.credits ?? 0
-  const unmatched = data ? Math.max(0, credits - data.matched_credits) : 0
+  // unrecognised receipts (no match signal) are not matchable: every
+  // performance figure is over the RECOGNISED credits, and they are
+  // reported on their own line
+  const unrecognised = data?.unrecognised_credits ?? 0
+  const recognised = data?.recognised_credits ?? Math.max(0, credits - unrecognised)
+  const unmatched = data ? Math.max(0, recognised - data.matched_credits) : 0
+  const settled = data?.settled_credits ?? data?.matches.LOCKED ?? 0
+  const manual = data?.manual_matches ?? 0
+  // locked_by.USER counts every user-locked match, manual ones included
+  const accepted = Math.max(0, (data?.locked_by.USER ?? 0) - manual)
 
   return (
     <section className="intake cc">
@@ -173,10 +182,10 @@ export function CommandCenter({
               <div className="tile-delta">{data.gold.lineage_docs.toLocaleString('en-IN')} lineage docs · {scope}</div>
             </div>
             <div className="tile">
-              <div className="tile-label">Matched</div>
-              <div className="tile-count">{data.matched_credits}</div>
-              <div className="tile-amount">{pct(data.match_rate)} of credits · {windowLabel(filter)}</div>
-              <div className="tile-delta">{data.matches.LOCKED} locked · {data.matches.REJECTED} rejected</div>
+              <div className="tile-label">Settled</div>
+              <div className="tile-count">{settled.toLocaleString('en-IN')}</div>
+              <div className="tile-amount">{pct(data.match_rate)} of recognised credits · {windowLabel(filter)}</div>
+              <div className="tile-delta">{data.matches.OPEN} awaiting review · {data.matches.REJECTED} rejected</div>
             </div>
             <div className="tile tone-review">
               <div className="tile-label">Analyst queue</div>
@@ -189,7 +198,9 @@ export function CommandCenter({
               <div className="tile-count">{openTotal.toLocaleString('en-IN')}</div>
               <div className="tile-amount">{inr(data.open_value.total)}</div>
               <div className="tile-delta">
-                {data.open_exceptions.BANK_ONLY} bank only · {data.open_exceptions.BILL_ONLY.toLocaleString('en-IN')} bill only · {scope}
+                {data.open_exceptions.BANK_ONLY} bank only
+                {unrecognised > 0 && ` (${unrecognised} unrecognised)`}
+                {' · '}{data.open_exceptions.BILL_ONLY.toLocaleString('en-IN')} bill only · {scope}
               </div>
             </div>
             <div className="tile tone-bill">
@@ -209,7 +220,12 @@ export function CommandCenter({
                 </button>
               </div>
               {data.top_exceptions.length === 0 ? (
-                <p className="frame-note">nothing open — run an incremental reconcile to populate the ledger</p>
+                <p className="frame-note">
+                  nothing open —{' '}
+                  <button className="link-btn" onClick={() => onNavigate('reconcile')}>
+                    initiate an incremental reconciliation →
+                  </button>
+                </p>
               ) : (
                 <table className="ledger">
                   <thead>
@@ -239,18 +255,29 @@ export function CommandCenter({
                 <h3 className="ledger-h">Match performance</h3>
               </div>
               <MatchDonut rate={data.match_rate} />
+              <p className="cc-settled-split">
+                <strong>{settled.toLocaleString('en-IN')}</strong> settled ·{' '}
+                {data.locked_by.AUTO_HIGH.toLocaleString('en-IN')} auto-locked ·{' '}
+                {accepted.toLocaleString('en-IN')} accepted by user ·{' '}
+                {manual.toLocaleString('en-IN')} matched by user
+              </p>
               <div className="cc-meters">
                 <Meter label="Auto-locked (HIGH)" count={data.locked_by.AUTO_HIGH}
-                       total={credits} tone="fill-green" />
+                       total={recognised} tone="fill-green" />
                 <Meter label="Locked by user" count={data.locked_by.USER}
-                       total={credits} tone="fill-green-soft" />
+                       total={recognised} tone="fill-green-soft" />
                 <Meter label="Matched by user (manual)" count={data.manual_matches ?? 0}
-                       total={credits} tone="fill-green-soft" />
+                       total={recognised} tone="fill-green-soft" />
                 <Meter label="Open review" count={data.matches.OPEN}
-                       total={credits} tone="fill-gold" />
+                       total={recognised} tone="fill-gold" />
                 <Meter label="Unmatched credits" count={unmatched}
-                       total={credits} tone="fill-sienna" />
+                       total={recognised} tone="fill-sienna" />
               </div>
+              <p className="frame-note cc-unrec">
+                Unrecognised receipts · <strong>{unrecognised.toLocaleString('en-IN')}</strong>
+                {' '}— no match signal in the narrative; not counted in the rate
+                ({recognised.toLocaleString('en-IN')} recognised of {credits.toLocaleString('en-IN')} credits)
+              </p>
             </div>
           </div>
 

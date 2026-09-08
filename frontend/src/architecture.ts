@@ -26,6 +26,8 @@ export interface LayerSpec {
   id: string
   index: number
   title: string
+  /** node label in the pipeline row when the title is too long for a sixth of the page */
+  short?: string
   oneLiner: string
   description: string
   components: LayerComponent[]
@@ -71,6 +73,7 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
     id: 'medallion',
     index: 2,
     title: 'Medallion Store — Bronze → Silver → Gold',
+    short: 'Medallion Store',
     oneLiner:
       'Raw bytes, source-native rows, and one canonical schema — per customer, one DATABASE_URL from laptop to RDS.',
     description:
@@ -94,7 +97,7 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
       { label: 'Lineage docs', live: (o) => n(o?.gold.lineage_docs) },
     ],
     flowsIn: ['Adapter output (canonical frames)'],
-    flowsOut: ['Reconciliation pools (engine)', 'Data pages (Current scope)'],
+    flowsOut: ['Reconciliation pools (engine)', 'Data pages (Complete Data scope)'],
     linksTo: [
       { label: 'Bills', view: 'gold_bills' },
       { label: 'Bank Transactions', view: 'gold_bank' },
@@ -123,7 +126,7 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
       { name: 'Golden-master gate', detail: 'Byte-exact CSV diff on the sample documents', code: 'tests/test_golden.py' },
     ],
     kpis: [
-      { label: 'Match rate', live: (o) => (o?.match_rate == null ? '—' : `${(o.match_rate * 100).toFixed(1)}%`), hint: 'credits settled' },
+      { label: 'Match rate', live: (o) => (o?.match_rate == null ? '—' : `${(o.match_rate * 100).toFixed(1)}%`), hint: 'recognised credits settled' },
       { label: 'Confidence tiers', value: '6', hint: 'HIGH → BATCHED' },
       { label: 'Golden frames', value: '6', hint: 'byte-diff gated' },
     ],

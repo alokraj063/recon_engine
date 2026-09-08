@@ -16,7 +16,7 @@ from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import Boolean, Date, Float, Integer, String, Text, select
+from sqlalchemy import Boolean, Date, Float, Integer, String, Text, false, or_, select
 
 from logging_setup import get_logger
 
@@ -108,9 +108,12 @@ def _coerce(v, sa_type):
     return v
 
 
-def reported_by_file(session, model, bronze_file_id: int, customer_id: int):
+def reported_by_file(session, model, bronze_file_id, customer_id: int):
     """WHERE clause selecting the rows of `model` that one ingested file
-    reported — its gold.file_rows sightings.
+    reported — its gold.file_rows sightings. `bronze_file_id` may also be
+    a list/tuple of ids: the clause is then the UNION of the per-file
+    clauses (a multi-statement reconciliation pool), each file keeping
+    its own sightings-or-ownership fallback below.
 
     "Owns" and "reported" differ the moment the same entity appears in two
     exports: the entity upsert keeps ONE gold row, stamped with the file
@@ -125,6 +128,12 @@ def reported_by_file(session, model, bronze_file_id: int, customer_id: int):
     SQLite's rowid counter, which REUSES the ids of deleted files, so an
     unscoped lookup could pick up a long-gone tenant's sightings.
     """
+    if isinstance(bronze_file_id, (list, tuple, set)):
+        ids = list(dict.fromkeys(bronze_file_id))
+        if not ids:
+            return false()
+        return or_(*[reported_by_file(session, model, i, customer_id)
+                     for i in ids])
     sighted = select(GoldFileRow.gold_row_id).where(
         GoldFileRow.bronze_file_id == bronze_file_id,
         GoldFileRow.customer_id == customer_id)

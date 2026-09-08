@@ -7,7 +7,7 @@ Read-only (no audit events).
 from datetime import date
 
 from datetime import datetime, timedelta
-from sqlalchemy import false, or_, true
+from sqlalchemy import and_, false, or_, true
 from sqlalchemy import func, select
 
 from . import incremental
@@ -127,6 +127,22 @@ def _date_bounds(col, date_from, date_to, is_datetime=False):
         cl.append(col < datetime.combine(date_to + timedelta(days=1), datetime.min.time())
                   if is_datetime else col <= date_to)
     return cl
+
+
+UNRECOGNISED = "UNRECOGNISED_RECEIPT"
+
+
+def unrecognised_clause():
+    """WHERE clause (needs GoldBankTxn joined) picking the BANK_ONLY
+    exceptions that are unrecognised receipts: the stored gap code, or —
+    for rows written before the code was stored — a blank zone_guess,
+    which is exactly what makes the default mapping assign the code.
+    An unrecognised receipt carries no match signal, can never pair with
+    a bill, and is therefore kept OUT of every match-rate denominator."""
+    return or_(ExceptionLedger.gap_type == UNRECOGNISED,
+               and_(ExceptionLedger.gap_type.is_(None),
+                    or_(GoldBankTxn.zone_guess.is_(None),
+                        GoldBankTxn.zone_guess == "")))
 
 
 def overview(session, customer_pk: int, date_from=None, date_to=None,
@@ -253,7 +269,7 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
         return session.execute(
             select(func.count()).select_from(q.subquery())).scalar() or 0
 
-    open_exc = {"BANK_ONLY": 0, "BILL_ONLY": 0}
+    open_exc = {"BANK_ONLY": 0, "BILL_ONLY": 0, "UNRECOGNISED": 0}
     if filtered:
         open_exc["BANK_ONLY"] = exc_count(exc_bank(ExceptionLedger.status == "OPEN"))
         open_exc["BILL_ONLY"] = exc_count(exc_bill(ExceptionLedger.status == "OPEN"))
@@ -269,6 +285,10 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
         resolved = _count(session, ExceptionLedger,
                           ExceptionLedger.customer_id == customer_pk,
                           ExceptionLedger.status == "RESOLVED")
+    # the unrecognised subset of open BANK_ONLY (same scope either way —
+    # the join-based count equals the plain one when nothing is filtered)
+    open_exc["UNRECOGNISED"] = exc_count(
+        exc_bank(ExceptionLedger.status == "OPEN", unrecognised_clause()))
 
     bank_open_value = session.execute(
         select(func.coalesce(func.sum(GoldBankTxn.amount), 0.0))
@@ -287,20 +307,25 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
                ExceptionLedger.exception_type == "BILL_ONLY",
                *bill_due_cl, *unit_bill_cl)).scalar() or 0.0
 
-    if filtered:
+    def credit_count(*status_cl):
         # numerator on the same column set as the credits denominator
-        matched_credits = session.execute(
-            select(func.count(func.distinct(MatchLedger.gold_bank_txn_id)))
-            .join(GoldBankTxn, GoldBankTxn.id == MatchLedger.gold_bank_txn_id)
-            .where(MatchLedger.customer_id == customer_pk,
-                   MatchLedger.status != "REJECTED",
-                   *txn_cl, *unit_txn_cl)).scalar() or 0
-    else:
-        matched_credits = session.execute(
-            select(func.count(func.distinct(MatchLedger.gold_bank_txn_id)))
-            .where(MatchLedger.customer_id == customer_pk,
-                   MatchLedger.status != "REJECTED")).scalar() or 0
-    match_rate = (matched_credits / gold["credits"]) if gold["credits"] else None
+        q = select(func.count(func.distinct(MatchLedger.gold_bank_txn_id)))
+        if filtered:
+            q = q.join(GoldBankTxn, GoldBankTxn.id == MatchLedger.gold_bank_txn_id)
+        return session.execute(
+            q.where(MatchLedger.customer_id == customer_pk, *status_cl,
+                    *(txn_cl + unit_txn_cl if filtered else []))).scalar() or 0
+    # matched = any non-rejected match (incl. those awaiting review);
+    # settled = LOCKED only (auto-locked HIGH, accepted by a user, or
+    # matched by hand) — the match RATE is the settled share
+    matched_credits = credit_count(MatchLedger.status != "REJECTED")
+    settled_credits = credit_count(MatchLedger.status == "LOCKED")
+    # unrecognised receipts are not matchable: the rate is over the
+    # RECOGNISED credits only, and they are reported as their own count
+    unrecognised_credits = open_exc["UNRECOGNISED"]
+    recognised_credits = max(0, gold["credits"] - unrecognised_credits)
+    match_rate = ((settled_credits / recognised_credits)
+                  if recognised_credits else None)
 
     # top open exceptions by absolute value (both sides in one list)
     top: list = []
@@ -375,6 +400,9 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
                        "bill_only": bill_open_value,
                        "total": bank_open_value + bill_open_value},
         "matched_credits": matched_credits,
+        "settled_credits": settled_credits,
+        "unrecognised_credits": unrecognised_credits,
+        "recognised_credits": recognised_credits,
         "match_rate": match_rate,
         "top_exceptions": top[:8],
         "last_run": last_run,
@@ -421,7 +449,10 @@ def ar_view(session, customer_pk: int,
         picked_per_match[m.id] = picked_per_match.get(m.id, 0) + 1
     received_txns: dict = {}
     for m, _link, bill, txn in ledger_rows:
-        received_txns[txn.id] = txn
+        # "received" = SETTLED (LOCKED) credits only; a match still under
+        # review is listed as IN_REVIEW below but is not money received
+        if m.status == "LOCKED":
+            received_txns[txn.id] = txn
         net = bill.net_payable_amount
         # a batched credit covers several bills — per-bill variance would
         # mislead, so it is only computed for 1:1 matches
@@ -497,7 +528,15 @@ def ar_view(session, customer_pk: int,
     credits = _count(session, GoldBankTxn,
                      GoldBankTxn.customer_id == customer_pk,
                      GoldBankTxn.used_in_recon.is_(True))
-    match_rate = (len(received_txns) / credits) if credits else None
+    unrecognised = session.execute(
+        select(func.count()).select_from(ExceptionLedger)
+        .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
+        .where(ExceptionLedger.customer_id == customer_pk,
+               ExceptionLedger.exception_type == "BANK_ONLY",
+               ExceptionLedger.status == "OPEN",
+               unrecognised_clause())).scalar() or 0
+    recognised = max(0, credits - unrecognised)
+    match_rate = (len(received_txns) / recognised) if recognised else None
 
     buckets = [("0-30", 0, 30), ("31-60", 31, 60), ("61-90", 61, 90),
                ("90+", 91, None)]
@@ -522,7 +561,8 @@ def ar_view(session, customer_pk: int,
             .order_by(Run.created_at.desc())).scalars():
         counts = ((run.payload or {}).get("meta") or {}).get("counts") or {}
         run_credits.append({"run_id": run.id,
-                            "credits": counts.get("bank_credits")})
+                            "credits": counts.get("bank_credits"),
+                            "unrecognised": counts.get("unrecognised_receipts")})
 
     return {
         "as_of": today.isoformat(),
@@ -534,6 +574,7 @@ def ar_view(session, customer_pk: int,
             "received": {"count": len(received_txns), "value": received_value,
                          "mtd_value": mtd_value},
             "match_rate": match_rate,
+            "unrecognised": unrecognised,
             "overdue": {"count": len(overdue_rows),
                         "value": sum(r["net_payable_amount"] or 0
                                      for r in overdue_rows)},

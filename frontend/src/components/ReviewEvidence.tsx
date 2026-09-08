@@ -36,6 +36,9 @@ export const CANDIDATE_LABELS: Array<[string, string]> = [
   ['return_reason', 'Reason for return'],
   ['operating_unit', 'Operating unit'],
   ['data_row', 'Export row'],
+  // the matcher's tie-break evidence, per candidate (engine._candidate_details)
+  ['DateGapDays', 'Gap to credit (days)'],
+  ['DateSource', 'Date compared'],
 ]
 
 export const REVIEW_SIGNALS: Array<[string, string]> = [
@@ -88,18 +91,23 @@ const MATCHED_AMOUNTS: Array<[string, string]> = [
   ['recovery_count', 'Recovery lines'],
 ]
 
-export function CandidateCard({ cand, runId, onAccept, busy, neutralPick }: {
+export function CandidateCard({ cand, runId, onAccept, busy, neutralPick, pickReason }: {
   cand: Candidate; runId?: string | null
   onAccept?: () => void; busy?: boolean
-  /** AMBIGUOUS matches: the engine's pick was arbitrary, so no card may
-   *  look endorsed — every candidate renders neutrally */
+  /** an undated AMBIGUOUS tie: the engine's pick really was arbitrary,
+   *  so no card may look endorsed — every candidate renders neutrally */
   neutralPick?: boolean
+  /** why this card is the pick (AMBIGUOUS ties broken by date: "closest
+   *  date"); shown after PICKED so the endorsement explains itself */
+  pickReason?: string
 }) {
   const showPicked = cand.Picked && !neutralPick
   return (
     <div className={`candidate-card${showPicked ? ' picked' : ''}`}>
       <div className="candidate-head">
-        {showPicked ? <span className="chip chip-picked">PICKED</span> : <span className="chip">candidate</span>}
+        {showPicked
+          ? <span className="chip chip-picked">PICKED{pickReason ? ` · ${pickReason}` : ''}</span>
+          : <span className="chip">candidate</span>}
         <span className="side-tag tag-bill">IREPS BILL</span>
         {onAccept && (
           <button className="btn-accept" disabled={busy} onClick={onAccept}>
@@ -189,9 +197,14 @@ export function ReviewEvidence({ row, runId, onAcceptBill, busy }: {
 }) {
   const cands = Array.isArray(row.Candidates) ? (row.Candidates as Candidate[]) : []
   const picked = cands.find((c) => c.Picked) ?? cands[0] ?? null
-  // an AMBIGUOUS pick was arbitrary — showing it as PICKED would read as
-  // a recommendation the engine explicitly is not making
-  const arbitrary = typeof row.flag === 'string' && row.flag.startsWith('AMBIGUOUS')
+  // AMBIGUOUS ties are broken by the bill date closest to the credit, so
+  // the pick IS a recommendation and the cards arrive pick-first, then
+  // closest-dated. Only an undated tie (flag says "arbitrarily") is still
+  // rendered neutrally — there the engine explicitly recommends nothing.
+  const flag = typeof row.flag === 'string' ? row.flag : ''
+  const ambiguous = flag.startsWith('AMBIGUOUS')
+  const arbitrary = ambiguous && flag.includes('arbitrarily')
+  const pickReason = ambiguous && !arbitrary ? 'closest date' : undefined
   return (
     <>
       <div className="side-panel side-bank">
@@ -225,7 +238,7 @@ export function ReviewEvidence({ row, runId, onAcceptBill, busy }: {
       <div className="candidate-list">
         {cands.map((c, i) => (
           <CandidateCard key={i} cand={c} runId={runId} busy={busy}
-                         neutralPick={arbitrary}
+                         neutralPick={arbitrary} pickReason={pickReason}
                          onAccept={onAcceptBill
                            ? () => onAcceptBill(c.bill_number as Cell)
                            : undefined} />

@@ -68,8 +68,9 @@ REVIEW_CONFIDENCE = {"AMBIGUOUS", "LOW", "AMOUNT_ONLY", "BATCHED"}
 
 REVIEW_ACTIONS = {
     "AMBIGUOUS":
-        "Several bills share this amount and score identically; the pick "
-        "was arbitrary. Compare the candidate bills listed and confirm "
+        "Several bills share this amount and score identically. The pick "
+        "is the bill whose advice / pay-order date lies closest to the "
+        "credit's value date; candidates are listed closest first. Confirm "
         "which one this credit settles.",
     "LOW":
         "One check did not agree — the flag names which check failed. "
@@ -177,14 +178,22 @@ def _expected_bills(bills, bank_df, window_days, co7_lookback_days, mapping):
     return expected
 
 
-def _candidate_details(indices, bills, picked):
+def _candidate_details(indices, bills, picked, gaps=None, sources=None):
     """One plain dict per candidate bill, from the enriched frame so the
-    RNOTE / CRN trail comes along. `Picked` marks the matcher's choice."""
+    RNOTE / CRN trail comes along. `Picked` marks the matcher's choice;
+    `DateGapDays` / `DateSource` are that candidate's own distance to the
+    credit's date and which bill date it was compared on (the matcher's
+    tie-break evidence, parallel lists on MatchResult). Order is preserved:
+    the matcher lists the pick first, then the rest closest-dated first."""
     out = []
-    for i in indices:
+    gaps = list(gaps) if gaps is not None else []
+    sources = list(sources) if sources is not None else []
+    for n, i in enumerate(indices):
         row = bills.loc[i]
         d = {f: row.get(f) for f in CANDIDATE_FIELDS if f in bills.columns}
         d["Picked"] = bool(i == picked)
+        d["DateGapDays"] = gaps[n] if n < len(gaps) else None
+        d["DateSource"] = sources[n] if n < len(sources) else None
         out.append(d)
     return out
 
@@ -195,7 +204,9 @@ def _candidate_summary(cands):
         adv = c.get("payment_advice_date")
         adv = adv.date().isoformat() if pd.notna(adv) and hasattr(adv, "date") else "no advice"
         mark = "*" if c.get("Picked") else ""
-        return f"{mark}{c.get('bill_number')} ({c.get('zone')}, {adv})"
+        gap = c.get("DateGapDays")
+        gap = f", {int(gap)}d" if gap is not None and pd.notna(gap) else ""
+        return f"{mark}{c.get('bill_number')} ({c.get('zone')}, {adv}{gap})"
     return f"{len(cands)} candidate(s): " + " | ".join(one(c) for c in cands)
 
 
@@ -208,9 +219,13 @@ def _match_review(matched, bills, review_actions=REVIEW_ACTIONS):
         return review
     review["exception_type"] = "MATCH_REVIEW"
     review["action"] = review["confidence"].map(review_actions)
+    has_gaps = "candidate_gaps" in review.columns
     review["Candidates"] = [
         _candidate_details(r.candidate_indices, bills,
-                           r.bill_indices[0] if r.bill_indices else None)
+                           r.bill_indices[0] if r.bill_indices else None,
+                           gaps=r.candidate_gaps if has_gaps else None,
+                           sources=(r.candidate_date_sources
+                                    if has_gaps else None))
         for r in review.itertuples()
     ]
     review["CandidateSummary"] = review["Candidates"].apply(_candidate_summary)
@@ -426,7 +441,9 @@ def exception_queue(out):
         # MatchResult bill fields (bill_number, bill_status, contract_no,
         # payment_order_*, payment_advice_date) already carry the canonical
         # bill-side names, so only the bank-derived pair needs renaming.
-        c = c.drop(columns=["bill_indices", "candidate_indices"], errors="ignore")
+        c = c.drop(columns=["bill_indices", "candidate_indices",
+                            "candidate_gaps", "candidate_date_sources"],
+                   errors="ignore")
         c = c.rename(columns={"narrative": "bank_narrative",
                               "zone_from_narrative": "zone"})
 

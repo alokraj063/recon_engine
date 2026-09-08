@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, RotateCw } from 'lucide-react'
+import { FilterChips } from './filters/FilterChips'
 import type { AuditEventRow, CustomerInfo } from '../types'
 import { fetchAudit } from '../api'
 import { fmtWhen } from '../format'
@@ -242,6 +243,15 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
               ))}
             </div>
           </div>
+
+          <FilterChips chips={[
+            { key: 'q', label: 'Search', values: query ? [query] : [], onRemove: () => setQuery('') },
+            { key: 'actor', label: 'Actor', values: actor === 'all' ? [] : [actor],
+              format: (v) => (v === 'user' ? 'Human' : 'System'), onRemove: () => setActor('all') },
+            { key: 'win', label: 'Window', values: win === 'all' ? [] : [win], onRemove: () => setWin('all') },
+            { key: 'cat', label: 'Category', values: cat === 'all' ? [] : [cat],
+              format: (v) => CATEGORY_LABEL[v as Category], onRemove: () => setCat('all') },
+          ]} />
 
           <div className="seg audit-tabs">
             <button className={tab === 'feed' ? 'on' : ''} onClick={() => setTab('feed')}>

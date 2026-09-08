@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Download, Filter, RotateCw } from 'lucide-react'
+import { ChevronRight, Download, ListFilter, RotateCw } from 'lucide-react'
 import { fetchLedger, fetchRun, fetchRuns, ledgerWorkbookUrl } from '../api'
 import {
   ApiError,
@@ -14,47 +14,50 @@ import {
   MatchDecision, PickList, billByNumber, useMatchDecision, type DecisionResult,
 } from './MatchDecision'
 import { ManualMatchPicker } from './ManualMatchPicker'
+import { SnapshotNotice } from './SnapshotNotice'
 import {
   EMPTY_RUN_FILTER, RunFilter, runFilterSet, runLabelFor, type RunFilterValue,
 } from './RunFilter'
+import { ColumnFilter } from './filters/ColumnFilter'
+import { FilterChips, type FilterChip } from './filters/FilterChips'
+import { FilterPopover } from './filters/FilterPopover'
+import { buildOptions } from './filters/facets'
 
 type Evidence = Row | 'loading' | 'missing' | 'manual'
 
-type ExcFilter = 'OPEN' | 'RESOLVED' | 'ALL'
-type MatchStatusFilter = 'ALL' | 'OPEN' | 'LOCKED' | 'REJECTED'
-
 const CONFIDENCE_ORDER = ['HIGH', 'MANUAL', 'AMBIGUOUS', 'LOW', 'AMOUNT_ONLY', 'BATCHED']
 
-/** In-header filter control: a funnel icon that opens a small popover.
- *  Invisible chrome until used — the funnel turns accent-colored while
- *  a filter is active. Closes on outside mousedown (RunPicker pattern). */
-function HeaderFilter({ active, children }: { active: boolean; children: React.ReactNode }) {
+const titleCase = (v: string) => v.charAt(0) + v.slice(1).toLowerCase()
+
+/** The When column's filter: the shared header icon + popover, holding a
+ *  date pair instead of a checklist (applies as you pick). */
+function DateRangeFilter({ from, to, onChange }: {
+  from: string; to: string; onChange: (from: string, to: string) => void
+}) {
   const [open, setOpen] = useState(false)
-  const wrap = useRef<HTMLSpanElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const close = (e: MouseEvent) => {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [open])
+  const btn = useRef<HTMLButtonElement>(null)
+  const active = !!(from || to)
   return (
-    <span className={`th-filter${active ? ' active' : ''}`} ref={wrap}
-          onClick={(e) => e.stopPropagation()}>
-      <button className="th-filter-btn" onClick={() => setOpen((o) => !o)}
-              title="filter">
-        <Filter size={11} strokeWidth={2} />
+    <span className="col-filter" onClick={(e) => e.stopPropagation()}>
+      <button ref={btn} type="button" className={`col-filter-btn${active ? ' on' : ''}`}
+              onClick={() => setOpen((o) => !o)} title="filter by date" aria-label="filter by date">
+        <ListFilter size={12} strokeWidth={2} />
+        {active && <span className="col-filter-dot" aria-hidden />}
       </button>
-      {open && (
-        <span className="th-pop"
-              onClick={(e) => {
-                // picking an option closes; interacting with date inputs doesn't
-                if ((e.target as HTMLElement).closest('.th-opt')) setOpen(false)
-              }}>
-          {children}
-        </span>
-      )}
+      <FilterPopover anchorRef={btn} open={open} onClose={() => setOpen(false)}>
+        <div className="filter-pop-head">When</div>
+        <div className="filter-pop-dates">
+          <input type="date" value={from} aria-label="from date"
+                 onChange={(e) => onChange(e.target.value, to)} />
+          <span className="chip-note">to</span>
+          <input type="date" value={to} aria-label="to date"
+                 onChange={(e) => onChange(from, e.target.value)} />
+        </div>
+        <div className="filter-pop-foot">
+          <button className="link-btn" onClick={() => { onChange('', ''); setOpen(false) }}>Clear</button>
+          <button className="filter-apply" onClick={() => setOpen(false)}>Done</button>
+        </div>
+      </FilterPopover>
     </span>
   )
 }
@@ -67,6 +70,8 @@ interface Props {
   /** called once the arrival flash has played so the parent clears
    *  focusId — the highlight is transient, not a selection */
   onFocusHandled?: () => void
+  /** the empty-ledger notice links back to Reconcile */
+  onGoToReconcile: () => void
 }
 
 function txnLine(m: LedgerMatch): string {
@@ -91,7 +96,8 @@ function resolvedBy(e: LedgerException, runs: RunListItem[]): string {
 
 function excLine(e: LedgerException): string {
   if (e.txn) {
-    return [e.txn.bank_ref, inr(e.txn.amount), e.txn.value_date, e.txn.zone]
+    return [e.txn.bank_ref, inr(e.txn.amount), e.txn.value_date, e.txn.zone,
+            e.gap_type ? e.gap_type.replace(/_/g, ' ').toLowerCase() : null]
       .filter(Boolean).join(' · ')
   }
   if (e.bill) {
@@ -101,15 +107,17 @@ function excLine(e: LedgerException): string {
   return '—'
 }
 
-export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
+export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcile }: Props) {
   const [data, setData] = useState<LedgerViewData | null>(null)
   // the customer's runs: labels for run ids + the run filter's choices
   const [runs, setRuns] = useState<RunListItem[]>([])
   const [runFilter, setRunFilter] = useState<RunFilterValue>(EMPTY_RUN_FILTER)
   const [error, setError] = useState<string | null>(null)
-  const [excFilter, setExcFilter] = useState<ExcFilter>('OPEN')
-  const [confFilter, setConfFilter] = useState<string>('ALL')
-  const [matchStatusFilter, setMatchStatusFilter] = useState<MatchStatusFilter>('ALL')
+  // column filters — multi-select; empty = every value. OPEN is the
+  // exceptions default so the queue opens on what needs work
+  const [excFilter, setExcFilter] = useState<string[]>(['OPEN'])
+  const [confFilter, setConfFilter] = useState<string[]>([])
+  const [matchStatusFilter, setMatchStatusFilter] = useState<string[]>([])
   const [sortAsc, setSortAsc] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -197,7 +205,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
   // resolved it — filtering by either run keeps it in view
   const allExceptions = data?.exceptions ?? []
   const exceptions = allExceptions.filter(
-    (e) => (excFilter === 'ALL' || e.status === excFilter)
+    (e) => (excFilter.length === 0 || excFilter.includes(e.status))
       && (!runSet || (!!e.first_seen_run_id && runSet.has(e.first_seen_run_id))
           || (!!e.resolved_by_run_id && runSet.has(e.resolved_by_run_id))),
   )
@@ -210,8 +218,8 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
 
   const visibleMatches = useMemo(() => {
     const rows = (data?.matches ?? []).filter((m) => {
-      if (confFilter !== 'ALL' && m.confidence !== confFilter) return false
-      if (matchStatusFilter !== 'ALL' && m.status !== matchStatusFilter) return false
+      if (confFilter.length && !confFilter.includes(m.confidence)) return false
+      if (matchStatusFilter.length && !matchStatusFilter.includes(m.status)) return false
       // a MANUAL match belongs to no run: a run filter hides it
       if (runSet && (!m.run_id || !runSet.has(m.run_id))) return false
       if (!inDayRange(localDay(m.created_at), dateFrom, dateTo)) return false
@@ -222,8 +230,22 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
       : b.created_at.localeCompare(a.created_at))
   }, [data, confFilter, matchStatusFilter, runSet, dateFrom, dateTo, sortAsc])
 
-  const matchesFiltered = confFilter !== 'ALL' || matchStatusFilter !== 'ALL'
+  const matchesFiltered = confFilter.length > 0 || matchStatusFilter.length > 0
     || !!dateFrom || !!dateTo || runSet !== null
+  const allMatches = data?.matches ?? []
+  const matchChips: FilterChip[] = [
+    { key: 'when', label: 'When',
+      values: dateFrom || dateTo ? [`${dateFrom || '…'} → ${dateTo || '…'}`] : [],
+      onRemove: () => { setDateFrom(''); setDateTo('') } },
+    { key: 'confidence', label: 'Confidence', values: confFilter,
+      onRemove: (v) => setConfFilter(v === undefined ? [] : confFilter.filter((x) => x !== v)) },
+    { key: 'status', label: 'Status', values: matchStatusFilter, format: titleCase,
+      onRemove: (v) => setMatchStatusFilter(v === undefined ? [] : matchStatusFilter.filter((x) => x !== v)) },
+  ]
+  const excChips: FilterChip[] = [
+    { key: 'exc-status', label: 'Status', values: excFilter, format: titleCase,
+      onRemove: (v) => setExcFilter(v === undefined ? [] : excFilter.filter((x) => x !== v)) },
+  ]
   const runNote = data && runSet
     ? `${visibleMatches.length} of ${data.matches.length} matches`
     : undefined
@@ -251,66 +273,41 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
       <div className="view-card">
         {error && <p className="frame-note">{error}</p>}
         {data && data.matches.length === 0 && data.exceptions.length === 0 && (
-          <p className="frame-note">
-            The ledger fills up when you run in incremental mode — durable matches and carried-forward
-            exceptions will appear here.
-          </p>
+          <SnapshotNotice runs={runs} what="The Analyst queue" onGoToReconcile={onGoToReconcile} />
         )}
 
         {data && data.matches.length > 0 && (
           <>
-            {matchesFiltered && (
-              <p className="ledger-count-note">
-                {visibleMatches.length} of {data.matches.length} matches
-              </p>
-            )}
+            <div className="ledger-filter-row">
+              <FilterChips chips={matchChips} />
+              {matchesFiltered && (
+                <span className="ledger-count-note">
+                  {visibleMatches.length} of {data.matches.length} matches
+                </span>
+              )}
+            </div>
             <div className="ledger-wrap">
             <table className="ledger ledger-matches">
               <thead>
                 <tr>
                   <th className="th-sort" onClick={() => setSortAsc((v) => !v)}>
                     When {sortAsc ? '▲' : '▼'}
-                    <HeaderFilter active={!!(dateFrom || dateTo)}>
-                      <span className="th-pop-dates">
-                        <input type="date" value={dateFrom} aria-label="from date"
-                               onChange={(e) => setDateFrom(e.target.value)} />
-                        <span className="chip-note">to</span>
-                        <input type="date" value={dateTo} aria-label="to date"
-                               onChange={(e) => setDateTo(e.target.value)} />
-                        {(dateFrom || dateTo) && (
-                          <button className="th-opt"
-                                  onClick={() => { setDateFrom(''); setDateTo('') }}>
-                            clear dates
-                          </button>
-                        )}
-                      </span>
-                    </HeaderFilter>
+                    <DateRangeFilter from={dateFrom} to={dateTo}
+                                     onChange={(f, t) => { setDateFrom(f); setDateTo(t) }} />
                   </th>
                   <th>Match</th>
                   <th>Run</th>
                   <th>
-                    Confidence{confFilter !== 'ALL' && ` · ${confFilter}`}
-                    <HeaderFilter active={confFilter !== 'ALL'}>
-                      {(['ALL', ...confidences]).map((c) => (
-                        <button key={c}
-                                className={`th-opt${confFilter === c ? ' on' : ''}`}
-                                onClick={() => setConfFilter(c)}>
-                          {c === 'ALL' ? 'All' : c}
-                        </button>
-                      ))}
-                    </HeaderFilter>
+                    Confidence
+                    <ColumnFilter label="Confidence" value={confFilter} onApply={setConfFilter}
+                                  options={buildOptions(allMatches, (m) => m.confidence)
+                                    .sort((a, b) => confidences.indexOf(a.value) - confidences.indexOf(b.value))} />
                   </th>
                   <th>
-                    Status{matchStatusFilter !== 'ALL' && ` · ${matchStatusFilter}`}
-                    <HeaderFilter active={matchStatusFilter !== 'ALL'}>
-                      {(['ALL', 'OPEN', 'LOCKED', 'REJECTED'] as MatchStatusFilter[]).map((s) => (
-                        <button key={s}
-                                className={`th-opt${matchStatusFilter === s ? ' on' : ''}`}
-                                onClick={() => setMatchStatusFilter(s)}>
-                          {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
-                        </button>
-                      ))}
-                    </HeaderFilter>
+                    Status
+                    <ColumnFilter label="Status" value={matchStatusFilter} onApply={setMatchStatusFilter}
+                                  format={titleCase}
+                                  options={buildOptions(allMatches, (m) => m.status)} />
                   </th>
                   <th>Locked by</th>
                   <th>Credit</th>
@@ -455,18 +452,15 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
               {runSet && (
                 <span className="chip-note"> {exceptions.length} of {allExceptions.length} </span>
               )}
-              <span className="seg seg-inline">
-                {(['OPEN', 'RESOLVED', 'ALL'] as ExcFilter[]).map((f) => (
-                  <button key={f} className={excFilter === f ? 'on' : ''} onClick={() => setExcFilter(f)}>
-                    {f === 'ALL' ? 'All' : f.toLowerCase()}
-                  </button>
-                ))}
-              </span>
             </h3>
+            <div className="ledger-filter-row">
+              <FilterChips chips={excChips} />
+            </div>
             {exceptions.length === 0 ? (
               <p className="frame-note">
-                Nothing with status {excFilter.toLowerCase()}
-                {runSet ? ' for the selected runs' : ''}.
+                Nothing with status {excFilter.map(titleCase).join(' / ').toLowerCase()}
+                {runSet ? ' for the selected runs' : ''} —{' '}
+                <button className="link-btn" onClick={() => setExcFilter([])}>show all</button>
               </p>
             ) : (
               <div className="ledger-wrap">
@@ -474,7 +468,12 @@ export function LedgerView({ customerId, focusId, onFocusHandled }: Props) {
                 <thead>
                   <tr>
                     <th>Type</th>
-                    <th>Status</th>
+                    <th>
+                      Status
+                      <ColumnFilter label="Status" value={excFilter} onApply={setExcFilter}
+                                    format={titleCase}
+                                    options={buildOptions(allExceptions, (e) => e.status)} />
+                    </th>
                     <th>Detail</th>
                     <th>First seen (run)</th>
                     <th>Resolved by</th>

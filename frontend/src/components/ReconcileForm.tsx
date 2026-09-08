@@ -9,21 +9,23 @@ interface Props {
   customers: CustomerInfo[]
   customerId: string
   onCustomerChange: (key: string) => void
-  onReconcile: (statementBronzeId: number, mode: RunMode) => void
+  onReconcile: (statementBronzeIds: number[], mode: RunMode) => void
   onGoToIngest: () => void
   refreshKey: number
 }
 
+// Incremental first and default: every workspace page (AR Reconciliation,
+// Analyst queue, Command Center) reads the ledger only incremental feeds
 const MODES: Array<{ value: RunMode; label: string; blurb: string }> = [
-  {
-    value: 'snapshot',
-    label: 'Snapshot',
-    blurb: 'A standalone reconciliation of the chosen statement against all current gold bills; nothing is carried forward.',
-  },
   {
     value: 'incremental',
     label: 'Incremental',
-    blurb: "Feeds this customer's running ledger: locked matches stay settled and open exceptions carry across runs.",
+    blurb: "Feeds this customer's running ledger — matches lock, open exceptions carry forward, and AR Reconciliation / Analyst queue fill up. The normal mode.",
+  },
+  {
+    value: 'snapshot',
+    label: 'Snapshot',
+    blurb: 'A one-off look: reconciles the chosen statement against all current gold bills and stores only this run\'s result. Nothing reaches the ledger or AR.',
   },
 ]
 
@@ -31,9 +33,10 @@ export function ReconcileForm({
   running, customers, customerId, onCustomerChange,
   onReconcile, onGoToIngest, refreshKey,
 }: Props) {
-  const [mode, setMode] = useState<RunMode>('snapshot')
+  const [mode, setMode] = useState<RunMode>('incremental')
   const [statements, setStatements] = useState<GoldFileInfo[] | null>(null)
-  const [statementId, setStatementId] = useState<number | null>(null)
+  // several statements may be ticked: one run over the union of their credits
+  const [statementIds, setStatementIds] = useState<number[]>([])
   const [elapsed, setElapsed] = useState(0)
   const [showConfig, setShowConfig] = useState(false)
 
@@ -42,11 +45,12 @@ export function ReconcileForm({
       .then((files) => {
         const stmts = files.filter((f) => f.source_type === 'bank_statement')
         setStatements(stmts)
-        // newest first from the API; preselect it (keep a still-valid pick)
-        setStatementId((prev) =>
-          prev !== null && stmts.some((s) => s.bronze_file_id === prev)
-            ? prev
-            : stmts[0]?.bronze_file_id ?? null)
+        // newest first from the API; tick it by default (keep the still-valid
+        // part of a prior selection)
+        setStatementIds((prev) => {
+          const kept = prev.filter((id) => stmts.some((s) => s.bronze_file_id === id))
+          return kept.length ? kept : stmts[0] ? [stmts[0].bronze_file_id] : []
+        })
       })
       .catch(() => setStatements([]))
   }, [customerId, refreshKey])
@@ -67,6 +71,14 @@ export function ReconcileForm({
       : 'no dates'
     return `${s.original_name} — ${dates} — ${st?.credits ?? 0} credits`
   }
+
+  const stmts = statements ?? []
+  const allSelected = stmts.length > 0 && stmts.every((s) => statementIds.includes(s.bronze_file_id))
+  const someSelected = statementIds.length > 0
+  const creditsOf = (list: GoldFileInfo[]) =>
+    list.reduce((n, s) => n + (s.statement?.credits ?? 0), 0)
+  const totalCredits = creditsOf(stmts)
+  const selectedCredits = creditsOf(stmts.filter((s) => statementIds.includes(s.bronze_file_id)))
 
   return (
     <section className="intake">
@@ -104,14 +116,54 @@ export function ReconcileForm({
               <button className="link-btn" onClick={onGoToIngest}>ingest documents first</button>
             </span>
           ) : (
-            <select value={statementId ?? ''} disabled={running}
-                    onChange={(e) => setStatementId(Number(e.target.value))}>
-              {statements.map((s) => (
-                <option key={s.bronze_file_id} value={s.bronze_file_id}>
-                  {stmtLabel(s)}
-                </option>
-              ))}
-            </select>
+            <div className="stmt-picker">
+              {/* Select all: a tri-state master checkbox above the (scrolling)
+                  list, so it stays reachable however many daily statements
+                  have been ingested. Ticked = every statement selected,
+                  indeterminate = some, clear = none. */}
+              <label className={`stmt-row stmt-head${allSelected ? ' on' : ''}`}>
+                <input type="checkbox" checked={allSelected} disabled={running}
+                       ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected }}
+                       aria-label="Select all statements"
+                       onChange={(e) => setStatementIds(
+                         e.target.checked ? statements.map((s) => s.bronze_file_id) : [])} />
+                <span className="stmt-label">
+                  Select all
+                  <span className="chip-note">
+                    {' '}· {statements.length} statement{statements.length === 1 ? '' : 's'} ·{' '}
+                    {totalCredits} credits
+                  </span>
+                </span>
+              </label>
+              <div className="stmt-list">
+                {statements.map((s) => {
+                  const on = statementIds.includes(s.bronze_file_id)
+                  return (
+                    <label key={s.bronze_file_id} className={`stmt-row${on ? ' on' : ''}`}>
+                      <input type="checkbox" checked={on} disabled={running}
+                             onChange={(e) => setStatementIds((prev) =>
+                               e.target.checked
+                                 ? [...prev, s.bronze_file_id]
+                                 : prev.filter((id) => id !== s.bronze_file_id))} />
+                      <span className="stmt-label">{stmtLabel(s)}</span>
+                    </label>
+                  )
+                })}
+              </div>
+              <div className="stmt-foot">
+                <span className="chip-note">
+                  {statementIds.length === 0
+                    ? 'no statement selected'
+                    : `${statementIds.length} of ${statements.length} selected · ${selectedCredits} credits`}
+                </span>
+                {statementIds.length > 0 && (
+                  <button className="link-btn" disabled={running}
+                          onClick={() => setStatementIds([])}>
+                    clear
+                  </button>
+                )}
+              </div>
+            </div>
           )}
         </label>
       </div>
@@ -134,8 +186,8 @@ export function ReconcileForm({
       </p>
 
       <div className="run-row">
-        <button className="btn-run" disabled={statementId === null || running}
-                onClick={() => statementId !== null && onReconcile(statementId, mode)}>
+        <button className="btn-run" disabled={statementIds.length === 0 || running}
+                onClick={() => statementIds.length > 0 && onReconcile(statementIds, mode)}>
           Initiate reconciliation
         </button>
         {running && (

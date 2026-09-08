@@ -334,7 +334,7 @@ export default function App() {
     setIngestEpoch((n) => n + 1)
   }
 
-  const onReconcile = async (statementBronzeId: number, mode: RunMode) => {
+  const onReconcile = async (statementBronzeIds: number[], mode: RunMode) => {
     setRunning(true)
     setError(null)
     try {
@@ -342,7 +342,7 @@ export default function App() {
       // config governs the run (API-side merge)
       const res = await reconcileFromGold({
         customer_id: customerId,
-        statement_bronze_id: statementBronzeId,
+        statement_bronze_ids: statementBronzeIds,
         mode,
       })
       payloadCache.set(res.run_id, res)
@@ -380,12 +380,12 @@ export default function App() {
         {page.run ? (
           <span className="seg seg-scope">
             <button className={activeScope === 'current' ? 'on' : ''}
-                    onClick={() => setScope(page, 'current')}>Current</button>
+                    onClick={() => setScope(page, 'current')}>Complete Data</button>
             <button className={activeScope === 'run' ? 'on' : ''}
-                    onClick={() => setScope(page, 'run')}>As of run</button>
+                    onClick={() => setScope(page, 'run')}>Reconcile Data</button>
           </span>
         ) : (
-          <span className="chip-note">current data only — runs keep no lineage snapshot</span>
+          <span className="chip-note">complete data only — runs keep no lineage snapshot</span>
         )}
         {activeScope === 'run' && page.runTrail && page.run && (
           <span className="seg seg-scope">
@@ -546,6 +546,7 @@ export default function App() {
             customerId={customerId}
             focusId={ledgerFocus}
             onFocusHandled={() => setLedgerFocus(null)}
+            onGoToReconcile={() => setView('reconcile')}
           />
         )}
 
@@ -557,6 +558,7 @@ export default function App() {
               setLedgerFocus(id)
               setView('ledger')
             }}
+            onGoToReconcile={() => setView('reconcile')}
           />
         )}
 
@@ -637,6 +639,12 @@ export default function App() {
                 )}
                 {primary.meta.mode && !multi && (
                   <span className="stamp head-stamp">{primary.meta.mode}</span>
+                )}
+                {!multi && (primary.meta.filenames?.statements?.length ?? 0) > 1 && (
+                  <span className="stamp head-stamp"
+                        title={primary.meta.filenames.statements!.join('\n')}>
+                    {primary.meta.filenames.statements!.length} statements
+                  </span>
                 )}
                 {primary.meta.customer && primary.meta.customer !== 'default' && (
                   <span className="stamp head-stamp">{primary.meta.customer}</span>

@@ -55,6 +55,11 @@ export function SummaryDashboard({ runs, aggregate }: Props) {
 
   const { meta } = runs[0]
   const { selfcheck, ingest, ledger } = meta
+  // one line per statement when several were reconciled; the scalar
+  // selfcheck is the single-statement compat form
+  const checks = meta.selfchecks?.length
+    ? meta.selfchecks
+    : selfcheck ? [{ ...selfcheck, original_name: null as string | null }] : []
   const conflicts = ingest?.conflicts ?? 0
 
   const tiles = [
@@ -102,6 +107,11 @@ export function SummaryDashboard({ runs, aggregate }: Props) {
             <div className="tile-label">{t.label}</div>
             <div className="tile-count">{t.count}</div>
             <div className="tile-amount">{inr(t.amount)}</div>
+            {t.label === 'Bank credits' && (counts.unrecognised_receipts ?? 0) > 0 && (
+              <div className="tile-delta">
+                {counts.unrecognised_receipts} unrecognised receipt{counts.unrecognised_receipts === 1 ? '' : 's'} — not matchable
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -128,19 +138,27 @@ export function SummaryDashboard({ runs, aggregate }: Props) {
         </div>
       )}
 
-      {!multi && selfcheck && (
-        selfcheck.passed === false ? (
-          <p className="selfcheck-line selfcheck-warn reveal reveal-2">
-            <span className="tick">⚠ parse mismatch</span> — statement states {selfcheck.stated_count} credits
-            / {inr(selfcheck.stated_total)}; gold rebuilt {selfcheck.parsed_count} / {inr(selfcheck.parsed_total)}
+      {!multi && checks.map((c, i) => {
+        const who = c.original_name ? `${c.original_name} states` : 'statement states'
+        return c.passed === false ? (
+          c.stated_count == null ? (
+            <p key={i} className="selfcheck-line selfcheck-warn reveal reveal-2">
+              <span className="tick">⚠ parse check failed</span> — {who.replace(/ states$/, '')}:{' '}
+              {c.detail ?? 'the bank adapter could not verify this statement'}
+            </p>
+          ) : (
+          <p key={i} className="selfcheck-line selfcheck-warn reveal reveal-2">
+            <span className="tick">⚠ parse mismatch</span> — {who} {c.stated_count} credits
+            / {inr(c.stated_total)}; gold rebuilt {c.parsed_count} / {inr(c.parsed_total)}
           </p>
+          )
         ) : (
-          <p className="selfcheck-line reveal reveal-2">
-            <span className="tick">✓ parse verified</span> — statement states {selfcheck.stated_count} credits
-            / {inr(selfcheck.stated_total)}; parsed {selfcheck.parsed_count} / {inr(selfcheck.parsed_total)}
+          <p key={i} className="selfcheck-line reveal reveal-2">
+            <span className="tick">✓ parse verified</span> — {who} {c.stated_count} credits
+            / {inr(c.stated_total)}; parsed {c.parsed_count} / {inr(c.parsed_total)}
           </p>
         )
-      )}
+      })}
 
       {multi ? (
         runs.map((r) => (

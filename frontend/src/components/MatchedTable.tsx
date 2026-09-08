@@ -37,8 +37,12 @@ const HIDDEN_BY_DEFAULT = [
   'gross_amount', 'approved_amount', 'deduction_amount', 'recoveries', 'recovery_count',
   'return_reason', 'RNOTE_MatchedVia', 'CRN_MatchedVia', 'PO_Date',
   'Receipt_Date', 'Receipt_Qty', 'DRR_or_Challan', 'Bill_Reg_No', 'bill_indices',
-  'candidate_indices',
+  'candidate_indices', 'candidate_gaps', 'candidate_date_sources',
 ]
+
+// header checklist filters (DataTable column meta `facet`)
+const FACETS = new Set(['confidence', 'zone_from_narrative', 'bill_zone', 'bill_status',
+                        'date_source', 'LineageStatus'])
 
 function buildColumns(rows: Row[]): ColumnDef<Row>[] {
   const present = new Set(rows.flatMap((r) => Object.keys(r)))
@@ -48,6 +52,7 @@ function buildColumns(rows: Row[]): ColumnDef<Row>[] {
   const make = (key: string, label: string): ColumnDef<Row> => ({
     id: key,
     header: label,
+    meta: FACETS.has(key) ? { facet: true, facetLabel: label } : undefined,
     accessorFn: (row) => row[key],
     cell: (ctx) => {
       const v = ctx.row.original[key]

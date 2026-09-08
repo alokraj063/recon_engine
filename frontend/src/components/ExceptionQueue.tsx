@@ -8,12 +8,17 @@ import { ReviewEvidence } from './ReviewEvidence'
 import { BillTrailDetail, DetailField } from './BillTrailDetail'
 import { ConfidenceBadge } from './ConfidenceBadge'
 import { DataTable } from './DataTable'
+import { deSnake } from './filters/facets'
 import {
   MatchDecision, PickList, billByNumber, ledgerStatusLabel, useMatchDecision, type Decide,
 } from './MatchDecision'
 import { ManualMatchPicker } from './ManualMatchPicker'
 
-type Side = 'ALL' | 'BANK_ONLY' | 'BILL_ONLY' | 'MATCH_REVIEW'
+// header checklist filters (DataTable column meta `facet`); the codes
+// display de-underscored, like the cells
+const FACETS = new Set(['exception_type', 'confidence', 'ledger_status', 'zone',
+                        'bill_status', 'ExpectedBasis', 'gap_type'])
+const CODE_COLS = new Set(['exception_type', 'ExpectedBasis', 'gap_type'])
 
 /** The shared spine every row shows; side-specific fields live in the
  *  expandable detail so the two-sided queue reads as one list. */
@@ -232,6 +237,9 @@ function buildColumns(rows: Row[], ledger: LedgerViewData | null | undefined): C
     .map(([key, label]) => ({
     id: key,
     header: label,
+    meta: FACETS.has(key)
+      ? { facet: true, facetLabel: label, facetFormat: CODE_COLS.has(key) ? deSnake : undefined }
+      : undefined,
     accessorFn: (row) => {
       if (key === 'ledger_status') {
         const m = liveMatch(row, ledger)
@@ -283,7 +291,6 @@ export function ExceptionQueue({
    *  ledger-fed view (and this overlay) refetches */
   onLedgerChanged?: () => void
 }) {
-  const [side, setSide] = useState<Side>('ALL')
   const [error, setError] = useState<string | null>(null)
   const onDecided = useCallback(() => {
     setError(null)
@@ -291,32 +298,17 @@ export function ExceptionQueue({
   }, [onLedgerChanged])
   const { decide, busy } = useMatchDecision(onDecided, setError)
   const columns = useMemo(() => buildColumns(rows, ledger), [rows, ledger])
-  const filtered = side === 'ALL' ? rows : rows.filter((r) => r.exception_type === side)
-
-  const seg = (
-    <div className="seg-row">
-    <div className="seg">
-      {(['ALL', 'BANK_ONLY', 'BILL_ONLY', 'MATCH_REVIEW'] as Side[]).map((s) => (
-        <button key={s} className={side === s ? 'on' : ''} onClick={() => setSide(s)}>
-          {s === 'ALL' ? 'All' : s.replace(/_/g, ' ')}
-        </button>
-      ))}
-    </div>
-    {error && <span className="flag-note">{error}</span>}
-    </div>
-  )
-
+  // the Type filter lives in the column header like every other filter
+  // (the ALL / BANK ONLY / … segment it replaced sat above the table)
   return (
     <DataTable
-      key={side}
-      rows={filtered}
+      rows={rows}
       columns={columns}
       numericIds={AMOUNT_COLS}
-      toolbar={seg}
+      toolbar={error ? <span className="flag-note">{error}</span> : undefined}
       emptyNote={rows.length === 0 ? emptyNote : (
         <p className="frame-note">
-          no {side.replace(/_/g, ' ')} exceptions in this run —{' '}
-          <button className="link-btn" onClick={() => setSide('ALL')}>show all</button>
+          no exceptions in this run
         </p>
       )}
       renderDetail={(row) => (

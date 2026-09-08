@@ -157,3 +157,23 @@ def test_reconcile_threads_field_map():
     assert out["matched"]["confidence"].iloc[0] == "HIGH"
     out_default = reconcile(_bank(), _bills())
     assert out_default["matched"]["confidence"].iloc[0] == "LOW"
+
+
+def test_medium_review_flag_names_the_fallback_date():
+    """All signals agree but the date was confirmed against the FALLBACK
+    field (no advice date on the bill yet) -> MEDIUM, and the review flag
+    must say so — it used to fall through to the generic 'amount matched
+    only; ... both unconfirmed' wording, contradicting the evidence."""
+    out = reconcile(
+        _bank(zone_guess="ECR", value_date=datetime(2026, 3, 16)),
+        _bills(zone="ECR", bill_status="CO7 DONE", payment_advice_date=pd.NaT,
+               payment_order_date=pd.Timestamp("2026-03-15")))
+    m = out["matched"]
+    assert len(m) == 1
+    row = m.iloc[0]
+    assert row["confidence"] == "MEDIUM"
+    assert row["date_source"] == "co7"
+    flag = str(row["flag"])
+    assert flag.startswith("REVIEW - amount, zone and date matched")
+    assert "payment_order_date" in flag and "payment_advice_date" in flag
+    assert "amount matched only" not in flag

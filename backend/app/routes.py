@@ -88,7 +88,8 @@ def _allowed_exts(field: str) -> tuple:
     return tuple(sorted(exts))
 
 
-def _save_upload(upload: UploadFile, field: str, tmpdir: Path) -> Path:
+def _save_upload(upload: UploadFile, field: str, tmpdir: Path,
+                 index: int = 0) -> Path:
     suffix = Path(upload.filename or "").suffix.lower()
     allowed = _allowed_exts(field)
     if allowed and suffix not in allowed:
@@ -97,7 +98,8 @@ def _save_upload(upload: UploadFile, field: str, tmpdir: Path) -> Path:
               f"'{upload.filename}'")
     # keep a recognisable name, but strip anything path-like
     stem = re.sub(r"[^\w. -]", "_", Path(upload.filename).stem)[:80] or field
-    dest = tmpdir / f"{field}__{stem}{suffix}"
+    # index: a slot may carry several files in one submission
+    dest = tmpdir / f"{field}__{index}__{stem}{suffix}"
     with dest.open("wb") as f:
         shutil.copyfileobj(upload.file, f)
     if dest.stat().st_size == 0:
@@ -183,20 +185,42 @@ def _register_inputs(session, customer, paths, names, source_configs):
     bronze_ids = {}
     for field, path in paths.items():
         if path is not None:
-            slot = _slot_source_type(field)
-            sc = source_configs.get(slot)
-            row = register_file(
-                session, customer, slot, Path(path), names[field],
-                adapter_key=sc.adapter_key if sc else None)
-            if row.source_type != slot:
-                _fail(400, "INVALID_INPUT",
-                      f"{field}: this file's contents were already "
-                      f"registered as '{row.original_name}' under a "
-                      f"different document type ({row.source_type}). "
-                      f"Check you attached the right file to the {field} "
-                      f"slot.")
-            bronze_ids[field] = row.id
+            bronze_ids[field] = _register_one(session, customer, field,
+                                              path, names[field], source_configs)
     return bronze_ids
+
+
+def _register_one(session, customer, field, path, name, source_configs) -> int:
+    """Bronze-register ONE file for a slot (see _register_inputs for the
+    slot-mismatch rationale). Returns the bronze file id."""
+    slot = _slot_source_type(field)
+    sc = source_configs.get(slot)
+    row = register_file(
+        session, customer, slot, Path(path), name,
+        adapter_key=sc.adapter_key if sc else None)
+    if row.source_type != slot:
+        _fail(400, "INVALID_INPUT",
+              f"{field}: this file's contents were already "
+              f"registered as '{row.original_name}' under a "
+              f"different document type ({row.source_type}). "
+              f"Check you attached the right file to the {field} "
+              f"slot.")
+    return row.id
+
+
+def _resolve_slot_adapter(source_configs, source_type, customer_key):
+    """Adapter instance + params for one configured slot (400 if the
+    customer has no source for it)."""
+    sc = source_configs.get(source_type)
+    if sc is None:
+        _fail(400, "INVALID_INPUT",
+              f"customer '{customer_key}' has no source configured "
+              f"for {source_type}")
+    try:
+        adapter = resolve_adapter(source_type, sc.adapter_key)
+    except KeyError as e:
+        _fail(400, "INVALID_INPUT", str(e))
+    return adapter, (sc.params or {})
 
 
 def _build_adapters(source_configs, paths, customer_key):
@@ -265,6 +289,12 @@ def _build_payload(out, form_config, selfcheck, names, customer_key,
                 "bill_only": len(out["bill_only"]),
                 "match_review": len(out["match_review"]),
                 "bank_credits": len(out["bank"]),
+                # credits with no match signal in the narrative — never
+                # matchable, kept out of the match-rate denominator
+                "unrecognised_receipts": int(
+                    (out["bank_only"]["gap_type"] == "UNRECOGNISED_RECEIPT").sum())
+                if not out["bank_only"].empty and "gap_type" in out["bank_only"].columns
+                else 0,
                 "bank_txns": len(out["bank_all"]),
                 "bills": len(out["bills"]),
                 "bills_grouped": len(out["bills_grouped"]),
@@ -353,6 +383,56 @@ def _persist_side_effects(customer_pk, bronze_ids, capture, run_id=None,
     return ids, stats
 
 
+def _merge_stats(acc: dict, more: dict) -> dict:
+    """Sum two ingest stats dicts (flat counters + by_frame counters)."""
+    for k, v in more.items():
+        if isinstance(v, dict):
+            acc[k] = _merge_stats(acc.get(k) or {}, v)
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            acc[k] = (acc.get(k) or 0) + v
+        elif isinstance(v, list):
+            acc[k] = (acc.get(k) or []) + v
+        else:
+            acc[k] = v
+    return acc
+
+
+def _persist_ingest_entries(customer_pk, entries, ingestion_event,
+                            entity_keys=None):
+    """The multi-file sibling of _persist_side_effects for /api/ingest:
+    `entries` is one dict per uploaded FILE, in upload order —
+    {slot, bronze_id, silver, gold} — and each gets its own silver rows
+    + its own ingest_gold_frames pass (that function is built around one
+    bronze file per frame and is idempotent, so N files in one slot are
+    N sequential passes: a later export updates what an earlier one
+    inserted, exactly as two separate ingestions would). Stats are summed
+    into the one dict the API returns; ONE ingestion.completed event
+    covering every file rides the same commit."""
+    stats: dict = {}
+    with SessionLocal() as session:
+        for e in entries:
+            slot, bronze_id = e["slot"], e["bronze_id"]
+            if e["silver"] is not None:
+                persist_silver(session, customer_pk, bronze_id, {
+                    name: df_to_records(df)
+                    for name, df in e["silver"].frames.items()
+                })
+            gold_frames, gold_bronze_ids = {}, {}
+            for name, df in e["gold"].items():
+                frame_key = slot if name.startswith("lineage") else name
+                gold_frames[frame_key] = df
+                gold_bronze_ids[frame_key] = bronze_id
+            _ids, one = ingest_gold_frames(session, customer_pk, gold_frames,
+                                           gold_bronze_ids, run_id=None,
+                                           entity_keys=entity_keys)
+            stats = _merge_stats(stats, one)
+        record_event(session, logger, event_type="ingestion.completed",
+                     customer_id=customer_pk,
+                     details={**ingestion_event, "stats": stats})
+        session.commit()
+    return stats
+
+
 def _match_links(out, bill_ids_by_seq):
     """run_match_bills rows from the matched frame; indices == gold bill
     row_seq in snapshot mode."""
@@ -366,7 +446,9 @@ def _match_links(out, bill_ids_by_seq):
                 links.append({"match_id": r.match_id,
                               "gold_bill_id": bill_ids_by_seq[i],
                               "role": "picked"})
-        for i in {int(i) for i in r.candidate_indices} - picked:
+        for i in [int(i) for i in r.candidate_indices]:  # matcher order
+            if i in picked:
+                continue
             if i in bill_ids_by_seq:
                 links.append({"match_id": r.match_id,
                               "gold_bill_id": bill_ids_by_seq[i],
@@ -388,7 +470,7 @@ async def create_run(
     allow_batched: bool = Form(True),
     max_batch_size: int = Form(3),
     customer_id: str = Form("default"),
-    mode: str = Form("snapshot"),
+    mode: str = Form("incremental"),
 ):
     if mode not in ("snapshot", "incremental"):
         _fail(400, "INVALID_INPUT", f"unknown mode '{mode}'")
@@ -862,10 +944,6 @@ def list_runs(customer_id: str | None = None, limit: int = 50):
 @router.post("/ingest")
 async def ingest(
     request: Request,
-    statement: UploadFile | None = File(None),
-    bills: UploadFile | None = File(None),
-    rnote: UploadFile | None = File(None),
-    crn: UploadFile | None = File(None),
     customer_id: str = Form("default"),
 ):
     """Raw files -> bronze -> silver -> gold, standalone.
@@ -874,11 +952,15 @@ async def ingest(
     processed, a slot with no upload is simply not part of it, and at
     least one file is required. Nothing is ever substituted — a slot left
     empty ingests nothing at all. No Run row either: a failed ingest
-    leaves log lines only, since nothing ran."""
+    leaves log lines only, since nothing ran.
+
+    A slot may carry SEVERAL files in one submission (the same multipart
+    field repeated). They are processed in the order attached, each as its
+    own bronze/silver/gold pass, inside one transaction and one
+    ingestion.completed event. Any statement failing its selfcheck fails
+    the whole submission (422), as a single file would."""
     tmpdir = Path(tempfile.mkdtemp(prefix="recon_ingest_"))
     try:
-        uploads = {"statement": statement, "bills": bills,
-                   "rnote": rnote, "crn": crn}
         # extra lineage slots upload under their slot key (source_type);
         # discover them from the customer's configured sources
         with SessionLocal() as session:
@@ -888,9 +970,11 @@ async def ingest(
                        if st not in SOURCE_TYPES.values()
                        and role_of(st) == "lineage"]
         form = await request.form()
-        for st in extra_slots:
-            up = form.get(st)
-            uploads[st] = up if hasattr(up, "filename") else None
+        fields = list(SOURCE_TYPES) + extra_slots
+        uploads = {
+            f: [u for u in form.getlist(f) if hasattr(u, "filename") and u.filename]
+            for f in fields
+        }
         # a file posted under a field name no slot answers to would
         # otherwise vanish silently (a typo'd slot key, or a lineage slot
         # this customer hasn't configured) — the ingest would "succeed"
@@ -902,11 +986,16 @@ async def ingest(
                   f"no such document slot(s): {stray}; this customer's slots "
                   f"are {sorted(uploads)}")
 
-        paths, names = {}, {}
-        for field, upload in uploads.items():
-            paths[field], names[field] = _resolve_input(
-                field, upload, tmpdir, False)
-        if not any(paths.values()):
+        # one plan row per FILE, in upload order (slot order, then the
+        # order the files were attached within the slot)
+        plan = []
+        for field, ups in uploads.items():
+            for i, up in enumerate(ups):
+                plan.append({"field": field,
+                             "slot": _slot_source_type(field),
+                             "path": _save_upload(up, field, tmpdir, i),
+                             "name": up.filename})
+        if not plan:
             _fail(400, "INVALID_INPUT",
                   "no files uploaded: attach at least one of "
                   f"{'/'.join(sorted(uploads))}")
@@ -916,49 +1005,54 @@ async def ingest(
                 session, customer_id)
             customer_id_var.set(customer_id)
             request.state.customer_id = customer_id
-            # dedup outcome per file, checked BEFORE register_file (which
-            # silently returns the existing row on identical bytes)
-            outcomes = {}
-            for field, path in paths.items():
-                if path is None:
-                    continue
-                sha = file_sha256(path)
+            for e in plan:
+                # dedup outcome per file, checked BEFORE register_file
+                # (which silently returns the existing row on identical
+                # bytes) — sequential, so the same bytes twice in ONE
+                # submission read registered then deduped
+                sha = file_sha256(e["path"])
                 exists = session.execute(
                     select(BronzeFile.id)
                     .where(BronzeFile.customer_id == customer.id,
                            BronzeFile.sha256 == sha).limit(1)).first()
-                outcomes[field] = "deduped" if exists else "registered"
-            bronze_ids = _register_inputs(session, customer, paths, names,
-                                          source_configs)
+                e["outcome"] = "deduped" if exists else "registered"
+                e["bronze_id"] = _register_one(session, customer, e["field"],
+                                               e["path"], e["name"],
+                                               source_configs)
+                session.flush()
             session.commit()
             customer_pk = customer.id
 
         files_resp = [{
-            "field": field,
-            "source_type": _slot_source_type(field),
-            "original_name": names[field],
-            "bronze_file_id": bronze_ids[field],
-            "outcome": outcomes[field],
-            "size_bytes": Path(paths[field]).stat().st_size,
-        } for field in bronze_ids]
+            "field": e["field"],
+            "source_type": e["slot"],
+            "original_name": e["name"],
+            "bronze_file_id": e["bronze_id"],
+            "outcome": e["outcome"],
+            "size_bytes": Path(e["path"]).stat().st_size,
+        } for e in plan]
 
-        inputs, adapters, adapter_params = _build_adapters(
-            source_configs, paths, customer_id)
-
-        capture = CaptureSinks()
+        # adapter + params resolve per SLOT, reused for every file in it
+        slot_adapters = {}
+        for e in plan:
+            if e["slot"] not in slot_adapters:
+                slot_adapters[e["slot"]] = _resolve_slot_adapter(
+                    source_configs, e["slot"], customer_id)
 
         def parse_all():
-            checks = {}
-            for source_type, path in inputs.items():
-                adapter = adapters[source_type]
-                p = adapter_params.get(source_type, {})
-                silver = adapter.parse(path, p)
-                capture.on_silver(source_type, adapter, silver)
-                gold = adapter.to_gold(silver, p)
-                capture.on_gold(source_type, adapter, gold)
-                check = adapter.selfcheck(gold, path, p)
+            checks = []
+            for e in plan:
+                adapter, p = slot_adapters[e["slot"]]
+                try:
+                    silver = adapter.parse(e["path"], p)
+                    gold = adapter.to_gold(silver, p)
+                    check = adapter.selfcheck(gold, e["path"], p)
+                except SelfCheckError as ex:
+                    raise SelfCheckError(f"{e['name']}: {ex}") from ex
+                e["silver"], e["gold"] = silver, gold
                 if check is not None:
-                    checks[source_type] = check
+                    checks.append({"slot": e["slot"], "bronze_file_id": e["bronze_id"],
+                                   "original_name": e["name"], "check": check})
             return checks
 
         try:
@@ -976,21 +1070,29 @@ async def ingest(
                 "details": {"customer_id": customer_pk}})
             _fail(422, "PARSE_FAILED", f"{type(e).__name__}: {e}")
 
-        selfcheck = (clean(checks["bank_statement"])
-                     if "bank_statement" in checks else None)
+        bank_checks = [c for c in checks if c["slot"] == "bank_statement"]
+        selfchecks = [{"bronze_file_id": c["bronze_file_id"],
+                       "original_name": c["original_name"],
+                       **clean(c["check"])} for c in bank_checks]
+        # scalar kept for compatibility: the one statement's check when
+        # exactly one statement was sent, else null (see `selfchecks`)
+        selfcheck = (clean(bank_checks[0]["check"])
+                     if len(bank_checks) == 1 else None)
         # audit details carry ids/outcomes, never filenames (joined back
         # at read time by GET /api/ingestions)
         ingestion_event = {
             "files": [{k: v for k, v in f.items() if k != "original_name"}
                       for f in files_resp],
-            "selfcheck_passed": (True if "bank_statement" in checks
-                                 else None),
+            "selfcheck_passed": (True if bank_checks else None),
         }
-        _ids, stats = await run_in_threadpool(
-            _persist_side_effects, customer_pk, bronze_ids, capture,
-            None, ingestion_event, _entity_keys(source_configs))
+        stats = await run_in_threadpool(
+            _persist_ingest_entries, customer_pk,
+            [{"slot": e["slot"], "bronze_id": e["bronze_id"],
+              "silver": e["silver"], "gold": e["gold"]} for e in plan],
+            ingestion_event, _entity_keys(source_configs))
         return {"customer": customer_id, "files": files_resp,
-                "stats": stats, "selfcheck": selfcheck}
+                "stats": stats, "selfcheck": selfcheck,
+                "selfchecks": selfchecks}
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -1058,8 +1160,13 @@ def gold_frame(frame: str, customer_id: str = "default",
 
 class ReconcileParams(BaseModel):
     customer_id: str = "default"
-    statement_bronze_id: int
-    mode: str = "snapshot"
+    # one statement (kept for compatibility) or several — the run's credit
+    # pool is the union of the selected statements' credits
+    statement_bronze_id: Optional[int] = None
+    statement_bronze_ids: Optional[list[int]] = None
+    # incremental by default (since 2026-09-08): the ledger-fed pages
+    # (AR, Analyst queue, Command Center) only fill from incremental runs
+    mode: str = "incremental"
     # per-run tunables are OPTIONAL: None falls through MatchRuleSet.merged
     # (which ignores None) so the customer's saved matching config applies.
     # The UI no longer sends them — matching config is the single source;
@@ -1072,11 +1179,15 @@ class ReconcileParams(BaseModel):
     max_batch_size: Optional[int] = None
 
 
-def _gold_filenames(session, customer_pk: int, stmt_name: str) -> dict:
-    """meta.filenames for gold-sourced runs: statement is exact; the
-    rest are the latest bronze file per source_type (best-effort,
-    cosmetic — keeps the app header rendering)."""
-    names = {"statement": stmt_name, "bills": None, "rnote": None, "crn": None}
+def _gold_filenames(session, customer_pk: int, stmt_names: list) -> dict:
+    """meta.filenames for gold-sourced runs: `statement` is the one
+    statement's name, or "<first> + N more" for several (it names the
+    workbook download); `statements` lists them all. The rest are the
+    latest bronze file per source_type (best-effort, cosmetic)."""
+    stmt = (stmt_names[0] if len(stmt_names) == 1
+            else f"{stmt_names[0]} + {len(stmt_names) - 1} more")
+    names = {"statement": stmt, "statements": list(stmt_names),
+             "bills": None, "rnote": None, "crn": None}
     for source_type, field in (("bill_status", "bills"),
                                ("lineage_rnote", "rnote"),
                                ("lineage_crn", "crn")):
@@ -1102,9 +1213,11 @@ def _gold_selfcheck(adapter, adapter_params, bank_df, stmt_path,
     try:
         if adapter is None or not Path(stmt_path).exists():
             return None
-        # bank_df is the credits-only engine frame; the adapter contract
-        # takes its own gold frames, so hand back the used_in_recon flag
-        gold = {"bank_txns": bank_df.assign(used_in_recon=True)}
+        # the adapter contract takes its own gold frames: pass the
+        # statement's full rows when they carry the used_in_recon flag
+        # (statement_txns_frame), else treat the frame as credits only
+        gold = {"bank_txns": bank_df if "used_in_recon" in bank_df.columns
+                else bank_df.assign(used_in_recon=True)}
         try:
             check = adapter.selfcheck(gold, stmt_path, adapter_params)
             if check is None:
@@ -1114,6 +1227,9 @@ def _gold_selfcheck(adapter, adapter_params, bank_df, stmt_path,
         except SelfCheckError as e:
             check = dict(e.check or {})
             check["passed"] = False
+            # a check with no totals (the adapter refused the frame
+            # outright) still needs to say WHY on the Summary page
+            check.setdefault("detail", str(e))
         if not check["passed"]:
             with SessionLocal() as session:
                 record_event(
@@ -1147,18 +1263,27 @@ async def reconcile_from_gold(request: Request, params: ReconcileParams):
                 session, params.customer_id)
             customer_id_var.set(params.customer_id)
             request.state.customer_id = params.customer_id
-            stmt_bronze = reconcile_gold.get_statement_bronze(
-                session, customer.id, params.statement_bronze_id)
-            if stmt_bronze is None:
-                _fail(404, "STATEMENT_NOT_FOUND",
-                      f"no ingested bank statement with id "
-                      f"{params.statement_bronze_id} for customer "
-                      f"'{params.customer_id}'")
+            wanted = list(params.statement_bronze_ids or [])
+            if params.statement_bronze_id is not None:
+                wanted.insert(0, params.statement_bronze_id)
+            wanted = list(dict.fromkeys(wanted))
+            if not wanted:
+                _fail(400, "INVALID_INPUT",
+                      "statement_bronze_ids: select at least one statement")
+            statements = []   # [(bronze_id, stored path, original name)]
+            for sid in wanted:
+                stmt_bronze = reconcile_gold.get_statement_bronze(
+                    session, customer.id, sid)
+                if stmt_bronze is None:
+                    _fail(404, "STATEMENT_NOT_FOUND",
+                          f"no ingested bank statement with id {sid} for "
+                          f"customer '{params.customer_id}'")
+                statements.append((sid, Path(stmt_bronze.stored_path),
+                                   stmt_bronze.original_name))
             customer_pk = customer.id
             rule_set_id = rule_row.id if rule_row else None
-            stmt_path = Path(stmt_bronze.stored_path)
             names = _gold_filenames(session, customer_pk,
-                                    stmt_bronze.original_name)
+                                    [n for _, _, n in statements])
             # the customer's bank adapter re-runs its own selfcheck
             # against the stored bronze file (best-effort, see
             # _gold_selfcheck)
@@ -1185,8 +1310,7 @@ async def reconcile_from_gold(request: Request, params: ReconcileParams):
                       customer_key=params.customer_id,
                       rule_set_id=rule_set_id, form_config=form_config,
                       rules=rules,
-                      statement_bronze_id=params.statement_bronze_id,
-                      stmt_path=stmt_path, names=names, tmpdir=tmpdir,
+                      statements=statements, names=names, tmpdir=tmpdir,
                       bank_adapter=bank_adapter,
                       bank_adapter_params=bank_adapter_params)
         if params.mode == "incremental":
@@ -1196,15 +1320,49 @@ async def reconcile_from_gold(request: Request, params: ReconcileParams):
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def _statement_selfchecks(customer_pk, statements, bank_adapter,
+                          bank_adapter_params):
+    """One selfcheck per statement, each against that statement's FULL
+    gold rows, debits included (a bank selfcheck ties the credits to the
+    totals printed on ONE document and applies its own credits filter;
+    the matched/pool frame is a designed subset — in incremental mode
+    ledger-consumed credits are excluded, and over several statements the
+    frame mixes documents). Returns
+    (scalar, list): scalar = the single statement's check when exactly
+    one was reconciled (compat), else None; list = every check with
+    bronze_file_id + original_name (None entries dropped)."""
+    checks = []
+    with SessionLocal() as session:
+        frames = [(sid, path, name,
+                   reconcile_gold.statement_txns_frame(session, sid, customer_pk))
+                  for sid, path, name in statements]
+    for sid, path, name, bank_df in frames:
+        check = _gold_selfcheck(bank_adapter, bank_adapter_params, bank_df,
+                                path, customer_pk, sid)
+        if check is not None:
+            checks.append({"bronze_file_id": sid, "original_name": name,
+                           **check})
+    scalar = (clean({k: v for k, v in checks[0].items()
+                     if k not in ("bronze_file_id", "original_name")})
+              if len(statements) == 1 and checks else None)
+    return scalar, checks
+
+
+def _statement_meta(statements) -> dict:
+    ids = [sid for sid, _, _ in statements]
+    return {"statement_bronze_id": ids[0], "statement_bronze_ids": ids}
+
+
 async def _reconcile_snapshot_from_gold(customer_pk, customer_key,
                                         rule_set_id, form_config, rules,
-                                        statement_bronze_id, stmt_path,
-                                        names, tmpdir, bank_adapter,
-                                        bank_adapter_params):
+                                        statements, names, tmpdir,
+                                        bank_adapter, bank_adapter_params):
+    statement_bronze_ids = [sid for sid, _, _ in statements]
+
     def do_match():
         with SessionLocal() as session:
             return reconcile_gold.run_snapshot(
-                session, customer_pk, statement_bronze_id, rules)
+                session, customer_pk, statement_bronze_ids, rules)
 
     try:
         out, _bank_ids, bill_ids = await run_in_threadpool(do_match)
@@ -1212,7 +1370,7 @@ async def _reconcile_snapshot_from_gold(customer_pk, customer_key,
         logger.exception("run.reconcile_failed", extra={
             "event_type": "run.reconcile_failed",
             "details": {"customer_id": customer_pk,
-                        "statement_bronze_id": statement_bronze_id}})
+                        "statement_bronze_ids": statement_bronze_ids}})
         runs.persist_failure(customer_pk, "snapshot", form_config,
                              {"error": "RECONCILE_FAILED",
                               "detail": f"{type(e).__name__}: {e}"})
@@ -1220,12 +1378,15 @@ async def _reconcile_snapshot_from_gold(customer_pk, customer_key,
 
     workbook_path = tmpdir / "Recon_Output.xlsx"
     await run_in_threadpool(write_workbook, out, workbook_path)
-    selfcheck = await run_in_threadpool(
-        _gold_selfcheck, bank_adapter, bank_adapter_params, out["bank"],
-        stmt_path, customer_pk, statement_bronze_id)
+    # per statement against its full credits (was: the matched frame
+    # itself — identical for one statement, meaningless for several)
+    selfcheck, selfchecks = await run_in_threadpool(
+        _statement_selfchecks, customer_pk, statements, bank_adapter,
+        bank_adapter_params)
     payload = _build_payload(
         out, form_config, selfcheck, names, customer_key, "snapshot",
-        extra_meta={"statement_bronze_id": statement_bronze_id}, rules=rules)
+        extra_meta={**_statement_meta(statements), "selfchecks": selfchecks},
+        rules=rules)
     await run_in_threadpool(
         runs.persist_success, customer_pk, rule_set_id, "snapshot",
         form_config, payload, selfcheck, workbook_path,
@@ -1235,9 +1396,9 @@ async def _reconcile_snapshot_from_gold(customer_pk, customer_key,
 
 async def _reconcile_incremental_from_gold(customer_pk, customer_key,
                                            rule_set_id, form_config, rules,
-                                           statement_bronze_id, stmt_path,
-                                           names, tmpdir, bank_adapter,
-                                           bank_adapter_params):
+                                           statements, names, tmpdir,
+                                           bank_adapter, bank_adapter_params):
+    statement_bronze_ids = [sid for sid, _, _ in statements]
     try:
         run_id = incremental.start_run(customer_pk, form_config)
     except incremental.RunInProgress as e:
@@ -1246,7 +1407,7 @@ async def _reconcile_incremental_from_gold(customer_pk, customer_key,
         def match_and_ledger():
             with SessionLocal() as session:
                 out, bank_ids, bill_ids = incremental.run_matching(
-                    session, customer_pk, statement_bronze_id, rules)
+                    session, customer_pk, statement_bronze_ids, rules)
                 ledger_stats, links, ledger_ids = incremental.finalize_ledger(
                     session, customer_pk, run_id, out, bank_ids, bill_ids)
                 session.commit()
@@ -1263,22 +1424,13 @@ async def _reconcile_incremental_from_gold(customer_pk, customer_key,
         if not out["queue"].empty and "match_id" in out["queue"].columns:
             out["queue"]["match_ledger_id"] = \
                 out["queue"]["match_id"].map(ledger_ids)
-        # selfcheck must see the statement's FULL gold credits, not the
-        # pool — the pool is a designed subset (ledger-consumed credits
-        # excluded) and would mismatch the printed totals on every run
-        def statement_selfcheck():
-            with SessionLocal() as session:
-                bank_df = reconcile_gold.statement_credits_frame(
-                    session, statement_bronze_id, customer_pk)
-            return _gold_selfcheck(bank_adapter, bank_adapter_params,
-                                   bank_df, stmt_path, customer_pk,
-                                   statement_bronze_id)
-
-        selfcheck = await run_in_threadpool(statement_selfcheck)
+        selfcheck, selfchecks = await run_in_threadpool(
+            _statement_selfchecks, customer_pk, statements, bank_adapter,
+            bank_adapter_params)
         payload = _build_payload(
             out, form_config, selfcheck, names, customer_key, "incremental",
-            extra_meta={"ledger": ledger_stats,
-                        "statement_bronze_id": statement_bronze_id},
+            extra_meta={"ledger": ledger_stats, **_statement_meta(statements),
+                        "selfchecks": selfchecks},
             rules=rules)
         await run_in_threadpool(
             runs.persist_success, customer_pk, rule_set_id, "incremental",

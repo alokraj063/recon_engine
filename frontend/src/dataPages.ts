@@ -3,14 +3,16 @@ import type { View } from './components/Sidebar'
 /**
  * The sidebar's single "Data" group: one page per data kind, each with
  * two SCOPES that are simply the two pre-existing views for that kind —
- *   Current   the live gold layer (GoldTable, the old gold_* views)
- *   As of run the frozen frame one reconciliation used (SourceTable,
- *             the old Run data views, named by the run frame)
+ *   "Complete Data"  (scope 'current') the live gold layer (GoldTable,
+ *                    the old gold_* views)
+ *   "Reconcile Data" (scope 'run') the frozen frame one reconciliation
+ *                    used (SourceTable, the old Run data views, named by
+ *                    the run frame)
  * Pairing the existing view keys (rather than inventing new ones) keeps
  * the URL hash format, the run auto-load gate and every legacy link
- * untouched: `#view=gold_bills` IS "Bills, Current".
+ * untouched: `#view=gold_bills` IS "Bills, Complete Data".
  *
- * run: null = Current only — a run persists no lineage snapshot (only
+ * run: null = Complete Data only — a run persists no lineage snapshot (only
  * bank / bills / bills_enriched / recoveries, see routes._frame_records).
  * runTrail is the "With lineage trail" toggle inside Bills in run scope:
  * bills_enriched is a run artifact with no gold counterpart.

@@ -136,7 +136,10 @@ def test_unfiltered_payload_unchanged(world):
     assert plain == explicit
     assert "filters_applied" not in plain
     assert plain["gold"]["credits"] == 3 and plain["gold"]["bills"] == 4
-    assert plain["open_exceptions"] == {"BANK_ONLY": 1, "BILL_ONLY": 2}
+    # T3 carries a customer_ref (the first exact signal) -> SIGNAL_BILL_NOT_FOUND,
+    # so nothing is unrecognised here and the rate denominator is all 3 credits
+    assert plain["open_exceptions"] == {"BANK_ONLY": 1, "BILL_ONLY": 2, "UNRECOGNISED": 0}
+    assert plain["unrecognised_credits"] == 0 and plain["recognised_credits"] == 3
     assert plain["matched_credits"] == 2
 
 
@@ -144,7 +147,7 @@ def test_date_window_moves_the_counts(world):
     march = _ov(world["cust"], date_from=date(2026, 3, 1), date_to=date(2026, 3, 31))
     assert march["gold"]["credits"] == 2            # T1, T3
     assert march["gold"]["bills"] == 2              # INV-1, INV-4
-    assert march["open_exceptions"] == {"BANK_ONLY": 1, "BILL_ONLY": 1}   # T3, INV-4
+    assert march["open_exceptions"] == {"BANK_ONLY": 1, "BILL_ONLY": 1, "UNRECOGNISED": 0}   # T3, INV-4
     assert march["matched_credits"] == 1 and march["match_rate"] == 0.5
     assert march["filters_applied"]["from"] == "2026-03-01"
     assert march["filters_applied"]["bank_only_unassigned"] == 1
@@ -153,7 +156,7 @@ def test_date_window_moves_the_counts(world):
     assert march["matches"] == {"OPEN": 0, "LOCKED": 0, "REJECTED": 0}
     april = _ov(world["cust"], date_from=date(2026, 4, 1), date_to=date(2026, 4, 30))
     assert april["gold"]["credits"] == 1 and april["gold"]["bills"] == 2
-    assert april["open_exceptions"] == {"BANK_ONLY": 0, "BILL_ONLY": 1}   # INV-3
+    assert april["open_exceptions"] == {"BANK_ONLY": 0, "BILL_ONLY": 1, "UNRECOGNISED": 0}   # INV-3
     assert [e["ref"] for e in april["top_exceptions"]] == ["INV-3"]
 
 
@@ -161,7 +164,7 @@ def test_operating_unit_filter_and_unassigned_bucket(world):
     friction = _ov(world["cust"], units=["Friction"])
     assert friction["gold"]["bills"] == 2                        # INV-1, INV-3
     assert friction["gold"]["credits"] == 1                      # T1 settles INV-1
-    assert friction["open_exceptions"] == {"BANK_ONLY": 0, "BILL_ONLY": 1}   # INV-3
+    assert friction["open_exceptions"] == {"BANK_ONLY": 0, "BILL_ONLY": 1, "UNRECOGNISED": 0}   # INV-3
     assert friction["matched_credits"] == 1 and friction["match_rate"] == 1.0
     assert friction["matches"]["LOCKED"] == 1                    # T1<->INV-1 only
     assert friction["filters_applied"]["unassigned_included"] is False
@@ -169,7 +172,7 @@ def test_operating_unit_filter_and_unassigned_bucket(world):
 
     with_unassigned = _ov(world["cust"], units=["Friction", overview.UNASSIGNED_UNIT])
     assert with_unassigned["gold"]["credits"] == 2               # + T3 (unmatched)
-    assert with_unassigned["open_exceptions"] == {"BANK_ONLY": 1, "BILL_ONLY": 2}  # + T3, INV-4
+    assert with_unassigned["open_exceptions"] == {"BANK_ONLY": 1, "BILL_ONLY": 2, "UNRECOGNISED": 0}  # + T3, INV-4
     assert with_unassigned["gold"]["bills"] == 3                 # + INV-4 (no unit)
 
     only_unassigned = _ov(world["cust"], units=[overview.UNASSIGNED_UNIT])

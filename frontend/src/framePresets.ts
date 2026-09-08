@@ -9,9 +9,10 @@
 export interface FramePreset {
   curated: Array<[string, string]>
   hidden: string[]
-  /** categorical columns that get a value dropdown in the GoldTable
-   *  toolbar — [column key, toolbar label]; options are derived from the
-   *  fetched rows, so only low-cardinality columns belong here */
+  /** categorical columns that get a header checklist filter (DataTable
+   *  column meta `facet`) in BOTH the gold tables and the run frames —
+   *  [column key, filter label]; options are derived from the rows, so
+   *  only low-cardinality columns belong here */
   facets?: Array<[string, string]>
 }
 
@@ -29,6 +30,7 @@ export const SHARED_PRESETS: Record<'bank' | 'bills' | 'recoveries' | 'lineage',
       ['page', 'Page'],
     ],
     hidden: ['supplementary', 'timestamp', 'bronze_file_id', 'row_seq'],
+    facets: [['txn_type', 'Type'], ['zone_guess', 'Zone'], ['used_in_recon', 'Used']],
   },
   bills: {
     curated: [
@@ -68,6 +70,7 @@ export const SHARED_PRESETS: Record<'bank' | 'bills' | 'recoveries' | 'lineage',
       ['recovery_text', 'Raw text'],
     ],
     hidden: ['bill_index', 'bronze_file_id', 'row_seq'],
+    facets: [['operating_unit', 'Operating unit'], ['recovery_head', 'Recovery head']],
   },
   // canonical unified view of gold.lineage_docs (RNOTE + CRN)
   lineage: {
@@ -85,5 +88,6 @@ export const SHARED_PRESETS: Record<'bank' | 'bills' | 'recoveries' | 'lineage',
       ['bill_reg_no', 'Bill reg no.'],
     ],
     hidden: ['bronze_file_id', 'row_seq'],
+    facets: [['doc_type', 'Type']],
   },
 }

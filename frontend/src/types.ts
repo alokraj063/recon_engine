@@ -28,6 +28,8 @@ export interface Selfcheck {
   /** present on gold-sourced runs: parse-time gate already ran at
    *  ingest, so a mismatch here is informational, not fatal */
   passed?: boolean
+  /** why a failed check has no totals (the adapter refused the frame) */
+  detail?: string
 }
 
 /** One gold frame's share of an ingestion: how many rows it carried
@@ -72,6 +74,8 @@ export interface ReconMeta {
     bill_only: number
     match_review: number
     bank_credits: number
+    /** bank-only credits with no match signal in the narrative (never matchable) */
+    unrecognised_receipts?: number
     bank_txns?: number
     bills?: number
     bills_grouped?: number
@@ -79,12 +83,20 @@ export interface ReconMeta {
   }
   selfcheck: Selfcheck | null
   config: Record<string, number | boolean>
-  filenames: { statement: string; bills: string; rnote: string | null; crn: string | null }
+  filenames: {
+    statement: string
+    /** every statement reconciled in this run (several allowed) */
+    statements?: string[]
+    bills: string; rnote: string | null; crn: string | null
+  }
   customer?: string
   mode?: 'snapshot' | 'incremental'
   ingest?: IngestStats
   ledger?: LedgerStats
   statement_bronze_id?: number
+  statement_bronze_ids?: number[]
+  /** one per statement, each checked against its own printed totals */
+  selfchecks?: Array<Selfcheck & { bronze_file_id: number; original_name: string }>
   rules_effective?: {
     field_map: FieldMap
     paid_statuses: string[]
@@ -188,6 +200,8 @@ export interface LedgerException {
   /** the resolving match's durable number (UI "M-{seq}") */
   resolved_by_match_seq?: number | null
   resolved_at?: string | null
+  /** BANK_ONLY: the frozen gap code (SIGNAL_BILL_NOT_FOUND | UNRECOGNISED_RECEIPT) */
+  gap_type?: string | null
   txn?: LedgerTxnInfo | null
   bill?: Omit<LedgerBillInfo, 'gold_bill_id' | 'role'> | null
 }
@@ -225,7 +239,10 @@ export interface IngestResponse {
   customer: string
   files: IngestFileOutcome[]
   stats: IngestStats
+  /** the one statement's check when exactly one statement was sent */
   selfcheck: Selfcheck | null
+  /** one entry per bank statement in the submission (several allowed) */
+  selfchecks?: Array<Selfcheck & { bronze_file_id: number; original_name: string }>
 }
 
 export interface IngestionListItem {
@@ -262,7 +279,8 @@ export interface GoldFileInfo {
  *  can still pass explicit per-run overrides. */
 export interface ReconcileParams {
   customer_id: string
-  statement_bronze_id: number
+  /** the run's credit pool is the union of these statements' credits */
+  statement_bronze_ids: number[]
   mode: RunMode
 }
 
@@ -284,10 +302,18 @@ export interface Overview {
   locked_by: { AUTO_HIGH: number; USER: number }
   /** non-rejected matches with the frozen MANUAL confidence (item 3.2) */
   manual_matches?: number
-  open_exceptions: { BANK_ONLY: number; BILL_ONLY: number }
+  /** UNRECOGNISED = the subset of BANK_ONLY with no match signal (never matchable) */
+  open_exceptions: { BANK_ONLY: number; BILL_ONLY: number; UNRECOGNISED?: number }
   resolved_exceptions: number
   open_value: { bank_only: number; bill_only: number; total: number }
+  /** credits with any non-rejected match (incl. those awaiting review) */
   matched_credits: number
+  /** credits with a LOCKED match — the match rate's numerator */
+  settled_credits?: number
+  /** open unrecognised receipts — excluded from the match-rate denominator */
+  unrecognised_credits?: number
+  /** credits − unrecognised: the match-rate denominator */
+  recognised_credits?: number
   match_rate: number | null
   top_exceptions: OverviewException[]
   last_run: { run_id: string; mode: string; created_at: string
@@ -347,7 +373,7 @@ export interface ArView {
   as_of: string
   /** succeeded runs with their statement credit count — the denominator
    *  of a match rate over a run subset (item 2.2) */
-  runs: Array<{ run_id: string; credits: number | null }>
+  runs: Array<{ run_id: string; credits: number | null; unrecognised?: number | null }>
   kpis: {
     outstanding: { count: number; value: number }
     received: { count: number; value: number; mtd_value: number }

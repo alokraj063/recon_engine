@@ -1,4 +1,5 @@
-"""HSBC daily-statement PDF -> gold bank transactions."""
+"""HSBC statement PDF (legacy Daily statement or HSBCnet transaction
+report) -> gold bank transactions."""
 
 from typing import Dict, Optional
 
@@ -30,8 +31,21 @@ class HsbcBankAdapter(SourceAdapter):
 
     def selfcheck(self, gold, path, params: dict) -> Optional[dict]:
         """The count and total HSBC prints on the last page must tie to
-        the parsed credits — everything downstream depends on this parse."""
+        the parsed credits — everything downstream depends on this parse.
+
+        Only the legacy Daily statement prints totals; the HSBCnet
+        transaction report has none, so `check` is None for it and only
+        the non-empty guard applies. A PDF that yields ZERO rows of any
+        type is not a layout this adapter understands — fail loud rather
+        than ingest an empty bank layer (a report with no credits but some
+        debits still passes)."""
         bank = gold["bank_txns"]
+        if bank.empty:
+            raise SelfCheckError(
+                "no transaction rows recognised — not an HSBC statement / "
+                "transaction report layout this adapter understands",
+                None,
+            )
         credits = bank[bank["used_in_recon"] == True]  # noqa: E712 (empty-frame safe)
         check = bank_selfcheck(credits, path)
         if check and (check["parsed_count"] != check["stated_count"]

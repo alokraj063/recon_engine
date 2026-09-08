@@ -65,11 +65,11 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
                 <tr key={i.id}>
                   <td className="when-cell">{fmtWhen(i.at)}</td>
                   <td className="files-cell">
-                    {i.files.map((f) => {
+                    {i.files.map((f, k) => {
                       const name = f.original_name ?? `file #${f.bronze_file_id}`
                       const isNew = f.outcome === 'registered'
                       return (
-                        <span key={f.bronze_file_id}
+                        <span key={`${f.bronze_file_id}-${k}`}
                               className={`chip file-chip${isNew ? ' chip-settled' : ''}`}
                               title={`${name} · ${fileOutcomeLabel(f.outcome)}`}>
                           <span className="file-chip-role">{sourceRoleTag(f.source_type)}</span>

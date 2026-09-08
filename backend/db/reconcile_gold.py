@@ -44,15 +44,29 @@ GOLD_FRAME_CAP = 20_000
 
 # --- snapshot-from-gold -------------------------------------------------
 
+def statement_ids(statement_bronze_ids) -> List[int]:
+    """One id or a sequence of ids -> ordered, deduped list (a run may
+    reconcile SEVERAL statements at once: their credits form one pool)."""
+    if isinstance(statement_bronze_ids, (list, tuple, set)):
+        ids = list(dict.fromkeys(int(i) for i in statement_bronze_ids))
+    else:
+        ids = [int(statement_bronze_ids)]
+    if not ids:
+        raise ValueError("at least one statement is required")
+    return ids
+
+
 def build_snapshot_frames(session, customer_id: int,
-                          statement_bronze_id: int) -> dict:
+                          statement_bronze_ids) -> dict:
     """Engine-shaped frames for a legacy-semantics snapshot: the chosen
-    statement's txns vs ALL current gold bills (entity-upserted latest
-    state). ids lists are positional, like the matcher's indices."""
+    statement(s)' txns vs ALL current gold bills (entity-upserted latest
+    state). ids lists are positional, like the matcher's indices.
+    Several statements = the union of their credits, each gold row once
+    (one IN query), ordered by file then row."""
+    ids = statement_ids(statement_bronze_ids)
     txn_rows = list(session.execute(
         select(GoldBankTxn)
-        .where(reported_by_file(session, GoldBankTxn, statement_bronze_id,
-                               customer_id))
+        .where(reported_by_file(session, GoldBankTxn, ids, customer_id))
         # (bronze_file_id, row_seq) not row_seq alone: a credit this
         # statement re-reports is owned by the earlier statement it first
         # arrived on, so the rows can span files
@@ -86,12 +100,13 @@ def build_snapshot_frames(session, customer_id: int,
             "lineage_df": lineage_df, "recoveries_df": recoveries_df}
 
 
-def run_snapshot(session, customer_id: int, statement_bronze_id: int,
+def run_snapshot(session, customer_id: int, statement_bronze_ids,
                  rules: MatchRuleSet) -> Tuple[dict, List[str], List[str]]:
     """Legacy-semantics snapshot over gold frames. Returns
     (out frames dict, bank_ids, bill_ids) — ids positional. NO ledger
-    reads or writes; the user's REAL window_days applies."""
-    f = build_snapshot_frames(session, customer_id, statement_bronze_id)
+    reads or writes; the user's REAL window_days applies — over several
+    statements the expected window spans their combined date range."""
+    f = build_snapshot_frames(session, customer_id, statement_bronze_ids)
     out = reconcile(
         f["bank_df"], f["bills_df"], f["lineage_df"],
         window_days=rules.window_days,
@@ -120,22 +135,25 @@ def run_snapshot(session, customer_id: int, statement_bronze_id: int,
     return out, f["bank_ids"], f["bill_ids"]
 
 
-def statement_credits_frame(session, statement_bronze_id: int,
-                            customer_id: int):
-    """The chosen statement's FULL credits rebuilt from gold — the frame
-    a bank-adapter selfcheck must verify. Incremental runs match on a
-    pool (a designed subset of the statement), so checking the pool
-    against the statement's printed totals would mismatch by design."""
+def statement_txns_frame(session, statement_bronze_id: int,
+                         customer_id: int):
+    """The chosen statement's FULL transactions rebuilt from gold — every
+    row it reported, debits included, with the used_in_recon flag — i.e.
+    exactly the gold frame the bank adapter's selfcheck saw at ingest.
+    Runs match on a pool (a designed subset), so checking the pool
+    against the statement's printed totals would mismatch by design; and
+    a credits-only frame would mis-read a debits-only statement as "no
+    rows recognised" (the adapter's empty-layout guard) — it must see
+    the whole statement and apply its own credits filter."""
     txn_rows = list(session.execute(
         select(GoldBankTxn)
         .where(reported_by_file(session, GoldBankTxn, statement_bronze_id,
                                customer_id))
         .order_by(GoldBankTxn.bronze_file_id, GoldBankTxn.row_seq)).scalars())
-    credit_rows = [r for r in txn_rows if r.used_in_recon]
-    bank_df, _ = frame_from_gold(credit_rows, BANK_MAP, "bank_txns",
+    bank_df, _ = frame_from_gold(txn_rows, BANK_MAP, "bank_txns",
                                  ensure=ensure_schema)
-    if "used_in_recon" in bank_df.columns:
-        bank_df = bank_df.drop(columns=["used_in_recon"])
+    if "used_in_recon" not in bank_df.columns:
+        bank_df["used_in_recon"] = [bool(r.used_in_recon) for r in txn_rows]
     return bank_df
 
 

@@ -24,11 +24,13 @@ import {
 } from './types'
 import { normalizeRows, normalizeRun } from './normalizeLegacy'
 
+/** Files per fixed slot — a slot may carry several, processed by the
+ *  server in the order attached. */
 export interface UploadFiles {
-  statement: File | null
-  bills: File | null
-  rnote: File | null
-  crn: File | null
+  statement: File[]
+  bills: File[]
+  rnote: File[]
+  crn: File[]
 }
 
 /** Turn a non-2xx response into an ApiError carrying the backend's
@@ -75,16 +77,16 @@ async function getJson<T>(url: string): Promise<T> {
 export async function ingestFiles(
   files: UploadFiles,
   customerId: string,
-  extraFiles?: Record<string, File | null>,
+  extraFiles?: Record<string, File[]>,
 ): Promise<IngestResponse> {
   const form = new FormData()
+  // the same field repeated = several files in one slot, in this order
   for (const field of ['statement', 'bills', 'rnote', 'crn'] as const) {
-    const f = files[field]
-    if (f) form.append(field, f)
+    for (const f of files[field]) form.append(field, f)
   }
   // extra lineage slots upload under their slot key (source_type)
-  for (const [slot, f] of Object.entries(extraFiles ?? {})) {
-    if (f) form.append(slot, f)
+  for (const [slot, fs] of Object.entries(extraFiles ?? {})) {
+    for (const f of fs) form.append(slot, f)
   }
   form.append('customer_id', customerId)
 

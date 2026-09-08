@@ -34,6 +34,8 @@ const PRESETS: Record<FrameName, FramePreset> = {
       ['payment_order_date', 'Pay order date'],
     ],
     hidden: [],   // computed below: everything not curated
+    facets: [['bill_status', 'Status'], ['zone', 'Zone'], ['Settled', 'Settled'],
+             ['LineageStatus', 'Lineage'], ['Attempts_Flag', 'Attempts']],
   },
 }
 
@@ -48,9 +50,11 @@ function buildColumns(name: FrameName, rows: Row[]): { columns: ColumnDef<Row>[]
     .filter((k) => k !== 'Run' && k !== 'run_id' && !preset.curated.some(([c]) => c === k))
     .sort()
 
+  const facets = new Map(preset.facets ?? [])
   const make = (key: string, label: string): ColumnDef<Row> => ({
     id: key,
     header: label,
+    meta: facets.has(key) ? { facet: true, facetLabel: facets.get(key) } : undefined,
     accessorFn: (row) => row[key],
     cell: (ctx) => {
       const v = ctx.row.original[key]

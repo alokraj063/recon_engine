@@ -35,57 +35,64 @@ const ERP_SLOTS: SlotSpec[] = [
 ]
 
 /** One document slot's file state: an explicit Upload button (hidden
- *  input) and drag & drop onto the area. A slot is ingested only when it
- *  holds a file — nothing is ever substituted for one, so an empty slot
- *  is simply not part of the ingestion. */
-function SlotFileArea({ on, running, file, accept, onFile }: {
+ *  input, multiple) and drag & drop onto the area. A slot may hold
+ *  SEVERAL files — they are ingested in the order attached — and is
+ *  ingested only when it holds at least one; nothing is ever substituted,
+ *  so an empty slot is simply not part of the ingestion. */
+function SlotFileArea({ on, running, files, accept, onAdd, onRemove }: {
   on: boolean
   running: boolean
-  file: File | null
+  files: File[]
   accept?: string
-  onFile: (f: File | null) => void
+  onAdd: (fs: File[]) => void
+  onRemove: (index: number) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const disabled = running || !on
 
-  const btn = (label: string, icon: React.ReactNode, onClick: () => void) => (
-    <button className="slot-revert" disabled={running} onClick={onClick}>
-      {icon} {label}
+  const uploadBtn = (
+    <button className="slot-revert" disabled={disabled}
+            onClick={() => inputRef.current?.click()}>
+      <Upload size={13} strokeWidth={1.75} /> {files.length ? 'Add file' : 'Upload file'}
     </button>
   )
-  const uploadBtn = btn('Upload file', <Upload size={13} strokeWidth={1.75} />,
-                        () => inputRef.current?.click())
 
   return (
     <div
       className={`slot-file-area${dragging && !disabled ? ' dragover' : ''}`}
-      title={disabled ? undefined : 'Drag & drop a file here, or use Upload file'}
+      title={disabled ? undefined : 'Drag & drop files here, or use Upload file'}
       onDragOver={(e) => { e.preventDefault(); if (!disabled) setDragging(true) }}
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => {
         e.preventDefault()
         setDragging(false)
         if (disabled) return
-        const f = e.dataTransfer.files?.[0]
-        if (f) onFile(f)
+        const fs = Array.from(e.dataTransfer.files ?? [])
+        if (fs.length) onAdd(fs)
       }}
     >
       {!on ? (
         <span className="slot-file slot-empty">skipped</span>
-      ) : file ? (
-        <>
-          <span className="slot-badge upload">Your upload</span>
-          <span className="slot-file" title={file.name}>{file.name}</span>
-          {btn('Remove', <X size={13} strokeWidth={1.75} />, () => onFile(null))}
-        </>
       ) : (
-        uploadBtn
+        <>
+          {files.length > 0 && <span className="slot-badge upload">Your upload</span>}
+          {files.map((f, i) => (
+            <span key={`${f.name}-${i}`} className="slot-file-chip">
+              <span className="slot-file" title={f.name}>{f.name}</span>
+              <button className="slot-file-x" disabled={running} title="remove this file"
+                      onClick={() => onRemove(i)}>
+                <X size={12} strokeWidth={1.75} />
+              </button>
+            </span>
+          ))}
+          {uploadBtn}
+        </>
       )}
-      <input ref={inputRef} type="file" accept={accept} disabled={disabled}
+      <input ref={inputRef} type="file" accept={accept} disabled={disabled} multiple
              onChange={(e) => {
-               const f = e.target.files?.[0] ?? null
-               if (f) onFile(f)
+               const fs = Array.from(e.target.files ?? [])
+               if (fs.length) onAdd(fs)
                e.target.value = ''   // allow re-picking the same file later
              }} />
     </div>
@@ -97,7 +104,7 @@ function SlotFileArea({ on, running, file, accept, onFile }: {
 const acceptOf = (o?: AdapterOption): string | undefined =>
   o && o.file_kinds?.length ? o.file_kinds.join(',') : undefined
 
-const NO_FILES: UploadFiles = { statement: null, bills: null, rnote: null, crn: null }
+const NO_FILES: UploadFiles = { statement: [], bills: [], rnote: [], crn: [] }
 const ALL_ON: Record<string, boolean> = { statement: true, bills: true, rnote: true, crn: true }
 
 /** "IREPS bill status" under system IREPS -> "Bill status". */
@@ -125,7 +132,7 @@ export function IngestForm({
   const [historyEpoch, setHistoryEpoch] = useState(0)
   // extra lineage slots (beyond the ERP's own documents): uploads keyed
   // by slot source_type, plus the add-slot mini-form
-  const [extraFiles, setExtraFiles] = useState<Record<string, File | null>>({})
+  const [extraFiles, setExtraFiles] = useState<Record<string, File[]>>({})
   const [addingSlot, setAddingSlot] = useState(false)
   const [newSlotKey, setNewSlotKey] = useState('')
   const [newSlotAdapter, setNewSlotAdapter] = useState('')
@@ -213,8 +220,10 @@ export function IngestForm({
     }
   }
 
-  const setFile = (field: keyof UploadFiles) => (f: File | null) =>
-    setFiles((prev) => ({ ...prev, [field]: f }))
+  const addFiles = (field: keyof UploadFiles) => (fs: File[]) =>
+    setFiles((prev) => ({ ...prev, [field]: [...prev[field], ...fs] }))
+  const removeFile = (field: keyof UploadFiles) => (i: number) =>
+    setFiles((prev) => ({ ...prev, [field]: prev[field].filter((_, j) => j !== i) }))
 
   const extraEnabled = (st: string) => enabled[st] ?? true
   // what actually gets posted: the files of enabled slots, nothing else.
@@ -226,10 +235,10 @@ export function IngestForm({
       .filter((s) => enabled[s.field])
       .map((s) => [s.field, files[s.field]])),
   }
-  const outgoingExtras = Object.fromEntries(
-    extraSlots.filter(extraEnabled).map((st) => [st, extraFiles[st] ?? null]))
-  const anyInput = Object.values(outgoing).some(Boolean)
-    || Object.values(outgoingExtras).some(Boolean)
+  const outgoingExtras: Record<string, File[]> = Object.fromEntries(
+    extraSlots.filter(extraEnabled).map((st) => [st, extraFiles[st] ?? []]))
+  const anyInput = Object.values(outgoing).some((fs) => fs.length > 0)
+    || Object.values(outgoingExtras).some((fs) => fs.length > 0)
 
   const onIngest = async () => {
     setRunning(true)
@@ -238,6 +247,12 @@ export function IngestForm({
     try {
       const res = await ingestFiles(outgoing, customerId, outgoingExtras)
       setResult(res)
+      // the "Ingested" panel now lists these files — clear the slots so
+      // the chips don't repeat it (and a second click can't re-post the
+      // same bytes); include toggles are kept. A failure keeps the
+      // selection so the user can fix and resubmit.
+      setFiles(NO_FILES)
+      setExtraFiles({})
       setHistoryEpoch((n) => n + 1)
       onIngested(res)
     } catch (e) {
@@ -267,7 +282,7 @@ export function IngestForm({
     try {
       const res = await saveCustomerSources(customerId, { [slot]: null })
       setSources(res.sources)
-      setExtraFiles((prev) => ({ ...prev, [slot]: null }))
+      setExtraFiles((prev) => { const next = { ...prev }; delete next[slot]; return next })
     } catch (e) { fail(e) }
   }
 
@@ -294,8 +309,8 @@ export function IngestForm({
   }
 
   const fileArea = (s: SlotSpec, on: boolean, accept?: string) => (
-    <SlotFileArea on={on} running={running} file={files[s.field]}
-                  accept={accept} onFile={setFile(s.field)} />
+    <SlotFileArea on={on} running={running} files={files[s.field]}
+                  accept={accept} onAdd={addFiles(s.field)} onRemove={removeFile(s.field)} />
   )
 
   const toggle = (field: keyof UploadFiles, on: boolean) => (
@@ -307,7 +322,7 @@ export function IngestForm({
   )
 
   const bankOn = enabled[BANK_SLOT.field]
-  const bankFilled = bankOn && Boolean(files.statement)
+  const bankFilled = bankOn && files.statement.length > 0
   // extensions follow the SELECTED adapter (fall back to the first option
   // before the customer's saved choice loads)
   const bankAccept = acceptOf(
@@ -369,7 +384,8 @@ export function IngestForm({
         Raw files land in bronze (registered by content hash), parse into silver, and
         transform into the gold layer every reconciliation runs on. An ingestion is
         exactly the files you attach — a slot you leave empty (or untick) is skipped,
-        never filled in for you. Format choices persist to the customer's configuration.
+        never filled in for you, and a slot can take several files, processed in the
+        order attached. Format choices persist to the customer's configuration.
       </p>
 
       <div className="ingest-section">
@@ -410,7 +426,7 @@ export function IngestForm({
         <div className="slot-stack">
           {erpDocs.map(({ slot, opt }) => {
             const on = enabled[slot.field]
-            const filled = on && Boolean(files[slot.field])
+            const filled = on && files[slot.field].length > 0
             return (
               <div key={slot.field}
                    className={`slot-row${on ? '' : ' slot-off'}${filled ? ' filled' : ''}`}>
@@ -430,10 +446,10 @@ export function IngestForm({
             {extraSlots.map((st) => {
               const on = extraEnabled(st)
               const opt = lineageAdapters.find((o) => o.key === sources[st])
-              const own = extraFiles[st] ?? null
+              const own = extraFiles[st] ?? []
               return (
                 <div key={st}
-                     className={`slot-row${on ? '' : ' slot-off'}${on && own ? ' filled' : ''}`}>
+                     className={`slot-row${on ? '' : ' slot-off'}${on && own.length ? ' filled' : ''}`}>
                   <input type="checkbox" className="slot-toggle" checked={on}
                          title={on ? 'skip this document' : 'include this document'}
                          disabled={running}
@@ -449,10 +465,12 @@ export function IngestForm({
                       ))}
                     </select>
                   </label>
-                  <SlotFileArea on={on} running={running} file={own}
+                  <SlotFileArea on={on} running={running} files={own}
                                 accept={acceptOf(opt)}
-                                onFile={(f) =>
-                                  setExtraFiles((prev) => ({ ...prev, [st]: f }))} />
+                                onAdd={(fs) =>
+                                  setExtraFiles((prev) => ({ ...prev, [st]: [...(prev[st] ?? []), ...fs] }))}
+                                onRemove={(i) =>
+                                  setExtraFiles((prev) => ({ ...prev, [st]: (prev[st] ?? []).filter((_, j) => j !== i) }))} />
                   <button className="btn-reject" title="remove this slot"
                           disabled={running} onClick={() => onRemoveSlot(st)}>
                     remove
@@ -514,8 +532,8 @@ export function IngestForm({
         <div className="ingest-result">
           <h3 className="ledger-h">Ingested</h3>
           <div className="stat-chips">
-            {result.files.map((f) => (
-              <span key={f.bronze_file_id}
+            {result.files.map((f, i) => (
+              <span key={`${f.bronze_file_id}-${i}`}
                     className={`chip${f.outcome === 'registered' ? ' chip-settled' : ''}`}>
                 {f.original_name} · {fileOutcomeLabel(f.outcome)}
               </span>
@@ -532,13 +550,17 @@ export function IngestForm({
               data tabs' “Ingestion” filter.
             </p>
           )}
-          {result.selfcheck && result.selfcheck.passed !== false && (
-            <p className="selfcheck-line">
-              <span className="tick">✓ parse verified</span> — statement states{' '}
-              {result.selfcheck.stated_count} credits / {inr(result.selfcheck.stated_total)};
-              parsed {result.selfcheck.parsed_count} / {inr(result.selfcheck.parsed_total)}
+          {(result.selfchecks?.length
+            ? result.selfchecks
+            : result.selfcheck ? [{ ...result.selfcheck, original_name: null }] : []
+          ).filter((c) => c.passed !== false).map((c, i) => (
+            <p key={i} className="selfcheck-line">
+              <span className="tick">✓ parse verified</span>
+              {c.original_name ? ` — ${c.original_name} states ` : ' — statement states '}
+              {c.stated_count} credits / {inr(c.stated_total)};
+              parsed {c.parsed_count} / {inr(c.parsed_total)}
             </p>
-          )}
+          ))}
         </div>
       )}
     </section>
