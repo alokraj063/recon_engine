@@ -255,7 +255,16 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
                exports are different FILES with the same BILLS; the key is
                per-customer config via source_configs.params["entity_key"],
                threaded as ingest_gold_frames(entity_keys=...) for an ERP with
-               no CO6-like ref; bank txns likewise). Lineage ingest is one
+               no CO6-like ref; bank txns likewise). Under the DEFAULT bill key
+               a blank bill_number ('-', IREPS works contracts) matches on the
+               CO6 ALONE (_bill_key) — before 2026-09-16 it never matched, so
+               every daily export stored one more copy with its own BILL_ONLY
+               exception; a custom entity_key keeps the strict all-columns
+               rule. db/bill_merge.py + scripts/merge_duplicate_bills.py
+               (dry run by default, --apply) repair a database loaded with the
+               old rule: keep the matched (else earliest) copy, move links,
+               DELETE the phantom exceptions and duplicate recovery lines,
+               audit gold.bills_merged. Lineage ingest is one
                generic path for ANY lineage frame (doc_type rides in the data,
                append-only keyed (doc_type, doc_no)); LOCKED bills never
                mutate -> ingest_conflicts. Every ingest also records what the
@@ -449,7 +458,8 @@ One vocabulary shared between log `event_type` and `audit_log.event_type` (see
 after the fact): `bronze.file_registered`/`bronze.file_deduped`,
 `silver.rows_persisted`, `gold.rows_persisted` (snapshot), `gold.ingest_completed`
 (incremental summary), `gold.ingest_conflict` (WARNING — a newer export tried
-to change a LOCKED bill), `run.started`/`run.start_conflict`/`run.succeeded`/
+to change a LOCKED bill), `gold.bills_merged` (scripts/merge_duplicate_bills.py —
+counts + {kept id: [deleted ids]}), `run.started`/`run.start_conflict`/`run.succeeded`/
 `run.failed`/`run.selfcheck_failed`/`run.parse_failed`, `ledger.finalized`
 (summary, not per-match), `ledger.match_accepted`/`ledger.match_rejected`/
 `ledger.match_unlocked` (LOCKED -> OPEN undo; details carry was_locked_by),

@@ -179,6 +179,28 @@ def _ingest_keyed(session, model, df, colmap, base, key_cols_db,
 DEFAULT_BILL_KEY = ("bill_number", "submission_ref")
 DEFAULT_BANK_KEY = ("bank_ref", "value_date", "amount")
 
+# stands in for a blank bill_number in the default bill key (see _bill_key)
+NO_BILL_NUMBER = "<NO_BILL_NUMBER>"
+
+
+def _bill_key(get, key_cols) -> Optional[tuple]:
+    """A bill's entity key, or None when it cannot be matched.
+
+    `get(col)` reads one key column (a gold row attribute or a frame
+    record). Every column must be non-blank — except, under the DEFAULT
+    key, a blank bill_number ('-' is IREPS's works-contract convention):
+    such a bill is identified by its CO6 alone. Every daily export
+    re-reports it, and treating each sighting as a distinct bill stored
+    one copy per export, each raising its own BILL_ONLY exception.
+    Safe because a resubmission gets a NEW CO6, and in the data no CO6
+    is ever shared by two different real bill numbers. A customer's own
+    entity_key keeps the strict all-columns rule. Known gap: a bill
+    exported first as '-' and later WITH a number still inserts anew."""
+    key = tuple(_norm_key(get(c)) for c in key_cols)
+    if tuple(key_cols) == DEFAULT_BILL_KEY and key[0] is None and key[1] is not None:
+        return (NO_BILL_NUMBER, key[1])
+    return key if all(k is not None for k in key) else None
+
 
 def _ingest_bills(session, df, base, stats,
                   key_cols=DEFAULT_BILL_KEY,
@@ -189,14 +211,13 @@ def _ingest_bills(session, df, base, stats,
     via source_configs.params["entity_key"]); LOCKED bills never mutate.
     Returns ({row_seq: gold_bill_id}, set of newly inserted ids).
 
-    A bill whose entity key is blank/placeholder (e.g. bill_number '-',
-    IREPS's works-contract convention) never matches ANY existing bill —
-    correct across different files (each is a genuinely distinct, un-
-    linkable bill), but that same rule made replaying the SAME bronze
+    A blank bill_number under the default key matches on CO6 alone
+    (_bill_key). A bill whose key is STILL unusable (e.g. no CO6 either)
+    never matches any existing bill, which made replaying the SAME bronze
     file non-idempotent: it kept trying to insert that row again and hit
     the (bronze_file_id, row_seq) uniqueness constraint. `existing_file_
     rows` ({row_seq: id} already owned by THIS bronze file) catches that:
-    a blank-keyed row already sitting at this row_seq means this exact
+    an unkeyed row already sitting at this row_seq means this exact
     ingest already ran, so it's reused instead of reinserted."""
     customer_id = base["customer_id"]
     existing_file_rows = existing_file_rows or {}
@@ -204,9 +225,10 @@ def _ingest_bills(session, df, base, stats,
     existing = {}
     for row in session.execute(
             select(GoldBill).where(GoldBill.customer_id == customer_id)
+            .order_by(GoldBill.bronze_file_id, GoldBill.row_seq)
     ).scalars():
-        key = tuple(_norm_key(getattr(row, c)) for c in key_cols)
-        if all(k is not None for k in key):
+        key = _bill_key(lambda c: getattr(row, c), key_cols)
+        if key is not None:
             existing.setdefault(key, row)
 
     columns = GoldBill.__table__.columns
@@ -218,8 +240,8 @@ def _ingest_bills(session, df, base, stats,
         # frame side of the entity identity — MUST track the canonical gold
         # names; a stale name here silently re-inserts every bill on every
         # ingest (rec.get returns None, no error)
-        key = tuple(_norm_key(rec.get(c)) for c in key_cols)
-        row = existing.get(key) if all(k is not None for k in key) else None
+        key = _bill_key(rec.get, key_cols)
+        row = existing.get(key) if key is not None else None
         if row is None:
             if seq in existing_file_rows:
                 ids[seq] = existing_file_rows[seq]

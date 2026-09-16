@@ -3,14 +3,18 @@ Regression: replaying the SAME bronze file (identical bytes re-ingested,
 e.g. a user re-uploading a file they already ingested) must be a safe
 no-op even when some of its rows have a blank/placeholder natural key.
 
-Bug: bill_number '-' (IREPS's works-contract convention), a blank
-bank_ref, or a blank lineage doc_no all normalise to no usable entity
-key, so entity-key matching correctly never merges them ACROSS two
+Bug: a blank bank_ref or a blank lineage doc_no normalises to no usable
+entity key, so entity-key matching never merges them ACROSS two
 different files — but that same rule meant a second ingest of the exact
 same file tried to insert those rows again, hitting the
 (bronze_file_id, row_seq) UNIQUE constraint with a raw IntegrityError.
 `existing_file_rows` in db/ingest.py closes that gap: a blank-keyed row
 already sitting at this row_seq for THIS bronze file is reused instead.
+
+Bills are different: bill_number '-' (IREPS's works-contract convention)
+matches on its CO6 alone under the default key (db/ingest._bill_key), so
+a '-' bill re-reported by a later export is ONE bill — see the
+*_merges_on_co6_* tests below.
 """
 
 import shutil
@@ -158,31 +162,115 @@ def test_replayed_bills_file_with_blank_keys_is_idempotent(customer, tmp_path):
     assert total == 4, "replay must not duplicate rows"
 
 
-def test_blank_key_bill_still_inserts_fresh_in_a_different_file(customer, tmp_path):
-    """The fix must not over-merge: the SAME blank key in a genuinely
-    DIFFERENT bronze file is still a distinct, newly-inserted bill."""
-    pk, bz = customer["pk"], customer["bronze"]
-
+def _second_bills_bronze(customer, tmp_path, name="second_bills.txt"):
     with SessionLocal() as s:
-        c = s.get(Customer, pk)
-        p = tmp_path / "second_bills.txt"
-        p.write_text("second-file-bytes")
-        other_bronze = register_file(s, c, "bill_status", p, "second_bills.txt").id
+        c = s.get(Customer, customer["pk"])
+        p = tmp_path / name
+        p.write_text(name + uuid.uuid4().hex)
+        bid = register_file(s, c, "bill_status", p, name).id
         s.commit()
+    return bid
+
+
+def _bill_count(pk):
+    with SessionLocal() as s:
+        return s.execute(select(func.count()).select_from(GoldBill)
+                         .where(GoldBill.customer_id == pk)).scalar()
+
+
+def test_blank_number_bill_merges_on_co6_across_files(customer, tmp_path):
+    """A '-' bill re-reported by a DIFFERENT daily export is the same bill
+    when its CO6 matches: it is updated, never stored again. Before the
+    fix every export added a copy, and each copy raised its own BILL_ONLY
+    exception (19 bills stored 57 times in real data)."""
+    pk, bz = customer["pk"], customer["bronze"]
+    other_bronze = _second_bills_bronze(customer, tmp_path)
 
     with SessionLocal() as s:
         ingest_gold_frames(s, pk, {"bills": _bills_frame()}, {"bills": bz["bills"]})
         s.commit()
+    later = _bills_frame()
+    later.loc[0, "bill_status"] = "PAYMENT MADE"
     with SessionLocal() as s:
-        _ids, stats = ingest_gold_frames(
-            s, pk, {"bills": _bills_frame()}, {"bills": other_bronze})
+        _ids, stats = ingest_gold_frames(s, pk, {"bills": later}, {"bills": other_bronze})
         s.commit()
-    assert stats["rows_inserted"] == 3, "a different file's blank-key bills must still insert"
+    assert stats["rows_inserted"] == 0, "a re-reported '-' bill must not be stored again"
+    assert stats["bills_updated"] == 1 and stats["rows_reused"] == 2
+    assert _bill_count(pk) == 3
 
     with SessionLocal() as s:
-        total = s.execute(select(func.count()).select_from(GoldBill)
-                          .where(GoldBill.customer_id == pk)).scalar()
-    assert total == 6
+        b = s.execute(select(GoldBill).where(GoldBill.customer_id == pk,
+                                             GoldBill.submission_ref == "CO6-0")).scalar_one()
+        assert b.bill_status == "PAYMENT MADE"
+        # both files still REPORTED it
+        assert s.execute(select(func.count()).select_from(GoldFileRow)
+                         .where(GoldFileRow.gold_row_id == b.id)).scalar() == 2
+
+
+def test_blank_number_bills_with_different_co6_stay_distinct(customer, tmp_path):
+    """No over-merge: '-' bills are one bill only when the CO6 agrees
+    (a resubmission gets a new CO6 and stays its own attempt)."""
+    pk, bz = customer["pk"], customer["bronze"]
+    other_bronze = _second_bills_bronze(customer, tmp_path)
+
+    with SessionLocal() as s:
+        ingest_gold_frames(s, pk, {"bills": _bills_frame()}, {"bills": bz["bills"]})
+        s.commit()
+    resubmitted = _bills_frame()
+    resubmitted["submission_ref"] = [f"CO6-NEW-{i}" for i in range(3)]
+    with SessionLocal() as s:
+        _ids, stats = ingest_gold_frames(
+            s, pk, {"bills": resubmitted}, {"bills": other_bronze})
+        s.commit()
+    assert stats["rows_inserted"] == 3
+    assert _bill_count(pk) == 6
+
+
+def test_custom_entity_key_keeps_strict_blank_rule(customer, tmp_path):
+    """The CO6 fallback belongs to the DEFAULT key only: a customer's own
+    entity_key still refuses to match on a blank column."""
+    pk, bz = customer["pk"], customer["bronze"]
+    other_bronze = _second_bills_bronze(customer, tmp_path)
+    keys = {"bills": ["bill_number", "contract_no"]}
+
+    with SessionLocal() as s:
+        ingest_gold_frames(s, pk, {"bills": _bills_frame()}, {"bills": bz["bills"]},
+                           entity_keys=keys)
+        s.commit()
+    with SessionLocal() as s:
+        _ids, stats = ingest_gold_frames(
+            s, pk, {"bills": _bills_frame()}, {"bills": other_bronze}, entity_keys=keys)
+        s.commit()
+    assert stats["rows_inserted"] == 3
+    assert _bill_count(pk) == 6
+
+
+def test_blank_number_recoveries_ride_with_the_first_copy_only(customer, tmp_path):
+    """Recovery lines attach to a NEW bill only, so a re-reported '-' bill
+    must not bring a second set of lines (real data: 157 lines on copies)."""
+    pk, bz = customer["pk"], customer["bronze"]
+    other_bronze = _second_bills_bronze(customer, tmp_path)
+
+    def frames():
+        bills = _bills_frame(n=1)
+        rec = ensure_schema(pd.DataFrame([
+            {"bill_number": "-", "submission_ref": "CO6-0",
+             "recovery_head": "IT", "recovery_amt": 10.0}]), "recoveries")
+        rec["row_seq"] = [0]
+        rec["bill_row_seq"] = [0]
+        return {"bills": bills, "recoveries": rec}
+
+    with SessionLocal() as s:
+        ingest_gold_frames(s, pk, frames(), {"bills": bz["bills"], "recoveries": bz["bills"]})
+        s.commit()
+    with SessionLocal() as s:
+        ingest_gold_frames(s, pk, frames(), {"bills": other_bronze, "recoveries": other_bronze})
+        s.commit()
+    with SessionLocal() as s:
+        n = s.execute(select(func.count()).select_from(GoldRecovery)
+                      .where(GoldRecovery.customer_id == pk)).scalar()
+    assert _bill_count(pk) == 1
+    assert n == 1
 
 
 def test_replayed_bank_file_with_blank_bank_ref_is_idempotent(customer, tmp_path):
