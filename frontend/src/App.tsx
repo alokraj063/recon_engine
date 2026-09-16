@@ -16,9 +16,9 @@ import { AuditTrailView } from './components/AuditTrailView'
 import { CommandCenter } from './components/CommandCenter'
 import { ErrorBanner } from './components/ErrorBanner'
 import { ExceptionQueue } from './components/ExceptionQueue'
-import { GoldTable } from './components/GoldTable'
+import { GoldTable, type GoldIntent } from './components/GoldTable'
 import { IngestForm } from './components/IngestForm'
-import { LedgerView } from './components/LedgerView'
+import { LedgerView, type LedgerIntent } from './components/LedgerView'
 import { MatchedTable } from './components/MatchedTable'
 import { ReconcileForm } from './components/ReconcileForm'
 import { RunPicker, runLabel } from './components/RunPicker'
@@ -179,6 +179,14 @@ export default function App() {
   // match_ledger id the Analyst queue should highlight (set by the
   // Exception queue's "Decide in Analyst queue" link)
   const [ledgerFocus, setLedgerFocus] = useState<string | null>(null)
+  // filters the Analyst queue should ARRIVE with, set by a Command
+  // Center heading (see LedgerIntent). Same shape as ledgerFocus above:
+  // an arrival instruction the view clears once it has applied it.
+  const [ledgerIntent, setLedgerIntent] = useState<LedgerIntent | null>(null)
+  // the same, for a Command Center figure that lives in a gold table
+  // (e.g. "IREPS credits" -> Bank Transactions filtered by credit scope)
+  const [goldIntent, setGoldIntent] = useState<GoldIntent | null>(null)
+  const clearGoldIntent = useCallback(() => setGoldIntent(null), [])
 
   const primary = selectedRuns?.[0]?.payload ?? null
   const selection = selectedRuns?.map((r) => r.runId) ?? []
@@ -213,6 +221,25 @@ export default function App() {
     setCustomerIdState(key)
     localStorage.setItem(CUSTOMER_KEY, key)
   }
+
+  // The remembered customer comes from localStorage, which outlives the
+  // database — after a reset (or on another backend) it can name a customer
+  // that no longer exists, and every customer-scoped call then 400s. Once
+  // the real list arrives, fall back to 'default' (else the first customer).
+  const loadCustomers = useCallback(() => {
+    fetchCustomers()
+      .then((cs) => {
+        if (!cs.length) return
+        setCustomers(cs)
+        setCustomerIdState((cur) => {
+          if (cs.some((c) => c.key === cur)) return cur
+          const next = cs.find((c) => c.key === 'default')?.key ?? cs[0].key
+          localStorage.setItem(CUSTOMER_KEY, next)
+          return next
+        })
+      })
+      .catch(() => {})
+  }, [])
 
   const labelFor = useCallback(
     (runId: string) => {
@@ -255,7 +282,7 @@ export default function App() {
   const hashRestore = useRef(!!(parseHash().run || parseHash().runs))
 
   useEffect(() => {
-    fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})
+    loadCustomers()
     // restore the selection named in the hash WITHOUT changing the view —
     // the view was already read from the hash, so a refresh stays put
     const { run, runs } = parseHash()
@@ -502,8 +529,7 @@ export default function App() {
             customers={customers}
             customerId={customerId}
             onCustomerChange={setCustomerId}
-            onCustomersChanged={() =>
-              fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})}
+            onCustomersChanged={loadCustomers}
             onIngested={onIngested}
           />
           {restoring && <p className="footer-note">Restoring run…</p>}
@@ -517,6 +543,11 @@ export default function App() {
             customerId={customerId}
             onCustomerChange={setCustomerId}
             onNavigate={setView}
+            onOpenQueue={(intent) => { setLedgerIntent(intent); setView('ledger') }}
+            onOpenGold={(intent) => {
+              setGoldIntent(intent)
+              setView(`gold_${intent.frame}` as View)
+            }}
             refreshKey={ingestEpoch + ledgerEpoch + (selectedRuns?.length ?? 0)}
           />
         )}
@@ -546,6 +577,8 @@ export default function App() {
             customerId={customerId}
             focusId={ledgerFocus}
             onFocusHandled={() => setLedgerFocus(null)}
+            intent={ledgerIntent}
+            onIntentHandled={() => setLedgerIntent(null)}
             onGoToReconcile={() => setView('reconcile')}
           />
         )}
@@ -584,7 +617,8 @@ export default function App() {
             {dataHead(dataPage, false)}
             <div className="view-card">
               <GoldTable key={`${customerId}:${goldFrame}:${ingestEpoch}`}
-                         customerId={customerId} frame={goldFrame} />
+                         customerId={customerId} frame={goldFrame}
+                         intent={goldIntent} onIntentHandled={clearGoldIntent} />
             </div>
           </>
         )}

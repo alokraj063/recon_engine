@@ -21,7 +21,7 @@ import {
 import { ColumnFilter } from './filters/ColumnFilter'
 import { FilterChips, type FilterChip } from './filters/FilterChips'
 import { FilterPopover } from './filters/FilterPopover'
-import { buildOptions } from './filters/facets'
+import { buildOptions, deSnake, facetKey } from './filters/facets'
 
 type Evidence = Row | 'loading' | 'missing' | 'manual'
 
@@ -62,6 +62,45 @@ function DateRangeFilter({ from, to, onChange }: {
   )
 }
 
+/**
+ * What a Command Center heading asks this queue to show on arrival.
+ *
+ * Every field maps onto a filter the queue ALREADY owns, deliberately:
+ * the preset lands as a removable FilterChip, so an analyst can see why
+ * the table is narrowed and clear it in one click. A preset that could
+ * not be expressed as a visible chip would read as a broken page.
+ * An empty array means "clear that filter" (`[]` = every value).
+ */
+export interface LedgerIntent {
+  /** matches → Status (OPEN | LOCKED | REJECTED) */
+  matchStatus?: string[]
+  /** exceptions → Status (OPEN | RESOLVED) */
+  excStatus?: string[]
+  /** exceptions → Type (BANK_ONLY | BILL_ONLY) */
+  excType?: string[]
+  /** exceptions → the BANK_ONLY gap code (see gapOf) */
+  excGap?: string[]
+  /** exceptions → Scope "Needs action": true hides other receipts
+   *  (UNRECOGNISED_RECEIPT) and credits awaiting data (AWAITING_STATUS /
+   *  AWAITING_BILL_DATA) — exactly the rows db/overview.open_in_scope
+   *  leaves out; false clears it */
+  excOpenWork?: boolean
+  /** which of the two tables to scroll to once it has rendered */
+  section?: 'matches' | 'exceptions'
+  /** the Command Center's date window (yyyy-mm-dd, '' = unbounded),
+   *  applied on the SAME dates db/overview counts with: a match by its
+   *  credit's value date, an exception by its credit's value date or its
+   *  bill's due date. Always sent, so an "All time" arrival clears it. */
+  from?: string
+  to?: string
+}
+
+/** The date db/overview windows an exception on: BANK_ONLY by the
+ *  credit's value date, BILL_ONLY by advice -> order -> submission. */
+function excDay(e: LedgerException): string {
+  return ((e.txn ? e.txn.value_date : e.bill?.due_date) ?? '').slice(0, 10)
+}
+
 interface Props {
   customerId: string
   /** match_ledger id to highlight + scroll to (arriving from the
@@ -70,6 +109,12 @@ interface Props {
   /** called once the arrival flash has played so the parent clears
    *  focusId — the highlight is transient, not a selection */
   onFocusHandled?: () => void
+  /** filters to preset + section to land on, set by a Command Center
+   *  heading (see LedgerIntent) */
+  intent?: LedgerIntent | null
+  /** called once the preset has been applied so the parent clears it —
+   *  an intent is an arrival instruction, not a selection */
+  onIntentHandled?: () => void
   /** the empty-ledger notice links back to Reconcile */
   onGoToReconcile: () => void
 }
@@ -94,20 +139,46 @@ function resolvedBy(e: LedgerException, runs: RunListItem[]): string {
   }
 }
 
-function excLine(e: LedgerException): string {
-  if (e.txn) {
-    return [e.txn.bank_ref, inr(e.txn.amount), e.txn.value_date, e.txn.zone,
-            e.gap_type ? e.gap_type.replace(/_/g, ' ').toLowerCase() : null]
-      .filter(Boolean).join(' · ')
-  }
-  if (e.bill) {
-    return [e.bill.bill_number, inr(e.bill.net_payable_amount), e.bill.bill_status, e.bill.zone]
-      .filter(Boolean).join(' · ')
-  }
-  return '—'
+/** The BANK_ONLY gap code, derived exactly the way
+ *  db/overview.unrecognised_clause derives it server-side: the stored
+ *  code, or — on rows written before that column existed — a blank
+ *  zone_guess, which is precisely what made the default mapping assign
+ *  UNRECOGNISED_RECEIPT. Keeping the rules in step is what lets each
+ *  Match performance row link to a queue filter selecting the same
+ *  credits it counted. BILL_ONLY rows have no gap. */
+/** gap codes the Open exceptions tile does not count (db/overview.
+ *  open_in_scope): each is reported once elsewhere on the Command Center */
+const NOT_OPEN_WORK = new Set(['UNRECOGNISED_RECEIPT', 'AWAITING_STATUS', 'AWAITING_BILL_DATA'])
+
+export function gapOf(e: LedgerException): string | null {
+  if (e.exception_type !== 'BANK_ONLY') return null
+  // the server's read-time reading wins: it is the only thing that can
+  // tell the two awaiting buckets apart from a plain missing bill
+  if (e.gap_detail) return e.gap_detail
+  if (e.gap_type) return e.gap_type
+  return e.txn?.zone ? 'SIGNAL_BILL_NOT_FOUND' : 'UNRECOGNISED_RECEIPT'
 }
 
-export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcile }: Props) {
+/** One exception's side-neutral cells — the same Ref / Zone / Date /
+ *  Amount spine as the Command Center's "Largest open exceptions". */
+function excCells(e: LedgerException) {
+  if (e.txn) {
+    // gapOf, not gap_type: the stored code cannot tell the two awaiting
+    // readings apart, so a row opened from "Awaiting bill data" would sit
+    // under a chip naming a reason the row itself denied. Server label
+    // first (per-customer wording), else the code spelled out.
+    const gap = gapOf(e)
+    return { ref: e.txn.bank_ref, sub: null, zone: e.txn.zone, date: e.txn.value_date,
+             amount: e.txn.amount, gap: gap ? (e.gap_label ?? deSnake(gap)) : null }
+  }
+  return { ref: e.bill?.bill_number ?? null, sub: e.bill?.bill_status ?? null,
+           zone: e.bill?.zone ?? null, date: e.bill?.due_date ?? null,
+           amount: e.bill?.net_payable_amount ?? null, gap: null }
+}
+
+export function LedgerView({
+  customerId, focusId, onFocusHandled, intent, onIntentHandled, onGoToReconcile,
+}: Props) {
   const [data, setData] = useState<LedgerViewData | null>(null)
   // the customer's runs: labels for run ids + the run filter's choices
   const [runs, setRuns] = useState<RunListItem[]>([])
@@ -116,16 +187,32 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
   // column filters — multi-select; empty = every value. OPEN is the
   // exceptions default so the queue opens on what needs work
   const [excFilter, setExcFilter] = useState<string[]>(['OPEN'])
+  const [excTypeFilter, setExcTypeFilter] = useState<string[]>([])
+  const [excGapFilter, setExcGapFilter] = useState<string[]>([])
+  // "Needs action": drop other receipts (never matchable) and credits
+  // awaiting data (cannot have matched yet) — the Open exceptions tile
+  const [excOpenWork, setExcOpenWork] = useState(false)
+  // the window a Command Center heading arrived with — a separate filter
+  // from When (the match's created_at), because the figures it came from
+  // are dated by the credit / bill, not by the match row
+  const [windowFrom, setWindowFrom] = useState('')
+  const [windowTo, setWindowTo] = useState('')
   const [confFilter, setConfFilter] = useState<string[]>([])
   const [matchStatusFilter, setMatchStatusFilter] = useState<string[]>([])
   const [sortAsc, setSortAsc] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const scrolled = useRef<string | null>(null)
+  // an arriving intent names a table; the scroll waits for it to render
+  const [pendingScroll, setPendingScroll] = useState<'matches' | 'exceptions' | null>(null)
+  const matchesRef = useRef<HTMLDivElement>(null)
+  const excRef = useRef<HTMLHeadingElement>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [evidence, setEvidence] = useState<Record<string, Evidence>>({})
   // the OPEN exception an analyst is pairing by hand (one picker at a time)
   const [picking, setPicking] = useState<string | null>(null)
+  // exception rows expanded to show their advice / narrative
+  const [excOpen, setExcOpen] = useState<Record<string, boolean>>({})
 
   /** Pull the match's evidence row from its creating run's persisted
    *  payload (fetchRun is cached + legacy-normalized). Review matches
@@ -167,6 +254,47 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId, data])
 
+  // Arriving from a Command Center heading: apply its preset onto this
+  // view's own filters, so the narrowing shows as a removable chip
+  // rather than as an inexplicably short table. The run filter is
+  // cleared because a Command Center tile counts the whole customer, not
+  // one run — leaving a stale run filter on would silently double-narrow.
+  // NOTE the tile's own date window is deliberately NOT carried over: it
+  // is a server-side window over gold/ledger dates, while this view's
+  // When filter is client-side over the match's created_at. Forcing one
+  // into the other would make the counts agree by filtering on the wrong
+  // date, so the queue lands on an honest superset instead.
+  useEffect(() => {
+    if (!intent) return
+    if (intent.matchStatus) {
+      setMatchStatusFilter(intent.matchStatus)
+      setConfFilter([])
+      setDateFrom('')
+      setDateTo('')
+    }
+    if (intent.excStatus) setExcFilter(intent.excStatus)
+    if (intent.excType) setExcTypeFilter(intent.excType)
+    if (intent.excGap) setExcGapFilter(intent.excGap)
+    if (intent.excOpenWork !== undefined) setExcOpenWork(intent.excOpenWork)
+    if (intent.from !== undefined || intent.to !== undefined) {
+      setWindowFrom(intent.from ?? '')
+      setWindowTo(intent.to ?? '')
+    }
+    setRunFilter(EMPTY_RUN_FILTER)
+    if (intent.section) setPendingScroll(intent.section)
+    onIntentHandled?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intent])
+
+  // ...and scroll once the table it named actually exists (the ledger
+  // arrives async; a section with no rows renders nothing at all)
+  useEffect(() => {
+    if (!pendingScroll || !data) return
+    const el = pendingScroll === 'exceptions' ? excRef.current : matchesRef.current
+    el?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    setPendingScroll(null)
+  }, [pendingScroll, data])
+
   const load = useCallback(() => {
     setError(null)
     fetchLedger(customerId)
@@ -177,8 +305,18 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
 
   useEffect(load, [load])
 
-  // a run filter belongs to one customer's run history
-  useEffect(() => setRunFilter(EMPTY_RUN_FILTER), [customerId])
+  // a run filter and an arrival window belong to one customer — reset on
+  // a real SWITCH only. Effects also run on mount, and this one runs after
+  // the intent effect above, so an unconditional reset wiped the window a
+  // Command Center link had just set (Open exceptions 18 -> 1,855 rows).
+  const shownCustomer = useRef(customerId)
+  useEffect(() => {
+    if (shownCustomer.current === customerId) return
+    shownCustomer.current = customerId
+    setRunFilter(EMPTY_RUN_FILTER)
+    setWindowFrom('')
+    setWindowTo('')
+  }, [customerId])
 
   const runSet = useMemo(() => runFilterSet(runFilter, runs), [runFilter, runs])
 
@@ -206,6 +344,10 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
   const allExceptions = data?.exceptions ?? []
   const exceptions = allExceptions.filter(
     (e) => (excFilter.length === 0 || excFilter.includes(e.status))
+      && (excTypeFilter.length === 0 || excTypeFilter.includes(e.exception_type))
+      && (excGapFilter.length === 0 || excGapFilter.includes(facetKey(gapOf(e))))
+      && (!excOpenWork || !NOT_OPEN_WORK.has(gapOf(e) ?? ''))
+      && (!(windowFrom || windowTo) || inDayRange(excDay(e), windowFrom, windowTo))
       && (!runSet || (!!e.first_seen_run_id && runSet.has(e.first_seen_run_id))
           || (!!e.resolved_by_run_id && runSet.has(e.resolved_by_run_id))),
   )
@@ -223,20 +365,26 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
       // a MANUAL match belongs to no run: a run filter hides it
       if (runSet && (!m.run_id || !runSet.has(m.run_id))) return false
       if (!inDayRange(localDay(m.created_at), dateFrom, dateTo)) return false
+      if ((windowFrom || windowTo)
+          && !inDayRange((m.txn?.value_date ?? '').slice(0, 10), windowFrom, windowTo)) return false
       return true
     })
     return rows.sort((a, b) => sortAsc
       ? a.created_at.localeCompare(b.created_at)
       : b.created_at.localeCompare(a.created_at))
-  }, [data, confFilter, matchStatusFilter, runSet, dateFrom, dateTo, sortAsc])
+  }, [data, confFilter, matchStatusFilter, runSet, dateFrom, dateTo, windowFrom, windowTo, sortAsc])
 
+  const windowOn = !!(windowFrom || windowTo)
+  const windowValues = windowOn ? [`${windowFrom || '…'} → ${windowTo || '…'}`] : []
+  const clearWindow = () => { setWindowFrom(''); setWindowTo('') }
   const matchesFiltered = confFilter.length > 0 || matchStatusFilter.length > 0
-    || !!dateFrom || !!dateTo || runSet !== null
+    || !!dateFrom || !!dateTo || windowOn || runSet !== null
   const allMatches = data?.matches ?? []
   const matchChips: FilterChip[] = [
     { key: 'when', label: 'When',
       values: dateFrom || dateTo ? [`${dateFrom || '…'} → ${dateTo || '…'}`] : [],
       onRemove: () => { setDateFrom(''); setDateTo('') } },
+    { key: 'credit-date', label: 'Credit date', values: windowValues, onRemove: clearWindow },
     { key: 'confidence', label: 'Confidence', values: confFilter,
       onRemove: (v) => setConfFilter(v === undefined ? [] : confFilter.filter((x) => x !== v)) },
     { key: 'status', label: 'Status', values: matchStatusFilter, format: titleCase,
@@ -245,6 +393,13 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
   const excChips: FilterChip[] = [
     { key: 'exc-status', label: 'Status', values: excFilter, format: titleCase,
       onRemove: (v) => setExcFilter(v === undefined ? [] : excFilter.filter((x) => x !== v)) },
+    { key: 'exc-type', label: 'Type', values: excTypeFilter, format: deSnake,
+      onRemove: (v) => setExcTypeFilter(v === undefined ? [] : excTypeFilter.filter((x) => x !== v)) },
+    { key: 'exc-gap', label: 'Gap', values: excGapFilter, format: deSnake,
+      onRemove: (v) => setExcGapFilter(v === undefined ? [] : excGapFilter.filter((x) => x !== v)) },
+    { key: 'exc-scope', label: 'Scope', values: excOpenWork ? ['Needs action'] : [],
+      onRemove: () => setExcOpenWork(false) },
+    { key: 'exc-date', label: 'Date', values: windowValues, onRemove: clearWindow },
   ]
   const runNote = data && runSet
     ? `${visibleMatches.length} of ${data.matches.length} matches`
@@ -278,7 +433,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
 
         {data && data.matches.length > 0 && (
           <>
-            <div className="ledger-filter-row">
+            <div className="ledger-filter-row" ref={matchesRef}>
               <FilterChips chips={matchChips} />
               {matchesFiltered && (
                 <span className="ledger-count-note">
@@ -447,46 +602,83 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
 
         {data && allExceptions.length > 0 && (
           <>
-            <h3 className="ledger-h">
-              Exceptions
-              {runSet && (
-                <span className="chip-note"> {exceptions.length} of {allExceptions.length} </span>
-              )}
-            </h3>
+            <h3 className="ledger-h" ref={excRef}>Exceptions</h3>
             <div className="ledger-filter-row">
               <FilterChips chips={excChips} />
+              {exceptions.length !== allExceptions.length && (
+                <span className="ledger-count-note">
+                  {exceptions.length} of {allExceptions.length} exceptions
+                </span>
+              )}
             </div>
             {exceptions.length === 0 ? (
               <p className="frame-note">
-                Nothing with status {excFilter.map(titleCase).join(' / ').toLowerCase()}
+                Nothing matching {[
+                  excFilter.length ? `status ${excFilter.map(titleCase).join(' / ').toLowerCase()}` : null,
+                  excTypeFilter.length ? `type ${excTypeFilter.map(deSnake).join(' / ').toLowerCase()}` : null,
+                  excGapFilter.length ? `gap ${excGapFilter.map(deSnake).join(' / ').toLowerCase()}` : null,
+                  excOpenWork ? 'needs action' : null,
+                ].filter(Boolean).join(' · ') || 'these filters'}
                 {runSet ? ' for the selected runs' : ''} —{' '}
-                <button className="link-btn" onClick={() => setExcFilter([])}>show all</button>
+                <button className="link-btn"
+                        onClick={() => { setExcFilter([]); setExcTypeFilter([]); setExcGapFilter([]); setExcOpenWork(false); clearWindow() }}>show all</button>
               </p>
             ) : (
               <div className="ledger-wrap">
-              <table className="ledger">
+              <table className="ledger ledger-exceptions">
                 <thead>
                   <tr>
-                    <th>Type</th>
+                    <th>
+                      Type
+                      <ColumnFilter label="Type" value={excTypeFilter} onApply={setExcTypeFilter}
+                                    format={deSnake}
+                                    options={buildOptions(allExceptions, (e) => e.exception_type)} />
+                    </th>
                     <th>
                       Status
                       <ColumnFilter label="Status" value={excFilter} onApply={setExcFilter}
                                     format={titleCase}
                                     options={buildOptions(allExceptions, (e) => e.status)} />
                     </th>
-                    <th>Detail</th>
+                    <th>Ref</th>
+                    <th>Zone</th>
+                    <th>Date</th>
+                    <th className="th-num">Amount</th>
+                    <th>
+                      Gap
+                      <ColumnFilter label="Gap" value={excGapFilter} onApply={setExcGapFilter}
+                                    format={deSnake}
+                                    options={buildOptions(allExceptions, gapOf)} />
+                    </th>
                     <th>First seen (run)</th>
                     <th>Resolved by</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {exceptions.map((e) => (
+                  {exceptions.map((e) => {
+                    const c = excCells(e)
+                    const open = !!excOpen[e.id]
+                    return (
                     <Fragment key={e.id}>
-                    <tr>
-                      <td><span className={`stamp stamp-${e.exception_type}`}>{e.exception_type.replace('_', ' ')}</span></td>
+                    <tr className={`xq-row${open ? ' open' : ''}`}
+                        onClick={() => setExcOpen((x) => ({ ...x, [e.id]: !x[e.id] }))}>
+                      <td>
+                        <ChevronRight className="chev chev-ic" size={14}
+                                      strokeWidth={2} aria-hidden />
+                        <span className={`stamp stamp-${e.exception_type}`}>{e.exception_type.replace('_', ' ')}</span>
+                      </td>
                       <td><span className={`stamp stamp-${e.status}`}>{e.status}</span></td>
-                      <td className="oneline">{excLine(e)}</td>
+                      <td>
+                        <div className="party-cell">
+                          <span className="party-ref">{c.ref ?? '—'}</span>
+                          {c.sub && <span className="party-meta">{c.sub}</span>}
+                        </div>
+                      </td>
+                      <td>{c.zone ?? '—'}</td>
+                      <td className="date">{c.date || '—'}</td>
+                      <td className="num">{inr(c.amount)}</td>
+                      <td className="exc-gap">{c.gap ?? '—'}</td>
                       <td className="run-cell" title={e.first_seen_run_id ?? undefined}>
                         {runLabelFor(runs, e.first_seen_run_id)}
                       </td>
@@ -496,7 +688,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
                                    .filter(Boolean).join(' · ') || undefined}>
                         {resolvedBy(e, runs)}
                       </td>
-                      <td>
+                      <td onClick={(ev) => ev.stopPropagation()}>
                         {e.status === 'OPEN' && (
                           <button className="btn-open"
                                   title={e.exception_type === 'BANK_ONLY'
@@ -508,9 +700,39 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
                         )}
                       </td>
                     </tr>
+                    {open && (
+                      <tr className="xq-detail">
+                        <td colSpan={10}>
+                          {e.gap_action && <div className="detail-advice">{e.gap_action}</div>}
+                          <div className="detail-grid">
+                            {e.txn ? (
+                              <>
+                                <div className="detail-section">Bank credit — no bill behind it</div>
+                                <div>
+                                  <div className="dt-label">Narrative</div>
+                                  <div className="dt-value">{e.txn.narrative || '—'}</div>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="detail-section">Bill — advised but no credit landed</div>
+                                <div>
+                                  <div className="dt-label">Submission ref</div>
+                                  <div className="dt-value">{e.bill?.submission_ref ?? '—'}</div>
+                                </div>
+                                <div>
+                                  <div className="dt-label">Bill status</div>
+                                  <div className="dt-value">{e.bill?.bill_status ?? '—'}</div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {picking === e.id && (
                       <tr className="xq-detail">
-                        <td colSpan={6}>
+                        <td colSpan={10}>
                           <ManualMatchPicker
                             customerId={customerId}
                             anchor={e}
@@ -522,7 +744,8 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
                       </tr>
                     )}
                     </Fragment>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
               </div>

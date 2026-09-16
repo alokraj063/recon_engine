@@ -4,6 +4,8 @@ import type { CustomerInfo, Overview } from '../types'
 import { fetchOperatingUnits, fetchOverview } from '../api'
 import { inr } from '../format'
 import type { View } from './Sidebar'
+import type { LedgerIntent } from './LedgerView'
+import type { GoldIntent } from './GoldTable'
 import {
   DEFAULT_DATE_FILTER, DateFilter, resolveWindow, unitsLabel, windowLabel,
   type DateFilterValue,
@@ -24,8 +26,68 @@ interface Props {
   customerId: string
   onCustomerChange: (key: string) => void
   onNavigate: (v: View) => void
+  /** open the Analyst queue already filtered to what the heading names */
+  onOpenQueue: (intent: LedgerIntent) => void
+  /** open a Data page (Current scope) already filtered to the figure */
+  onOpenGold: (intent: GoldIntent) => void
   refreshKey: number
 }
+
+/* The presets each heading carries into the Analyst queue. They are
+   plain filter values, so each one arrives as a removable chip there —
+   the analyst sees WHY the table is narrowed. `[]` clears a filter. */
+const Q_SETTLED: LedgerIntent = { section: 'matches', matchStatus: ['LOCKED'] }
+const Q_REVIEW: LedgerIntent = { section: 'matches', matchStatus: ['OPEN'] }
+const Q_ALL_MATCHES: LedgerIntent = { section: 'matches', matchStatus: [] }
+/* Open exceptions are the work that needs an analyst (db/overview.
+   open_in_scope): other receipts can never match a bill and credits
+   awaiting data cannot have matched yet, so each is counted once
+   elsewhere ("other receipts excluded", "awaiting data") and never
+   here. excGap is always set so a gap chip left over from an earlier
+   arrival cannot narrow these. */
+const Q_OPEN_EXC: LedgerIntent = {
+  section: 'exceptions', excStatus: ['OPEN'], excType: [], excGap: [], excOpenWork: true,
+}
+/** the unmatched credits — the credit half of Open exceptions */
+const Q_UNMATCHED: LedgerIntent = {
+  section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
+  excGap: ['SIGNAL_BILL_NOT_FOUND'], excOpenWork: false,
+}
+/** the IREPS credits the rate excuses: bill still in flight, or its
+ *  export not ingested yet */
+const Q_AWAITING: LedgerIntent = {
+  section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
+  excGap: ['AWAITING_STATUS', 'AWAITING_BILL_DATA'], excOpenWork: false,
+}
+const Q_RESOLVED_EXC: LedgerIntent = {
+  section: 'exceptions', excStatus: ['RESOLVED'], excType: [], excGap: [], excOpenWork: false,
+}
+/** open exceptions of ONE side — the tile's "N bank only" / "M bill only" */
+const qExcSide = (side: string): LedgerIntent =>
+  ({ section: 'exceptions', excStatus: ['OPEN'], excType: [side], excGap: [], excOpenWork: true })
+/* Open bank-only exceptions narrowed to ONE gap code (LedgerView.gapOf).
+   Each key row below owns a distinct code, so a row opens exactly the
+   credits it counted. Two of the four are stored on the exception
+   (UNRECOGNISED_RECEIPT | SIGNAL_BILL_NOT_FOUND); the awaiting pair is
+   computed per row by db/overview.gap_details and ridden to the client
+   as `gap_detail` — without that they collapse into
+   SIGNAL_BILL_NOT_FOUND and all three rows land on the same table. */
+const qExcGap = (gap: string): LedgerIntent =>
+  ({ section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
+     excGap: [gap], excOpenWork: false })
+
+/* The same, for figures whose rows live in the gold bank table. The
+   credit funnel levels are the read-time `credit_scope` column
+   (db/overview.credit_scopes), whose codes partition every credit
+   exactly the way the overview counts them. */
+const G_CREDITS: GoldIntent = { frame: 'bank', filters: { used_in_recon: ['true'] } }
+const G_IN_SCOPE: GoldIntent = {
+  frame: 'bank',
+  filters: { credit_scope: ['RECOGNISED', 'AWAITING_STATUS', 'AWAITING_BILL_DATA'] },
+}
+const G_RECOGNISED: GoldIntent = { frame: 'bank', filters: { credit_scope: ['RECOGNISED'] } }
+/** every bill in the window — the Gold pool figure */
+const G_BILLS: GoldIntent = { frame: 'bills', filters: {} }
 
 const pct = (v: number | null | undefined) =>
   v === null || v === undefined ? '—' : `${(v * 100).toFixed(1)}%`
@@ -53,34 +115,102 @@ function MatchDonut({ rate }: { rate: number | null }) {
   )
 }
 
-function Meter({ label, count, total, tone }: {
-  label: string; count: number; total: number; tone: string
-}) {
-  const w = total > 0 ? (count / total) * 100 : 0
+/* One bucket of the credit funnel. The buckets inside a section are
+   mutually exclusive and sum to that section's total, so the bar above
+   them is an honest part-to-whole — unlike the five overlapping meters
+   this replaces, where AUTO_HIGH + USER simply WAS `settled` and USER
+   already contained the manual matches.
+   Colour: only the acted-on buckets carry a fill, the remainder is left
+   as bare track. That holds every bar to a pair that survives colour-
+   blind simulation — green/gold is OKLab dE 13.7 (deuteranopia), 20.8
+   (normal vision), while the obvious third fill, gold/sienna, is 1.7
+   and 12.4 and would be unreadable. */
+interface Bucket {
+  key: string
+  label: string
+  count: number
+  /** '' = no fill: this bucket IS the bar's remainder, keyed hollow */
+  tone: string
+  /** why the bucket exists, on hover — three lines instead of three paragraphs */
+  hint: string
+  value?: number
+  /** sits BELOW the bar's total, excluded from it (the "not rated" credits) */
+  aside?: boolean
+  onOpen?: () => void
+}
+
+/** Part-to-whole bar: filled buckets in order, remainder left as track. */
+function CompositionBar({ buckets, total }: { buckets: Bucket[]; total: number }) {
   return (
-    <div className="cc-meter-row">
-      <span className="cc-meter-label">{label}</span>
-      <div className="cc-meter-track">
-        <div className={`cc-meter-fill ${tone}`} style={{ width: `${w}%` }} />
-      </div>
-      <span className="cc-meter-count">{count}</span>
+    <div className="cc-comp" role="img"
+         aria-label={buckets.map((b) => `${b.label} ${b.count}`).join(', ')}>
+      {buckets.filter((b) => b.tone && b.count > 0).map((b) => (
+        <span key={b.key} className={`cc-comp-seg ${b.tone}`}
+              title={`${b.label} · ${b.count.toLocaleString('en-IN')}`}
+              style={{ width: `${total > 0 ? (b.count / total) * 100 : 0}%` }} />
+      ))}
     </div>
   )
 }
 
-function PipeNode({ label, state, value }: {
+/** The bar's legend row — identity in text, never colour alone. */
+function KeyRow({ bucket, total }: { bucket: Bucket; total: number }) {
+  const body = (
+    <>
+      <span className={`cc-key-dot ${bucket.tone || 'seg-track'}`} />
+      <span className="cc-key-label">{bucket.label}</span>
+      <span className="cc-key-n">{bucket.count.toLocaleString('en-IN')}</span>
+      <span className="cc-key-pct">
+        {bucket.aside ? 'not rated' : pct(total > 0 ? bucket.count / total : null)}
+      </span>
+      {bucket.value !== undefined && <span className="cc-key-v">{inr(bucket.value)}</span>}
+    </>
+  )
+  const cls = `cc-key-row${bucket.aside ? ' is-aside' : ''}`
+  return bucket.onOpen
+    ? <button type="button" className={`${cls} is-link`} title={bucket.hint}
+              onClick={bucket.onOpen}>{body}</button>
+    : <div className={cls} title={bucket.hint}>{body}</div>
+}
+
+/** The level of the funnel a bar divides, and its total. Both levels
+ *  count CREDITS, so the label opens the page the credits live on — the
+ *  precise outcome drill-downs (settled, in review) stay on the key rows
+ *  below, where the filter can actually be exact. */
+function SectionHead({ label, hint, count, value, onOpen }: {
+  label: string; hint: string; count: number; value?: number
+  onOpen?: () => void
+}) {
+  return (
+    <div className="cc-sec-head" title={hint}>
+      {onOpen
+        ? <button type="button" className="cc-sec-label cc-h-link" onClick={onOpen}>
+            {label}
+          </button>
+        : <span className="cc-sec-label">{label}</span>}
+      <span className="cc-sec-n">{count.toLocaleString('en-IN')}</span>
+      {value !== undefined && <span className="cc-sec-v">{inr(value)}</span>}
+    </div>
+  )
+}
+
+function PipeNode({ label, state, value, onOpen }: {
   label: string; state: 'done' | 'active' | 'idle'; value?: string
+  /** omit to leave the stage as a plain label */
+  onOpen?: () => void
 }) {
   return (
     <div className={`pipe-node pipe-${state}`}>
       <span className="pipe-dot">{state === 'done' ? '✓' : value ?? '·'}</span>
-      <span className="pipe-label">{label}</span>
+      {onOpen
+        ? <button type="button" className="pipe-label cc-h-link" onClick={onOpen}>{label}</button>
+        : <span className="pipe-label">{label}</span>}
     </div>
   )
 }
 
 export function CommandCenter({
-  customers, customerId, onCustomerChange, onNavigate, refreshKey,
+  customers, customerId, onCustomerChange, onNavigate, onOpenQueue, onOpenGold, refreshKey,
 }: Props) {
   const [data, setData] = useState<Overview | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -118,26 +248,135 @@ export function CommandCenter({
   const filtered = !!data?.filters_applied
   const quiet = filtered && data && data.gold.credits === 0 && data.gold.bills === 0
 
-  const openTotal = data
-    ? data.open_exceptions.BANK_ONLY + data.open_exceptions.BILL_ONLY
-    : 0
+  // IREPS-only: other receipts are counted once, in Match performance
+  const openInScope = data?.open_in_scope
   const credits = data?.gold.credits ?? 0
   // unrecognised receipts (no match signal) are not matchable: every
-  // performance figure is over the RECOGNISED credits, and they are
-  // reported on their own line
+  // performance figure is over the RECOGNISED credits. This IS
+  // out_of_scope_credits — the panel below shows it once, as "Other
+  // receipts"; here it only qualifies the bank-only exception count
   const unrecognised = data?.unrecognised_credits ?? 0
-  const recognised = data?.recognised_credits ?? Math.max(0, credits - unrecognised)
+  // the matching bill is still in flight in the source system, so the
+  // credit could not have matched — reported, not rated (same treatment
+  // as an unrecognised receipt, different reason)
+  const awaitingStatus = data?.awaiting_status_credits ?? 0
+  // the bill export covering this credit's advice has not been ingested
+  // yet — excused only until it goes stale (server-side cap)
+  const awaitingBillData = data?.awaiting_bill_data_credits ?? 0
+  const awaiting = awaitingStatus + awaitingBillData
+  // Open exceptions shows "N credits + M bills": only the credits add up
+  // to Received, so the two halves are kept apart
+  const billOnly = data?.open_in_scope.bill_only ?? 0
+  const openCreditValue = Math.max(0,
+    (data?.open_in_scope.value ?? 0) - (data?.open_value.bill_only ?? 0))
+  const recognised = data?.recognised_credits
+    ?? Math.max(0, credits - unrecognised - awaitingStatus - awaitingBillData)
+  // every credit is either this source's money (IREPS) or a receipt from
+  // somewhere else; the rate's denominator is carved out of the first
+  const inScope = data?.in_scope_credits ?? Math.max(0, credits - unrecognised)
+  const outOfScope = data?.out_of_scope_credits ?? unrecognised
   const unmatched = data ? Math.max(0, recognised - data.matched_credits) : 0
   const settled = data?.settled_credits ?? data?.matches.LOCKED ?? 0
   const manual = data?.manual_matches ?? 0
   // locked_by.USER counts every user-locked match, manual ones included
   const accepted = Math.max(0, (data?.locked_by.USER ?? 0) - manual)
+  // a CREDIT count, like every other figure in the performance panel —
+  // matches.OPEN is a MATCH count and belongs to the tiles above
+  const inReview = data ? Math.max(0, data.matched_credits - settled) : 0
+  // the panel's top line: the server reports the two halves of the
+  // window's money, never the whole, so add them back up here
+  const creditsValue =
+    data && data.in_scope_value !== undefined && data.out_of_scope_value !== undefined
+      ? data.in_scope_value + data.out_of_scope_value
+      : undefined
+
+  // A heading routes to where its figure actually LIVES. Every number on
+  // this page comes from /api/overview — live gold + ledger state — so the
+  // targets are the Analyst queue and the Data pages' CURRENT scope
+  // (gold_*), never a run-scoped frame, which may be empty or from an
+  // unrelated run. Opening a gold page deliberately does not touch the
+  // user's recon.dataScope preference (App owns that, and only the scope
+  // switch itself writes it).
+
+  /** Every trip to the queue carries this page's date window, so the
+   *  table lands on the same credits/bills the figure counted (the queue
+   *  applies it on the dates db/overview uses). "All time" sends '' and
+   *  clears any window left over from an earlier visit. Operating units
+   *  are NOT carried: the ledger payload has no unit to filter on. */
+  const openQueue = (intent: LedgerIntent) => {
+    const win = resolveWindow(filter)
+    onOpenQueue({ ...intent, from: win.from, to: win.to })
+  }
+
+  /** The same for a Data page: the window rides along, applied on the
+   *  date db/overview counted that frame with (GoldTable.DATE_FIELD). */
+  const openGold = (intent: GoldIntent) => {
+    const win = resolveWindow(filter)
+    onOpenGold({ ...intent, from: win.from, to: win.to })
+  }
+
+  /** A heading whose figure is a gold table: opens it windowed + filtered. */
+  const goldLink = (text: string, intent: GoldIntent) => (
+    <button type="button" className="cc-h-link" onClick={() => openGold(intent)}>
+      {text}
+    </button>
+  )
+
+  /** A heading whose figure lives in the ledger: same link, but it also
+   *  carries the filter that makes the queue show THAT figure. */
+  const queueLink = (text: string, intent: LedgerIntent) => (
+    <button type="button" className="cc-h-link" onClick={() => openQueue(intent)}>
+      {text}
+    </button>
+  )
+
+  /* The credit funnel exactly as db/overview.py computes it:
+       credits       = other receipts + IREPS credits
+       IREPS credits = awaiting status + awaiting bill data + recognised
+       recognised    = settled + in review + unmatched
+     Each section below renders one level, which is why no figure needs to
+     appear twice (unrecognised_credits IS out_of_scope_credits — the old
+     panel printed that one number as both "Unrecognised receipts" and the
+     "other receipts" half of "Credit mix"). */
+  const scopeBuckets: Bucket[] = [
+    { key: 'ireps', label: 'IREPS credits', count: inScope, tone: 'seg-ireps',
+      value: data?.in_scope_value,
+      hint: "credits carrying this customer's match signal — the money a bill can settle; opens the credits themselves",
+      onOpen: () => openGold(G_IN_SCOPE) },
+    { key: 'other', label: 'Other receipts', count: outOfScope, tone: '',
+      value: data?.out_of_scope_value,
+      hint: 'no match signal in the narrative — interest, sweeps and payers outside IREPS; never matchable, so never in the rate',
+      onOpen: () => openQueue(qExcGap('UNRECOGNISED_RECEIPT')) },
+  ]
+  const outcomeBuckets: Bucket[] = [
+    { key: 'settled', label: 'Settled', count: settled, tone: 'seg-settled',
+      hint: 'credits with a LOCKED match — auto-locked on HIGH confidence, accepted by a user, or matched by hand',
+      onOpen: () => openQueue(Q_SETTLED) },
+    { key: 'review', label: 'In review', count: inReview, tone: 'seg-review',
+      hint: 'credits whose match is still open — accept or reject it to settle them',
+      onOpen: () => openQueue(Q_REVIEW) },
+    { key: 'unmatched', label: 'Unmatched', count: unmatched, tone: '',
+      hint: 'recognised credits with no match at all — the real gap',
+      onOpen: () => openQueue(qExcGap('SIGNAL_BILL_NOT_FOUND')) },
+  ]
+  const notRated: Bucket[] = [
+    { key: 'awaiting_status', label: 'Awaiting source status', tone: '', aside: true,
+      count: awaitingStatus,
+      hint: 'the same-amount bill is still passed/registered, not advised — the credit could not have matched yet',
+      onOpen: () => openQueue(qExcGap('AWAITING_STATUS')) },
+    { key: 'awaiting_bill_data', label: 'Awaiting bill data', tone: '', aside: true,
+      count: awaitingBillData,
+      hint: `valued after the latest bill export${data?.bills_covered_through
+        ? ` (advices through ${data.bills_covered_through})` : ''} — excused until it goes stale`,
+      onOpen: () => openQueue(qExcGap('AWAITING_BILL_DATA')) },
+  ].filter((b) => b.count > 0)
 
   return (
     <section className="intake cc">
       <div className="ingest-head">
         <div>
           <h2 className="page-title">Command Center</h2>
+          {data && <p className="cc-scope">Showing {scope}</p>}
         </div>
         <span className="cc-head-right">
           <DateFilter value={filter} onChange={setFilter} units={units} unitCounts={unitCounts} />
@@ -174,48 +413,115 @@ export function CommandCenter({
               and {data.filters_applied.bank_only_unassigned === 1 ? 'is' : 'are'} hidden by the unit filter — tick “Unassigned” to include them.
             </p>
           )}
+          {/* Read left to right: what came in -> what is done -> what
+              needs you. Each headline names its own unit (credits /
+              matches / exceptions), and the window is stated once, above,
+              instead of on every tile. */}
           <div className="tiles cc-tiles">
             <div className="tile tone-neutral">
-              <div className="tile-label">Gold pool</div>
-              <div className="tile-count">{data.gold.bills.toLocaleString('en-IN')}</div>
-              <div className="tile-amount">bills · {data.gold.credits} credits</div>
-              <div className="tile-delta">{data.gold.lineage_docs.toLocaleString('en-IN')} lineage docs · {scope}</div>
-            </div>
-            <div className="tile">
-              <div className="tile-label">Settled</div>
-              <div className="tile-count">{settled.toLocaleString('en-IN')}</div>
-              <div className="tile-amount">{pct(data.match_rate)} of recognised credits · {windowLabel(filter)}</div>
-              <div className="tile-delta">{data.matches.OPEN} awaiting review · {data.matches.REJECTED} rejected</div>
-            </div>
-            <div className="tile tone-review">
-              <div className="tile-label">Analyst queue</div>
-              <div className="tile-count">{data.matches.OPEN}</div>
-              <div className="tile-amount">matches awaiting review</div>
-              <div className="tile-delta">accept or reject to settle · {scope}</div>
-            </div>
-            <div className="tile tone-bank">
-              <div className="tile-label">Open exceptions</div>
-              <div className="tile-count">{openTotal.toLocaleString('en-IN')}</div>
-              <div className="tile-amount">{inr(data.open_value.total)}</div>
+              <div className="tile-label">{goldLink('Received', G_IN_SCOPE)}</div>
+              {/* the headline is the IREPS money — every tile to the right
+                  is IREPS-only; what was left out is named underneath */}
+              <div className="tile-count">
+                {inScope.toLocaleString('en-IN')}
+                <span className="tile-unit"> IREPS credits</span>
+              </div>
+              {data.in_scope_value !== undefined && (
+                <div className="tile-amount">{inr(data.in_scope_value)}</div>
+              )}
               <div className="tile-delta">
-                {data.open_exceptions.BANK_ONLY} bank only
-                {unrecognised > 0 && ` (${unrecognised} unrecognised)`}
-                {' · '}{data.open_exceptions.BILL_ONLY.toLocaleString('en-IN')} bill only · {scope}
+                {/* the same receipts Match performance shows as "Other
+                    receipts" — never matchable */}
+                {queueLink(
+                  `${outOfScope.toLocaleString('en-IN')} other receipts excluded`,
+                  qExcGap('UNRECOGNISED_RECEIPT'))}
+                {' · '}
+                {goldLink(`${credits.toLocaleString('en-IN')} credits in window`, G_CREDITS)}
+              </div>
+              <div className="tile-delta">
+                {goldLink(`${data.gold.bills.toLocaleString('en-IN')} bills`, G_BILLS)}
+                {' · '}{data.gold.lineage_docs.toLocaleString('en-IN')} lineage docs
               </div>
             </div>
-            <div className="tile tone-bill">
-              <div className="tile-label">Resolved</div>
-              <div className="tile-count">{data.resolved_exceptions}</div>
-              <div className="tile-amount">exceptions closed by runs or decisions</div>
-              <div className="tile-delta">{scope}</div>
+            {/* Settled + Needs review + Open exceptions + Awaiting data
+                = Received: one CREDIT bucket per tile, the same partition
+                as Match performance (recognised = settled + in review +
+                unmatched; IREPS credits = recognised + awaiting). Open
+                exceptions reads "N credits + M bills": the bills are named
+                beside the credits, never summed into them. */}
+            <div className="tile">
+              <div className="tile-label">{queueLink('Settled', Q_SETTLED)}</div>
+              <div className="tile-count">
+                {settled.toLocaleString('en-IN')}
+                <span className="tile-unit"> credits</span>
+              </div>
+              <div className="tile-amount">
+                {pct(data.match_rate)} of {recognised.toLocaleString('en-IN')} recognised credits
+              </div>
+              <div className="tile-delta">
+                auto {data.locked_by.AUTO_HIGH.toLocaleString('en-IN')}
+                {' · '}accepted {accepted.toLocaleString('en-IN')}
+                {' · '}manual {manual.toLocaleString('en-IN')}
+              </div>
+            </div>
+            <div className="tile tone-review">
+              <div className="tile-label">{queueLink('Needs review', Q_REVIEW)}</div>
+              <div className="tile-count">
+                {inReview.toLocaleString('en-IN')}
+                <span className="tile-unit"> credits</span>
+              </div>
+              <div className="tile-amount">
+                {data.matches.OPEN.toLocaleString('en-IN')} {data.matches.OPEN === 1 ? 'match' : 'matches'} to accept or reject
+              </div>
+            </div>
+            <div className="tile tone-bank">
+              <div className="tile-label">{queueLink('Open exceptions', Q_OPEN_EXC)}</div>
+              {/* the credits count toward Received; the bills sit beside
+                  them in the headline but outside the credit sum */}
+              <div className="tile-count">
+                {unmatched.toLocaleString('en-IN')}
+                <span className="tile-unit"> {unmatched === 1 ? 'credit' : 'credits'}</span>
+                {' + '}
+                {billOnly.toLocaleString('en-IN')}
+                <span className="tile-unit"> {billOnly === 1 ? 'bill' : 'bills'}</span>
+              </div>
+              <div className="tile-amount">{inr(data.open_in_scope.value)}</div>
+              <div className="tile-delta">
+                {queueLink(`${inr(openCreditValue)} credits`, Q_UNMATCHED)}
+                {' · '}
+                {queueLink(`${inr(data.open_value.bill_only)} bills`, qExcSide('BILL_ONLY'))}
+              </div>
+              <div className="tile-delta">
+                {queueLink(
+                  `${data.resolved_exceptions.toLocaleString('en-IN')} resolved in window`,
+                  Q_RESOLVED_EXC)}
+              </div>
+            </div>
+            <div className="tile tone-neutral">
+              <div className="tile-label">{queueLink('Awaiting data', Q_AWAITING)}</div>
+              <div className="tile-count">
+                {awaiting.toLocaleString('en-IN')}
+                <span className="tile-unit"> credits</span>
+              </div>
+              {openInScope?.awaiting_value !== undefined && (
+                <div className="tile-amount">{inr(openInScope.awaiting_value)}</div>
+              )}
+              <div className="tile-delta">
+                {queueLink(`${awaitingStatus.toLocaleString('en-IN')} source status`,
+                  qExcGap('AWAITING_STATUS'))}
+                {' · '}
+                {queueLink(`${awaitingBillData.toLocaleString('en-IN')} bill data`,
+                  qExcGap('AWAITING_BILL_DATA'))}
+              </div>
+              <div className="tile-delta">not rated · clears as the data arrives</div>
             </div>
           </div>
 
           <div className="cc-grid">
             <div className="cc-panel">
               <div className="cc-panel-head">
-                <h3 className="ledger-h">Largest open exceptions</h3>
-                <button className="btn-open" onClick={() => onNavigate('ledger')}>
+                <h3 className="ledger-h">{queueLink('Largest open exceptions', Q_OPEN_EXC)}</h3>
+                <button className="btn-open" onClick={() => openQueue(Q_OPEN_EXC)}>
                   open Analyst queue →
                 </button>
               </div>
@@ -236,7 +542,8 @@ export function CommandCenter({
                   </thead>
                   <tbody>
                     {data.top_exceptions.map((e) => (
-                      <tr key={e.id} className="cc-row" onClick={() => onNavigate('ledger')}>
+                      <tr key={e.id} className="cc-row"
+                          onClick={() => openQueue(qExcSide(e.exception_type))}>
                         <td><span className={`stamp stamp-${e.exception_type}`}>
                           {e.exception_type.replace('_', ' ')}</span></td>
                         <td className="mono-cell">{e.ref ?? '—'}</td>
@@ -252,31 +559,38 @@ export function CommandCenter({
 
             <div className="cc-panel">
               <div className="cc-panel-head">
-                <h3 className="ledger-h">Match performance</h3>
+                <h3 className="ledger-h">{queueLink('Match performance', Q_ALL_MATCHES)}</h3>
               </div>
               <MatchDonut rate={data.match_rate} />
-              <p className="cc-settled-split">
-                <strong>{settled.toLocaleString('en-IN')}</strong> settled ·{' '}
-                {data.locked_by.AUTO_HIGH.toLocaleString('en-IN')} auto-locked ·{' '}
-                {accepted.toLocaleString('en-IN')} accepted by user ·{' '}
-                {manual.toLocaleString('en-IN')} matched by user
-              </p>
-              <div className="cc-meters">
-                <Meter label="Auto-locked (HIGH)" count={data.locked_by.AUTO_HIGH}
-                       total={recognised} tone="fill-green" />
-                <Meter label="Locked by user" count={data.locked_by.USER}
-                       total={recognised} tone="fill-green-soft" />
-                <Meter label="Matched by user (manual)" count={data.manual_matches ?? 0}
-                       total={recognised} tone="fill-green-soft" />
-                <Meter label="Open review" count={data.matches.OPEN}
-                       total={recognised} tone="fill-gold" />
-                <Meter label="Unmatched credits" count={unmatched}
-                       total={recognised} tone="fill-sienna" />
-              </div>
-              <p className="frame-note cc-unrec">
-                Unrecognised receipts · <strong>{unrecognised.toLocaleString('en-IN')}</strong>
-                {' '}— no match signal in the narrative; not counted in the rate
-                ({recognised.toLocaleString('en-IN')} recognised of {credits.toLocaleString('en-IN')} credits)
+
+              <SectionHead label="Credits in window" count={credits}
+                           value={creditsValue}
+                           hint="every credit the reconciliation saw in this window"
+                           onOpen={() => openGold(G_CREDITS)} />
+              <CompositionBar buckets={scopeBuckets} total={credits} />
+              {scopeBuckets.map((b) => (
+                <KeyRow key={b.key} bucket={b} total={credits} />
+              ))}
+
+              <SectionHead label="Recognised" count={recognised}
+                           hint="IREPS credits that could already have matched — the rate's denominator"
+                           onOpen={() => openGold(G_RECOGNISED)} />
+              <CompositionBar buckets={outcomeBuckets} total={recognised} />
+              {outcomeBuckets.map((b) => (
+                <KeyRow key={b.key} bucket={b} total={recognised} />
+              ))}
+              {notRated.length > 0 && (
+                <div className="cc-aside">
+                  {notRated.map((b) => (
+                    <KeyRow key={b.key} bucket={b} total={recognised} />
+                  ))}
+                </div>
+              )}
+
+              <p className="cc-perf-foot">
+                settled by · auto {data.locked_by.AUTO_HIGH.toLocaleString('en-IN')}
+                {' · '}accepted {accepted.toLocaleString('en-IN')}
+                {' · '}manual {manual.toLocaleString('en-IN')}
               </p>
             </div>
           </div>
@@ -294,21 +608,26 @@ export function CommandCenter({
               </span>
             </div>
             <div className="pipe">
-              <PipeNode label="Ingest" state={data.gold.bank_txns > 0 ? 'done' : 'active'} />
+              <PipeNode label="Ingest" state={data.gold.bank_txns > 0 ? 'done' : 'active'}
+                        onOpen={() => onNavigate('ingest')} />
               <span className="pipe-link" />
               <PipeNode label="Gold layer"
                         state={data.gold.bills > 0 ? 'done' : 'idle'}
-                        value={data.gold.bills ? undefined : '·'} />
+                        value={data.gold.bills ? undefined : '·'}
+                        onOpen={() => onNavigate('gold_bills')} />
               <span className="pipe-link" />
-              <PipeNode label="Reconcile" state={data.last_run ? 'done' : 'idle'} />
+              <PipeNode label="Reconcile" state={data.last_run ? 'done' : 'idle'}
+                        onOpen={() => onNavigate('reconcile')} />
               <span className="pipe-link" />
               <PipeNode label="Analyst review"
                         state={data.matches.OPEN > 0 ? 'active' : data.last_run ? 'done' : 'idle'}
-                        value={data.matches.OPEN > 0 ? String(data.matches.OPEN) : undefined} />
+                        value={data.matches.OPEN > 0 ? String(data.matches.OPEN) : undefined}
+                        onOpen={() => openQueue(Q_REVIEW)} />
               <span className="pipe-link" />
               <PipeNode label="Resolved"
                         state={data.resolved_exceptions > 0 ? 'done' : 'idle'}
-                        value={data.resolved_exceptions > 0 ? String(data.resolved_exceptions) : undefined} />
+                        value={data.resolved_exceptions > 0 ? String(data.resolved_exceptions) : undefined}
+                        onOpen={() => openQueue(Q_RESOLVED_EXC)} />
             </div>
           </div>
         </>

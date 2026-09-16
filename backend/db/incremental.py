@@ -674,10 +674,15 @@ def _txn_info(t: Optional[GoldBankTxn]) -> Optional[dict]:
 def _bill_info(b: Optional[GoldBill]) -> Optional[dict]:
     if b is None:
         return None
+    # the due-date chain db/overview windows BILL_ONLY rows on (advice ->
+    # order -> submission), so the Analyst queue can apply a Command
+    # Center date window to the same rows
+    due = b.payment_advice_date or b.payment_order_date or b.submission_date
     return {"bill_number": b.bill_number,
             "submission_ref": b.submission_ref,
             "net_payable_amount": b.net_payable_amount,
-            "zone": b.zone, "bill_status": b.bill_status}
+            "zone": b.zone, "bill_status": b.bill_status,
+            "due_date": due.isoformat() if due else None}
 
 
 def ledger_view(customer_id: int) -> dict:

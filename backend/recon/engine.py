@@ -59,6 +59,19 @@ BANK_ACTIONS = {
         "No match signal recognised in the credit's narrative. Likely a "
         "receipt from outside the reconciled source. Route to the "
         "relevant sub-ledger.",
+    # The engine never STAMPS these two: they are read-time readings of a
+    # SIGNAL_BILL_NOT_FOUND row (db/overview.gap_details) for credits that
+    # could not have matched yet. Their copy lives here so a tenant edits
+    # every gap sentence in one place, and so the queue can say WHY a row
+    # the Command Center excused from the match rate is sitting there.
+    "AWAITING_STATUS":
+        "A bill of this amount exists but the source system has not "
+        "advised payment yet — the status lags the money. No action "
+        "until a later export refreshes it.",
+    "AWAITING_BILL_DATA":
+        "This credit is valued after the latest bill export ingested, so "
+        "the bill covering it cannot be here yet. Ingest the next export "
+        "before treating it as a gap.",
 }
 
 # Matches that stand but need a human eye. They stay in the matched frame
@@ -111,6 +124,8 @@ BILL_ACTIONS = {
 DEFAULT_LABELS = {
     "SIGNAL_BILL_NOT_FOUND": "Signal matched, bill missing",
     "UNRECOGNISED_RECEIPT": "Unrecognised receipt",
+    "AWAITING_STATUS": "Awaiting source status",
+    "AWAITING_BILL_DATA": "Awaiting bill data",
     "ADVICE_DATE": "Advised, not received",
     "PAYMENT_ORDER_NO_ADVICE": "Payment order issued, no advice",
     "ZERO_NET_NOTHING_DUE": "Nil payable",

@@ -50,6 +50,12 @@ CASES = [
     ("NEFT FROM EPAO CUSTOMS DUTY DRAWBAC SBINN52026070290772430", None),
     ("NEFT FROM DELHI METRO RAIL CORPORAT ICICN22026072416933801", None),
     ("NEFT FROM ICICI SECURITIES LTD ICICN2", None),          # ICI.. is not ICF
+    # a company name that looks like "<station> <zone>…" is not a railway
+    # payment unless it came through SBI (IREPS pays via SBI): MEDHA SERVO
+    # used to read as SER through Rule A and the legacy search alike
+    ("NEFT FROM MEDHA SERVO DRIVES PVT LT ICICN22026082144212285 ICIB VENDOR PAYMENTS", None),
+    ("NEFT FROM 0701HQ SERSET OF MK FOR D ICICN22026081881167091 ICIB", None),
+    ("NEFT FROM 0701HQ SERSET OF MK FOR D SBINN52026081881167091 SBOI /ATTN", "SER"),
     ("", None),
     (None, None),
 ]

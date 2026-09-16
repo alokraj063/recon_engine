@@ -215,6 +215,12 @@ _RULE_B = re.compile(r"^(?:\d{4})?(" + "|".join(PRODUCTION_UNITS)
 # the sample statement). Only reached when A and B both miss, which is
 # what retires its known false positive ("…SCREW…" read as SCR).
 _ZONE_RE = re.compile(r"\b(" + "|".join(ZONE_CODES) + r")")
+# IREPS pays through SBI, so every railway NEFT credit carries SBI's NEFT
+# reference ("…SBINN52026081881167091 SBOI /ATTN…"). A NEFT that arrives
+# through any other bank is an ordinary company payment, whose NAME must
+# never be read as a zone: "MEDHA SERVO DRIVES … ICICN2… ICIB" would
+# otherwise match Rule A (and the legacy search) as SER.
+_SBI_NEFT_REF = re.compile(r"\bSBINN\d")
 
 
 def extract_zone_from_narrative(narrative):
@@ -229,13 +235,17 @@ def extract_zone_from_narrative(narrative):
                        '2001MCFaxle mounted disc…'    -> MCF
                        '1301ICF1331000197 90 Sup…'   -> ICF
     Rules are tried in that order (both anchored at the head), then the
-    historical unanchored search as a fallback. Anything else — deposit
-    interest, customs drawback, ordinary vendors — stays None, which the
-    matcher treats as "zone unconfirmed", never as a match.
+    historical unanchored search as a fallback. A NEFT credit that did not
+    come through SBI (no SBI NEFT reference) is not an IREPS payment and
+    gets no zone at all. Anything else — deposit interest, customs
+    drawback, ordinary vendors — stays None, which the matcher treats as
+    "zone unconfirmed", never as a match.
     """
     if not narrative:
         return None
     neft = re.match(r"^NEFT FROM\s+(.*)$", narrative, re.S)
+    if neft and not _SBI_NEFT_REF.search(narrative):
+        return None
     body = neft.group(1) if neft else narrative
     if neft:
         # the anchored rules describe the IREPS payer prefix, which only

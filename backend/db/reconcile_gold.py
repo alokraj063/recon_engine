@@ -165,7 +165,8 @@ def gold_frame(session, frame: str, customer_id: int,
     """One gold table as an engine-shaped frame. Returns
     (df, provenance, total) where provenance[i] = (bronze_file_id,
     row_seq) of frame row i — the caller stamps these onto the serialized
-    records (frame_from_gold deliberately omits them)."""
+    records (frame_from_gold deliberately omits them), plus the row's
+    gold id for read-time enrichment."""
     model, colmap, frame_name, use_ensure = BROWSE_FRAMES[frame]
     where = [model.customer_id == customer_id]
     if bronze_file_id is not None:
@@ -186,7 +187,7 @@ def gold_frame(session, frame: str, customer_id: int,
         .limit(min(limit, GOLD_FRAME_CAP))).scalars())
     df, _ = frame_from_gold(rows, colmap, frame_name,
                             ensure=ensure_schema if use_ensure else None)
-    provenance = [(r.bronze_file_id, r.row_seq) for r in rows]
+    provenance = [(r.bronze_file_id, r.row_seq, r.id) for r in rows]
     return df, provenance, total
 
 

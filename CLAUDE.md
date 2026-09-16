@@ -255,7 +255,16 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
                exports are different FILES with the same BILLS; the key is
                per-customer config via source_configs.params["entity_key"],
                threaded as ingest_gold_frames(entity_keys=...) for an ERP with
-               no CO6-like ref; bank txns likewise). Lineage ingest is one
+               no CO6-like ref; bank txns likewise). Under the DEFAULT bill key
+               a blank bill_number ('-', IREPS works contracts) matches on the
+               CO6 ALONE (_bill_key) — before 2026-09-16 it never matched, so
+               every daily export stored one more copy with its own BILL_ONLY
+               exception; a custom entity_key keeps the strict all-columns
+               rule. db/bill_merge.py + scripts/merge_duplicate_bills.py
+               (dry run by default, --apply) repair a database loaded with the
+               old rule: keep the matched (else earliest) copy, move links,
+               DELETE the phantom exceptions and duplicate recovery lines,
+               audit gold.bills_merged. Lineage ingest is one
                generic path for ANY lineage frame (doc_type rides in the data,
                append-only keyed (doc_type, doc_no)); LOCKED bills never
                mutate -> ingest_conflicts. Every ingest also records what the
@@ -364,7 +373,30 @@ backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/inge
                GET /api/overview (optional ?from=&to=&operating_unit=
                repeatable; "UNASSIGNED" is the bucket for bank-only credits,
                which have no unit — a unit filter without it HIDES them and
-               filters_applied.bank_only_unassigned says how many),
+               filters_applied.bank_only_unassigned says how many; which
+               date each figure windows on is in db/overview.overview's
+               docstring — match counts go by the CREDIT's value_date, not
+               the match's created_at. The credit funnel: credits = other
+               receipts (out_of_scope, UNRECOGNISED_RECEIPT) + IREPS credits
+               (in_scope) = awaiting_status + awaiting_bill_data +
+               recognised (the match rate's denominator). open_in_scope
+               {bank_only, bill_only, count, value, awaiting,
+               awaiting_value} is the Open exceptions tile — open
+               exceptions WITHOUT other receipts (counted once, as
+               out_of_scope) and WITHOUT credits awaiting data (counted
+               once, as awaiting_*_credits, named by `awaiting`), so
+               Settled's "of N" and the tile read one definition;
+               top_exceptions excludes both too;
+               open_exceptions/open_value stay all-inclusive),
+               GET /api/ledger also hands each OPEN BANK_ONLY exception its
+               read-time gap_detail (db/overview.gap_details — the AWAITING_*
+               codes are never stored) + gap_label/gap_action resolved
+               through the customer's copy_overrides, and each bill its
+               due_date (advice -> order -> submission); GET /api/gold/bank
+               adds a read-time credit_scope column (db/overview.
+               credit_scopes: RECOGNISED | AWAITING_STATUS |
+               AWAITING_BILL_DATA | UNRECOGNISED_RECEIPT) so funnel figures
+               can open the table filtered to their own credits,
                GET /api/customers/{key}/operating-units (distinct gold
                bills units + counts), GET /api/ar, GET /api/audit,
                GET /api/ledger/workbook (customer ledger export),
@@ -430,7 +462,8 @@ One vocabulary shared between log `event_type` and `audit_log.event_type` (see
 after the fact): `bronze.file_registered`/`bronze.file_deduped`,
 `silver.rows_persisted`, `gold.rows_persisted` (snapshot), `gold.ingest_completed`
 (incremental summary), `gold.ingest_conflict` (WARNING — a newer export tried
-to change a LOCKED bill), `run.started`/`run.start_conflict`/`run.succeeded`/
+to change a LOCKED bill), `gold.bills_merged` (scripts/merge_duplicate_bills.py —
+counts + {kept id: [deleted ids]}), `run.started`/`run.start_conflict`/`run.succeeded`/
 `run.failed`/`run.selfcheck_failed`/`run.parse_failed`, `ledger.finalized`
 (summary, not per-match), `ledger.match_accepted`/`ledger.match_rejected`/
 `ledger.match_unlocked` (LOCKED -> OPEN undo; details carry was_locked_by),
@@ -448,8 +481,27 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                + lucide-react (nav/button icons — professional stroke set,
                tree-shaken per import; the only other runtime dep);
                IA: "Operate" group — Command Center (default landing; real
-               KPIs/donut/pipeline from GET /api/overview, top exceptions
-               click through to Analyst queue; DateFilter — quick picks
+               KPIs/donut/pipeline from GET /api/overview; every heading,
+               tile subtitle, Match performance row and pipeline stage
+               opens where its figure lives, ALREADY FILTERED to it — a
+               LedgerIntent (Analyst queue: status/type/gap/IREPS-scope
+               filters + the page's date window as from/to, always sent
+               through CommandCenter.openQueue) or a GoldIntent (Data pages,
+               Current scope, e.g. credit_scope, plus the window — always
+               through openGold; Gold pool opens Bills this way). Every
+               preset lands as a
+               visible, removable FilterChip — a narrowing the analyst
+               cannot see or clear reads as a broken page. The tiles are
+               ONE credit partition: Received (IREPS credits) = Settled +
+               Needs review (credits, not matches) + Open exceptions
+               (headline "N credits + M bills" — only the credits
+               count toward the sum; the bills are named beside them) + Awaiting
+               data (status / bill export) — every headline is credits so
+               they add up, guarded in tests/test_awaiting_status.py.
+               Largest open exceptions is the work needing an analyst
+               (open_in_scope: no other receipts, no credits awaiting
+               data, bills included);
+               DateFilter — quick picks
                Today / Yesterday / This month (default) / All / custom +
                operating-unit chips incl. "Unassigned", persisted per
                customer in localStorage, sent as /overview query params;
@@ -508,7 +560,15 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                ONLY — /api/ledger and DB names unchanged; hosts the same
                MatchDecision + ManualMatchPicker, shows MANUAL matches as
                "Matched by user" with their note, exceptions carry a
-               "Resolved by" column, and "⬇ Export ledger" downloads
+               "Resolved by" column — the Exceptions table uses the Command
+               Center's "Largest open exceptions" spine, one column each
+               (Type · Status · Ref · Zone · Date · Amount · Gap · First
+               seen · Resolved by), rows expand to the gap_action advice +
+               narrative, and its filter row mirrors Matches (chips + "N of
+               M"); exception filters are Status / Type / Gap (gapOf — keep
+               it in step with db/overview.unrecognised_clause) / Date /
+               Scope "Needs action" (excOpenWork: hides UNRECOGNISED_RECEIPT
+               and AWAITING_* — the rows open_in_scope leaves out) — and "⬇ Export ledger" downloads
                /api/ledger/workbook; a Run column +
                a RunFilter (components/RunFilter.tsx: mode + run-date range
                + ticked runs, EMPTY = every run, the opposite of RunPicker's
@@ -547,6 +607,10 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                a scope switch in its head. "Current" = GoldTable (shared
                presets in framePresets.ts, refetch-on-mount — no cache,
                gold mutates on ingest) browsing the live gold layer with a
+               date window on Bank (value_date) and Bills (submission_date,
+               else bill_date) — GoldTable.DATE_FIELD, the SAME dates
+               db/overview counts those figures with, so a Command Center
+               link carrying from/to lands on exactly its rows — and a
                per-ingestion filter (per-file rows come from the file's
                gold.file_rows sightings, so a re-export of known bills
                still filters to its own rows); "As of run" = SourceTable
@@ -573,6 +637,7 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
 
 - **The golden master is the refactor gate.** `tests/test_golden.py` diffs the engine's output on the sample documents byte-for-byte against committed CSVs. Any engine/parser/adapter change must keep it green, or regenerate the snapshots explicitly and say why. (Regenerated once on 2026-08-31 for the lineage canonicalization: `bills_enriched`/`queue` dropped the raw RN_*/CR_* columns, `matched`/`queue`/`bills_enriched` gained `Invoice_Date`/`Bill_Reg_Date`, and CRN integer quantities lost a spurious float artifact — verified as a pure drop/add with `scripts/verify_lineage_canonicalization.py`.)
 - **Both sides are sources of truth**, so exceptions run in both directions: `BANK_ONLY` (credit with no bill) and `BILL_ONLY` (advised bill with no credit). The queue deliberately mixes both; bank rows lack bill fields and vice versa by design.
+- **Every credit is counted exactly once in the Command Center funnel.** Other receipts (`UNRECOGNISED_RECEIPT` — no match signal: interest, sweeps, non-IREPS payers) can never match a bill, so they sit outside the match rate AND outside the Open exceptions tile / Largest open exceptions; they appear once, as "Other receipts". Credits awaiting source status or bill data are IREPS money that could not have matched *yet* — excused from the rate AND left out of the Open exceptions tile / Largest open exceptions (named there as "awaiting data" instead; they stay OPEN rows in the ledger, and re-enter the tile on their own once the awaiting-bill-data cap expires). Received's IREPS credits = settled + in review + unmatched + awaiting data, and Open exceptions = unmatched + bill-only. Every figure's drill-down must select the same rows the server counted: `db/overview` clauses, `gap_details`/`credit_scopes` and the frontend's `gapOf` are one definition, so change them together.
 - **Snapshot vs incremental runs.** Snapshot (default) reconciles one statement against one export, results per run. Incremental accumulates: gold rows are **ingestion-owned** (written once per file, entity-upserted across files), the pool carries open exceptions forward, and matches are durable in `match_ledger` — HIGH confidence auto-LOCKs, review confidences stay OPEN until a user accepts/rejects. A LOCKED match's credit and bills never re-enter any pool; rejecting releases both sides. The wide-open expected-window in incremental mode intentionally reports the whole open-bill backlog once — rows persist as OPEN exceptions, not duplicated per run.
 - **A gold row is an ENTITY, so "owns" ≠ "reported".** The entity upsert keeps one row per bill/credit/doc, stamped with the bronze file that FIRST inserted it. A later export that re-reports 34 known bills therefore inserts nothing and owns nothing — before `gold.file_rows` it vanished from the UI entirely ("I ingested a file and the Bills page still shows the old data"), and a bank statement whose credits had all arrived on an earlier one could not even be picked to reconcile. Ingest now records one sighting per row carried; anything that means "this upload's rows" (gold browse filter, `gold_files` counts, statement picker, snapshot/incremental bank pools) goes through `db/gold.py reported_by_file`, which falls back to plain ownership for files ingested before the table existed. Recovery LINES are the one deliberate exception: they ride with a NEW bill only, so a re-export contributes no recovery rows and its recoveries tab is legitimately empty.
 - **Amount is a filter, not a signal.** Pairs are only scored if amounts already agree (indexed on `round(net_payable_amount, 2)`); zone and date break ties. Confidence labels are derived from the raw signals, not by reversing the score. Signal weights are per-customer config, but labels stay signal-derived.

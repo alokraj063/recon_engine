@@ -155,7 +155,7 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
     kpis: [
       { label: 'Locked', live: (o) => n(o?.matches.LOCKED) },
       { label: 'Open reviews', live: (o) => n(o?.matches.OPEN) },
-      { label: 'Open exceptions', live: (o) => n(o ? o.open_exceptions.BANK_ONLY + o.open_exceptions.BILL_ONLY : null) },
+      { label: 'Open exceptions', live: (o) => n(o?.open_in_scope.count) },
     ],
     flowsIn: ['Incremental run results', 'Analyst decisions'],
     flowsOut: ['Future run pools (consumed items excluded)', 'Command Center KPIs'],

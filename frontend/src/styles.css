@@ -451,7 +451,19 @@ table.data td.date, .ledger td.date {
   font-size: var(--fs-note);
   white-space: nowrap;
 }
-.ledger td.oneline { white-space: nowrap; }
+/* Analyst queue exceptions: the Command Center "Largest open exceptions"
+   spine (Type · Ref · Zone · Date · Amount) plus the ledger columns. Every
+   column but Gap (7) stays tight; Gap absorbs the slack and wraps. The
+   advisory sentence lives in the expandable detail row, not the spine. */
+.ledger-exceptions th, .ledger-exceptions td { width: 1%; white-space: nowrap; }
+.ledger-exceptions th:nth-child(7), .ledger-exceptions td.exc-gap {
+  width: auto;
+  white-space: normal;
+  min-width: 18ch;
+}
+.ledger-exceptions th.th-num { text-align: right; }
+.ledger-exceptions td { padding-top: 8px; padding-bottom: 8px; vertical-align: middle; }
+.ledger-exceptions .xq-detail td { white-space: normal; width: auto; }
 .ledger td.num { font-family: var(--font-mono); font-size: var(--fs-body); text-align: right; }
 .ledger tr.indent td:first-child { padding-left: 26px; color: var(--ink-soft); font-size: var(--fs-body); }
 .ledger tr.major td { font-weight: 600; }
@@ -1414,7 +1426,6 @@ tr.active-run td { background: rgba(44, 115, 80, 0.06); }
 }
 .slot-file-area .slot-revert:hover { border-color: var(--green); }
 .slot-file-area input[type='file'] { display: none; }
-.cc-unrec { margin: 10px 0 0; padding: 8px 0 0; border-top: 1px solid var(--rule); }
 /* Reconcile: statement checkbox list (several may be ticked -> one run) */
 .stmt-picker { display: flex; flex-direction: column; gap: 4px; }
 .stmt-list { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; padding-right: 4px; }
@@ -1570,7 +1581,16 @@ tr.active-run td { background: rgba(44, 115, 80, 0.06); }
   color: var(--ink-faint);
 }
 .cc-head-right { display: flex; align-items: flex-end; gap: 10px; }
-.cc-tiles { margin-top: 16px; }
+/* five credit buckets side by side on a laptop; wraps below that */
+.cc-tiles { margin-top: 16px; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); }
+.cc-scope { margin: 2px 0 0; font-size: var(--fs-note); color: var(--ink-faint); }
+/* the unit beside a tile headline ("27 of 31", "3 matches") */
+.tile .tile-count .tile-unit {
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  font-weight: 400;
+  color: var(--ink-soft);
+}
 .tile-delta {
   margin-top: 4px;
   font-size: var(--fs-label);
@@ -1684,6 +1704,27 @@ tr.active-run td { background: rgba(44, 115, 80, 0.06); }
   background: var(--rule-strong);
   margin: 0 4px 20px;
 }
+
+/* Clickable Command Center headings. The button keeps its parent
+   heading's typography and colour in every state (`font`/`color:
+   inherit`), so a tile label still reads as a tile label. Placed AFTER
+   the .pipe rules on purpose: `.pipe-done .pipe-label` has the same
+   specificity as the :hover rule below, so the later one must be ours
+   or a completed stage would not tint on hover. */
+.cc-h-link {
+  background: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+.cc-h-link:hover { color: var(--green-bright); text-decoration: underline; }
+.cc-h-link:focus-visible { outline: 2px solid var(--green-bright); outline-offset: 2px; }
 
 /* ==================================================================== */
 /*  recon-alpha enterprise theme — chrome overrides (end of cascade)    */
@@ -2238,7 +2279,6 @@ table.data td { padding: 6px 8px; }
 .unit-chip.on { color: var(--ink); background: var(--paper-deep); border-color: var(--ink-soft); }
 .cc-filter-note { display: block; margin: 0 0 10px; color: var(--gold); }
 
-.cc-settled-split { margin: 6px 0 10px; text-align: center; font-size: var(--fs-note); color: var(--ink-faint); }
 /* --- column filters: one vocabulary for every table ------------------- */
 /* header icon (faint until a filter is active) */
 .col-filter { position: relative; display: inline-flex; margin-left: 6px; vertical-align: middle; }
@@ -2304,3 +2344,132 @@ table.data td { padding: 6px 8px; }
 .filter-chip-x-all { margin-left: 2px; }
 .ledger-filter-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 6px; }
 .ledger-filter-row .ledger-count-note { margin: 0; }
+
+/* --- Command Center · match performance ------------------------------- */
+/* One bar per level of the credit funnel. Only the acted-on buckets take
+   a fill; a bar's remainder stays bare track, so each bar spends at most
+   two hues and never places --gold beside --sienna (OKLab dE 1.7 under
+   deuteranopia — indistinguishable). Identity is always in the key text
+   next to the swatch, never in the colour alone. */
+.cc-sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 14px 0 7px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  cursor: help;
+}
+.cc-sec-label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-label);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.cc-sec-n {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-h4);
+  font-weight: 600;
+  color: var(--ink);
+}
+.cc-sec-v {
+  flex-basis: 100%;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-faint);
+}
+
+.cc-comp {
+  display: flex;
+  gap: 2px;                      /* surface gap between stacked segments */
+  height: 10px;
+  margin-bottom: 7px;
+  background: var(--rule);       /* the track IS the unfilled remainder */
+  border-radius: 5px;
+  overflow: hidden;
+}
+.cc-comp-seg { height: 100%; border-radius: 5px; min-width: 2px; }
+.seg-ireps { background: var(--green); }
+.seg-settled { background: var(--green-bright); }
+.seg-review { background: var(--gold); }
+
+.cc-key-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto 46px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  font-family: var(--font-body);
+  font-size: var(--fs-note);
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: help;
+}
+.cc-key-row.is-link { cursor: pointer; }
+.cc-key-row.is-link:hover { background: var(--paper-deep); color: var(--ink); }
+.cc-key-row.is-link:focus-visible {
+  outline: 2px solid var(--green-bright);
+  outline-offset: 1px;
+}
+.cc-key-dot { width: 10px; height: 10px; border-radius: 3px; background: var(--rule); }
+/* hollow key = "this bucket is the bar's remainder", a shape difference
+   so the two unfilled buckets never rely on a colour to be told apart */
+.cc-key-dot.seg-track {
+  background: var(--paper-card);
+  border: 1.5px solid var(--rule-strong);
+}
+.cc-key-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-key-n {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-body);
+  color: var(--ink);
+}
+.cc-key-pct {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-label);
+  color: var(--ink-faint);
+  text-align: right;
+}
+.cc-key-v {
+  grid-column: 2 / -1;
+  margin-top: -3px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-faint);
+}
+/* credits the rate deliberately does not judge — below the bar's total */
+.cc-aside { margin-top: 6px; padding-top: 5px; border-top: 1px dashed var(--rule); }
+.cc-key-row.is-aside { color: var(--ink-faint); }
+.cc-key-row.is-aside .cc-key-n { font-size: var(--fs-note); color: var(--ink-faint); }
+.cc-key-row.is-aside .cc-key-pct { font-style: italic; }
+.cc-perf-foot {
+  margin: 12px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+  text-align: center;
+  font-size: var(--fs-label);
+  color: var(--ink-faint);
+}
+
+/* Data pages: the date window beside the ingestion pick (GoldTable) */
+.gold-dates input[type='date'] {
+  font-family: var(--font-mono);
+  font-size: var(--fs-note);
+  padding: 4px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+}
