@@ -214,6 +214,25 @@ export default function App() {
     localStorage.setItem(CUSTOMER_KEY, key)
   }
 
+  // The remembered customer comes from localStorage, which outlives the
+  // database — after a reset (or on another backend) it can name a customer
+  // that no longer exists, and every customer-scoped call then 400s. Once
+  // the real list arrives, fall back to 'default' (else the first customer).
+  const loadCustomers = useCallback(() => {
+    fetchCustomers()
+      .then((cs) => {
+        if (!cs.length) return
+        setCustomers(cs)
+        setCustomerIdState((cur) => {
+          if (cs.some((c) => c.key === cur)) return cur
+          const next = cs.find((c) => c.key === 'default')?.key ?? cs[0].key
+          localStorage.setItem(CUSTOMER_KEY, next)
+          return next
+        })
+      })
+      .catch(() => {})
+  }, [])
+
   const labelFor = useCallback(
     (runId: string) => {
       const item = runList.find((r) => r.run_id === runId)
@@ -255,7 +274,7 @@ export default function App() {
   const hashRestore = useRef(!!(parseHash().run || parseHash().runs))
 
   useEffect(() => {
-    fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})
+    loadCustomers()
     // restore the selection named in the hash WITHOUT changing the view —
     // the view was already read from the hash, so a refresh stays put
     const { run, runs } = parseHash()
@@ -502,8 +521,7 @@ export default function App() {
             customers={customers}
             customerId={customerId}
             onCustomerChange={setCustomerId}
-            onCustomersChanged={() =>
-              fetchCustomers().then((cs) => cs.length && setCustomers(cs)).catch(() => {})}
+            onCustomersChanged={loadCustomers}
             onIngested={onIngested}
           />
           {restoring && <p className="footer-note">Restoring run…</p>}
