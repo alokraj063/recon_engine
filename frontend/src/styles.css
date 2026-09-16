@@ -1685,6 +1685,27 @@ tr.active-run td { background: rgba(44, 115, 80, 0.06); }
   margin: 0 4px 20px;
 }
 
+/* Clickable Command Center headings. The button keeps its parent
+   heading's typography and colour in every state (`font`/`color:
+   inherit`), so a tile label still reads as a tile label. Placed AFTER
+   the .pipe rules on purpose: `.pipe-done .pipe-label` has the same
+   specificity as the :hover rule below, so the later one must be ours
+   or a completed stage would not tint on hover. */
+.cc-h-link {
+  background: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+.cc-h-link:hover { color: var(--green-bright); text-decoration: underline; }
+.cc-h-link:focus-visible { outline: 2px solid var(--green-bright); outline-offset: 2px; }
+
 /* ==================================================================== */
 /*  recon-alpha enterprise theme — chrome overrides (end of cascade)    */
 /* ==================================================================== */

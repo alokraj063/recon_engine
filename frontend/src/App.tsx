@@ -18,7 +18,7 @@ import { ErrorBanner } from './components/ErrorBanner'
 import { ExceptionQueue } from './components/ExceptionQueue'
 import { GoldTable } from './components/GoldTable'
 import { IngestForm } from './components/IngestForm'
-import { LedgerView } from './components/LedgerView'
+import { LedgerView, type LedgerIntent } from './components/LedgerView'
 import { MatchedTable } from './components/MatchedTable'
 import { ReconcileForm } from './components/ReconcileForm'
 import { RunPicker, runLabel } from './components/RunPicker'
@@ -179,6 +179,10 @@ export default function App() {
   // match_ledger id the Analyst queue should highlight (set by the
   // Exception queue's "Decide in Analyst queue" link)
   const [ledgerFocus, setLedgerFocus] = useState<string | null>(null)
+  // filters the Analyst queue should ARRIVE with, set by a Command
+  // Center heading (see LedgerIntent). Same shape as ledgerFocus above:
+  // an arrival instruction the view clears once it has applied it.
+  const [ledgerIntent, setLedgerIntent] = useState<LedgerIntent | null>(null)
 
   const primary = selectedRuns?.[0]?.payload ?? null
   const selection = selectedRuns?.map((r) => r.runId) ?? []
@@ -535,6 +539,7 @@ export default function App() {
             customerId={customerId}
             onCustomerChange={setCustomerId}
             onNavigate={setView}
+            onOpenQueue={(intent) => { setLedgerIntent(intent); setView('ledger') }}
             refreshKey={ingestEpoch + ledgerEpoch + (selectedRuns?.length ?? 0)}
           />
         )}
@@ -564,6 +569,8 @@ export default function App() {
             customerId={customerId}
             focusId={ledgerFocus}
             onFocusHandled={() => setLedgerFocus(null)}
+            intent={ledgerIntent}
+            onIntentHandled={() => setLedgerIntent(null)}
             onGoToReconcile={() => setView('reconcile')}
           />
         )}

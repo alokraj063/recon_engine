@@ -21,7 +21,7 @@ import {
 import { ColumnFilter } from './filters/ColumnFilter'
 import { FilterChips, type FilterChip } from './filters/FilterChips'
 import { FilterPopover } from './filters/FilterPopover'
-import { buildOptions } from './filters/facets'
+import { buildOptions, deSnake } from './filters/facets'
 
 type Evidence = Row | 'loading' | 'missing' | 'manual'
 
@@ -62,6 +62,26 @@ function DateRangeFilter({ from, to, onChange }: {
   )
 }
 
+/**
+ * What a Command Center heading asks this queue to show on arrival.
+ *
+ * Every field maps onto a filter the queue ALREADY owns, deliberately:
+ * the preset lands as a removable FilterChip, so an analyst can see why
+ * the table is narrowed and clear it in one click. A preset that could
+ * not be expressed as a visible chip would read as a broken page.
+ * An empty array means "clear that filter" (`[]` = every value).
+ */
+export interface LedgerIntent {
+  /** matches → Status (OPEN | LOCKED | REJECTED) */
+  matchStatus?: string[]
+  /** exceptions → Status (OPEN | RESOLVED) */
+  excStatus?: string[]
+  /** exceptions → Type (BANK_ONLY | BILL_ONLY) */
+  excType?: string[]
+  /** which of the two tables to scroll to once it has rendered */
+  section?: 'matches' | 'exceptions'
+}
+
 interface Props {
   customerId: string
   /** match_ledger id to highlight + scroll to (arriving from the
@@ -70,6 +90,12 @@ interface Props {
   /** called once the arrival flash has played so the parent clears
    *  focusId — the highlight is transient, not a selection */
   onFocusHandled?: () => void
+  /** filters to preset + section to land on, set by a Command Center
+   *  heading (see LedgerIntent) */
+  intent?: LedgerIntent | null
+  /** called once the preset has been applied so the parent clears it —
+   *  an intent is an arrival instruction, not a selection */
+  onIntentHandled?: () => void
   /** the empty-ledger notice links back to Reconcile */
   onGoToReconcile: () => void
 }
@@ -107,7 +133,9 @@ function excLine(e: LedgerException): string {
   return '—'
 }
 
-export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcile }: Props) {
+export function LedgerView({
+  customerId, focusId, onFocusHandled, intent, onIntentHandled, onGoToReconcile,
+}: Props) {
   const [data, setData] = useState<LedgerViewData | null>(null)
   // the customer's runs: labels for run ids + the run filter's choices
   const [runs, setRuns] = useState<RunListItem[]>([])
@@ -116,12 +144,17 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
   // column filters — multi-select; empty = every value. OPEN is the
   // exceptions default so the queue opens on what needs work
   const [excFilter, setExcFilter] = useState<string[]>(['OPEN'])
+  const [excTypeFilter, setExcTypeFilter] = useState<string[]>([])
   const [confFilter, setConfFilter] = useState<string[]>([])
   const [matchStatusFilter, setMatchStatusFilter] = useState<string[]>([])
   const [sortAsc, setSortAsc] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const scrolled = useRef<string | null>(null)
+  // an arriving intent names a table; the scroll waits for it to render
+  const [pendingScroll, setPendingScroll] = useState<'matches' | 'exceptions' | null>(null)
+  const matchesRef = useRef<HTMLDivElement>(null)
+  const excRef = useRef<HTMLHeadingElement>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [evidence, setEvidence] = useState<Record<string, Evidence>>({})
   // the OPEN exception an analyst is pairing by hand (one picker at a time)
@@ -167,6 +200,41 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId, data])
 
+  // Arriving from a Command Center heading: apply its preset onto this
+  // view's own filters, so the narrowing shows as a removable chip
+  // rather than as an inexplicably short table. The run filter is
+  // cleared because a Command Center tile counts the whole customer, not
+  // one run — leaving a stale run filter on would silently double-narrow.
+  // NOTE the tile's own date window is deliberately NOT carried over: it
+  // is a server-side window over gold/ledger dates, while this view's
+  // When filter is client-side over the match's created_at. Forcing one
+  // into the other would make the counts agree by filtering on the wrong
+  // date, so the queue lands on an honest superset instead.
+  useEffect(() => {
+    if (!intent) return
+    if (intent.matchStatus) {
+      setMatchStatusFilter(intent.matchStatus)
+      setConfFilter([])
+      setDateFrom('')
+      setDateTo('')
+    }
+    if (intent.excStatus) setExcFilter(intent.excStatus)
+    if (intent.excType) setExcTypeFilter(intent.excType)
+    setRunFilter(EMPTY_RUN_FILTER)
+    if (intent.section) setPendingScroll(intent.section)
+    onIntentHandled?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intent])
+
+  // ...and scroll once the table it named actually exists (the ledger
+  // arrives async; a section with no rows renders nothing at all)
+  useEffect(() => {
+    if (!pendingScroll || !data) return
+    const el = pendingScroll === 'exceptions' ? excRef.current : matchesRef.current
+    el?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    setPendingScroll(null)
+  }, [pendingScroll, data])
+
   const load = useCallback(() => {
     setError(null)
     fetchLedger(customerId)
@@ -206,6 +274,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
   const allExceptions = data?.exceptions ?? []
   const exceptions = allExceptions.filter(
     (e) => (excFilter.length === 0 || excFilter.includes(e.status))
+      && (excTypeFilter.length === 0 || excTypeFilter.includes(e.exception_type))
       && (!runSet || (!!e.first_seen_run_id && runSet.has(e.first_seen_run_id))
           || (!!e.resolved_by_run_id && runSet.has(e.resolved_by_run_id))),
   )
@@ -245,6 +314,8 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
   const excChips: FilterChip[] = [
     { key: 'exc-status', label: 'Status', values: excFilter, format: titleCase,
       onRemove: (v) => setExcFilter(v === undefined ? [] : excFilter.filter((x) => x !== v)) },
+    { key: 'exc-type', label: 'Type', values: excTypeFilter, format: deSnake,
+      onRemove: (v) => setExcTypeFilter(v === undefined ? [] : excTypeFilter.filter((x) => x !== v)) },
   ]
   const runNote = data && runSet
     ? `${visibleMatches.length} of ${data.matches.length} matches`
@@ -278,7 +349,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
 
         {data && data.matches.length > 0 && (
           <>
-            <div className="ledger-filter-row">
+            <div className="ledger-filter-row" ref={matchesRef}>
               <FilterChips chips={matchChips} />
               {matchesFiltered && (
                 <span className="ledger-count-note">
@@ -447,7 +518,7 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
 
         {data && allExceptions.length > 0 && (
           <>
-            <h3 className="ledger-h">
+            <h3 className="ledger-h" ref={excRef}>
               Exceptions
               {runSet && (
                 <span className="chip-note"> {exceptions.length} of {allExceptions.length} </span>
@@ -458,16 +529,25 @@ export function LedgerView({ customerId, focusId, onFocusHandled, onGoToReconcil
             </div>
             {exceptions.length === 0 ? (
               <p className="frame-note">
-                Nothing with status {excFilter.map(titleCase).join(' / ').toLowerCase()}
+                Nothing matching {[
+                  excFilter.length ? `status ${excFilter.map(titleCase).join(' / ').toLowerCase()}` : null,
+                  excTypeFilter.length ? `type ${excTypeFilter.map(deSnake).join(' / ').toLowerCase()}` : null,
+                ].filter(Boolean).join(' · ') || 'these filters'}
                 {runSet ? ' for the selected runs' : ''} —{' '}
-                <button className="link-btn" onClick={() => setExcFilter([])}>show all</button>
+                <button className="link-btn"
+                        onClick={() => { setExcFilter([]); setExcTypeFilter([]) }}>show all</button>
               </p>
             ) : (
               <div className="ledger-wrap">
               <table className="ledger">
                 <thead>
                   <tr>
-                    <th>Type</th>
+                    <th>
+                      Type
+                      <ColumnFilter label="Type" value={excTypeFilter} onApply={setExcTypeFilter}
+                                    format={deSnake}
+                                    options={buildOptions(allExceptions, (e) => e.exception_type)} />
+                    </th>
                     <th>
                       Status
                       <ColumnFilter label="Status" value={excFilter} onApply={setExcFilter}

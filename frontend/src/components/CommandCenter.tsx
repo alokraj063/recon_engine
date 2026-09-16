@@ -4,6 +4,7 @@ import type { CustomerInfo, Overview } from '../types'
 import { fetchOperatingUnits, fetchOverview } from '../api'
 import { inr } from '../format'
 import type { View } from './Sidebar'
+import type { LedgerIntent } from './LedgerView'
 import {
   DEFAULT_DATE_FILTER, DateFilter, resolveWindow, unitsLabel, windowLabel,
   type DateFilterValue,
@@ -24,8 +25,22 @@ interface Props {
   customerId: string
   onCustomerChange: (key: string) => void
   onNavigate: (v: View) => void
+  /** open the Analyst queue already filtered to what the heading names */
+  onOpenQueue: (intent: LedgerIntent) => void
   refreshKey: number
 }
+
+/* The presets each heading carries into the Analyst queue. They are
+   plain filter values, so each one arrives as a removable chip there —
+   the analyst sees WHY the table is narrowed. `[]` clears a filter. */
+const Q_SETTLED: LedgerIntent = { section: 'matches', matchStatus: ['LOCKED'] }
+const Q_REVIEW: LedgerIntent = { section: 'matches', matchStatus: ['OPEN'] }
+const Q_ALL_MATCHES: LedgerIntent = { section: 'matches', matchStatus: [] }
+const Q_OPEN_EXC: LedgerIntent = { section: 'exceptions', excStatus: ['OPEN'], excType: [] }
+const Q_RESOLVED_EXC: LedgerIntent = { section: 'exceptions', excStatus: ['RESOLVED'], excType: [] }
+/** open exceptions of ONE side — the tile's "N bank only" / "M bill only" */
+const qExcSide = (side: string): LedgerIntent =>
+  ({ section: 'exceptions', excStatus: ['OPEN'], excType: [side] })
 
 const pct = (v: number | null | undefined) =>
   v === null || v === undefined ? '—' : `${(v * 100).toFixed(1)}%`
@@ -68,19 +83,23 @@ function Meter({ label, count, total, tone }: {
   )
 }
 
-function PipeNode({ label, state, value }: {
+function PipeNode({ label, state, value, onOpen }: {
   label: string; state: 'done' | 'active' | 'idle'; value?: string
+  /** omit to leave the stage as a plain label */
+  onOpen?: () => void
 }) {
   return (
     <div className={`pipe-node pipe-${state}`}>
       <span className="pipe-dot">{state === 'done' ? '✓' : value ?? '·'}</span>
-      <span className="pipe-label">{label}</span>
+      {onOpen
+        ? <button type="button" className="pipe-label cc-h-link" onClick={onOpen}>{label}</button>
+        : <span className="pipe-label">{label}</span>}
     </div>
   )
 }
 
 export function CommandCenter({
-  customers, customerId, onCustomerChange, onNavigate, refreshKey,
+  customers, customerId, onCustomerChange, onNavigate, onOpenQueue, refreshKey,
 }: Props) {
   const [data, setData] = useState<Overview | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -126,12 +145,41 @@ export function CommandCenter({
   // performance figure is over the RECOGNISED credits, and they are
   // reported on their own line
   const unrecognised = data?.unrecognised_credits ?? 0
-  const recognised = data?.recognised_credits ?? Math.max(0, credits - unrecognised)
+  // the matching bill is still in flight in the source system, so the
+  // credit could not have matched — reported, not rated (same treatment
+  // as an unrecognised receipt, different reason)
+  const awaitingStatus = data?.awaiting_status_credits ?? 0
+  // the bill export covering this credit's advice has not been ingested
+  // yet — excused only until it goes stale (server-side cap)
+  const awaitingBillData = data?.awaiting_bill_data_credits ?? 0
+  const recognised = data?.recognised_credits
+    ?? Math.max(0, credits - unrecognised - awaitingStatus - awaitingBillData)
   const unmatched = data ? Math.max(0, recognised - data.matched_credits) : 0
   const settled = data?.settled_credits ?? data?.matches.LOCKED ?? 0
   const manual = data?.manual_matches ?? 0
   // locked_by.USER counts every user-locked match, manual ones included
   const accepted = Math.max(0, (data?.locked_by.USER ?? 0) - manual)
+
+  // A heading routes to where its figure actually LIVES. Every number on
+  // this page comes from /api/overview — live gold + ledger state — so the
+  // targets are the Analyst queue and the Data pages' CURRENT scope
+  // (gold_*), never a run-scoped frame, which may be empty or from an
+  // unrelated run. Navigating straight to gold_bills deliberately does not
+  // touch the user's recon.dataScope preference (App owns that, and only
+  // the scope switch itself writes it).
+  const headLink = (to: View, text: string) => (
+    <button type="button" className="cc-h-link" onClick={() => onNavigate(to)}>
+      {text}
+    </button>
+  )
+
+  /** A heading whose figure lives in the ledger: same link, but it also
+   *  carries the filter that makes the queue show THAT figure. */
+  const queueLink = (text: string, intent: LedgerIntent) => (
+    <button type="button" className="cc-h-link" onClick={() => onOpenQueue(intent)}>
+      {text}
+    </button>
+  )
 
   return (
     <section className="intake cc">
@@ -176,35 +224,39 @@ export function CommandCenter({
           )}
           <div className="tiles cc-tiles">
             <div className="tile tone-neutral">
-              <div className="tile-label">Gold pool</div>
+              <div className="tile-label">{headLink('gold_bills', 'Gold pool')}</div>
               <div className="tile-count">{data.gold.bills.toLocaleString('en-IN')}</div>
               <div className="tile-amount">bills · {data.gold.credits} credits</div>
               <div className="tile-delta">{data.gold.lineage_docs.toLocaleString('en-IN')} lineage docs · {scope}</div>
             </div>
             <div className="tile">
-              <div className="tile-label">Settled</div>
+              <div className="tile-label">{queueLink('Settled', Q_SETTLED)}</div>
               <div className="tile-count">{settled.toLocaleString('en-IN')}</div>
               <div className="tile-amount">{pct(data.match_rate)} of recognised credits · {windowLabel(filter)}</div>
               <div className="tile-delta">{data.matches.OPEN} awaiting review · {data.matches.REJECTED} rejected</div>
             </div>
             <div className="tile tone-review">
-              <div className="tile-label">Analyst queue</div>
+              <div className="tile-label">{queueLink('Analyst queue', Q_REVIEW)}</div>
               <div className="tile-count">{data.matches.OPEN}</div>
               <div className="tile-amount">matches awaiting review</div>
               <div className="tile-delta">accept or reject to settle · {scope}</div>
             </div>
             <div className="tile tone-bank">
-              <div className="tile-label">Open exceptions</div>
+              <div className="tile-label">{queueLink('Open exceptions', Q_OPEN_EXC)}</div>
               <div className="tile-count">{openTotal.toLocaleString('en-IN')}</div>
               <div className="tile-amount">{inr(data.open_value.total)}</div>
               <div className="tile-delta">
-                {data.open_exceptions.BANK_ONLY} bank only
+                {queueLink(`${data.open_exceptions.BANK_ONLY} bank only`, qExcSide('BANK_ONLY'))}
                 {unrecognised > 0 && ` (${unrecognised} unrecognised)`}
-                {' · '}{data.open_exceptions.BILL_ONLY.toLocaleString('en-IN')} bill only · {scope}
+                {' · '}
+                {queueLink(
+                  `${data.open_exceptions.BILL_ONLY.toLocaleString('en-IN')} bill only`,
+                  qExcSide('BILL_ONLY'))}
+                {' · '}{scope}
               </div>
             </div>
             <div className="tile tone-bill">
-              <div className="tile-label">Resolved</div>
+              <div className="tile-label">{queueLink('Resolved', Q_RESOLVED_EXC)}</div>
               <div className="tile-count">{data.resolved_exceptions}</div>
               <div className="tile-amount">exceptions closed by runs or decisions</div>
               <div className="tile-delta">{scope}</div>
@@ -214,8 +266,8 @@ export function CommandCenter({
           <div className="cc-grid">
             <div className="cc-panel">
               <div className="cc-panel-head">
-                <h3 className="ledger-h">Largest open exceptions</h3>
-                <button className="btn-open" onClick={() => onNavigate('ledger')}>
+                <h3 className="ledger-h">{queueLink('Largest open exceptions', Q_OPEN_EXC)}</h3>
+                <button className="btn-open" onClick={() => onOpenQueue(Q_OPEN_EXC)}>
                   open Analyst queue →
                 </button>
               </div>
@@ -236,7 +288,8 @@ export function CommandCenter({
                   </thead>
                   <tbody>
                     {data.top_exceptions.map((e) => (
-                      <tr key={e.id} className="cc-row" onClick={() => onNavigate('ledger')}>
+                      <tr key={e.id} className="cc-row"
+                          onClick={() => onOpenQueue(qExcSide(e.exception_type))}>
                         <td><span className={`stamp stamp-${e.exception_type}`}>
                           {e.exception_type.replace('_', ' ')}</span></td>
                         <td className="mono-cell">{e.ref ?? '—'}</td>
@@ -252,7 +305,7 @@ export function CommandCenter({
 
             <div className="cc-panel">
               <div className="cc-panel-head">
-                <h3 className="ledger-h">Match performance</h3>
+                <h3 className="ledger-h">{queueLink('Match performance', Q_ALL_MATCHES)}</h3>
               </div>
               <MatchDonut rate={data.match_rate} />
               <p className="cc-settled-split">
@@ -278,6 +331,21 @@ export function CommandCenter({
                 {' '}— no match signal in the narrative; not counted in the rate
                 ({recognised.toLocaleString('en-IN')} recognised of {credits.toLocaleString('en-IN')} credits)
               </p>
+              {awaitingStatus > 0 && (
+                <p className="frame-note cc-unrec">
+                  Awaiting source status · <strong>{awaitingStatus.toLocaleString('en-IN')}</strong>
+                  {' '}— the same-amount bill is still passed/registered, not advised; not counted in the rate
+                </p>
+              )}
+              {awaitingBillData > 0 && (
+                <p className="frame-note cc-unrec">
+                  Awaiting bill data · <strong>{awaitingBillData.toLocaleString('en-IN')}</strong>
+                  {' '}— valued after the latest bill export
+                  {data.bills_covered_through
+                    ? ` (advices through ${data.bills_covered_through})`
+                    : ''}; not counted in the rate until they go stale
+                </p>
+              )}
             </div>
           </div>
 
@@ -294,21 +362,26 @@ export function CommandCenter({
               </span>
             </div>
             <div className="pipe">
-              <PipeNode label="Ingest" state={data.gold.bank_txns > 0 ? 'done' : 'active'} />
+              <PipeNode label="Ingest" state={data.gold.bank_txns > 0 ? 'done' : 'active'}
+                        onOpen={() => onNavigate('ingest')} />
               <span className="pipe-link" />
               <PipeNode label="Gold layer"
                         state={data.gold.bills > 0 ? 'done' : 'idle'}
-                        value={data.gold.bills ? undefined : '·'} />
+                        value={data.gold.bills ? undefined : '·'}
+                        onOpen={() => onNavigate('gold_bills')} />
               <span className="pipe-link" />
-              <PipeNode label="Reconcile" state={data.last_run ? 'done' : 'idle'} />
+              <PipeNode label="Reconcile" state={data.last_run ? 'done' : 'idle'}
+                        onOpen={() => onNavigate('reconcile')} />
               <span className="pipe-link" />
               <PipeNode label="Analyst review"
                         state={data.matches.OPEN > 0 ? 'active' : data.last_run ? 'done' : 'idle'}
-                        value={data.matches.OPEN > 0 ? String(data.matches.OPEN) : undefined} />
+                        value={data.matches.OPEN > 0 ? String(data.matches.OPEN) : undefined}
+                        onOpen={() => onOpenQueue(Q_REVIEW)} />
               <span className="pipe-link" />
               <PipeNode label="Resolved"
                         state={data.resolved_exceptions > 0 ? 'done' : 'idle'}
-                        value={data.resolved_exceptions > 0 ? String(data.resolved_exceptions) : undefined} />
+                        value={data.resolved_exceptions > 0 ? String(data.resolved_exceptions) : undefined}
+                        onOpen={() => onOpenQueue(Q_RESOLVED_EXC)} />
             </div>
           </div>
         </>
