@@ -832,8 +832,29 @@ def reopen_match(match_ledger_id: str):
 @router.get("/ledger")
 def ledger(customer_id: str = "default"):
     with SessionLocal() as session:
-        customer_pk = _get_customer(session, customer_id).id
-    return incremental.ledger_view(customer_pk)
+        customer, _, rule_row = _load_customer_context(session, customer_id)
+        customer_pk = customer.id
+        payload = incremental.ledger_view(customer_pk)
+        # AWAITING_STATUS / AWAITING_BILL_DATA exist only as read-time
+        # clauses over live gold (db/overview), never as a stored column,
+        # so each open bank-only row is handed its reading here. Without
+        # it the queue cannot separate them from SIGNAL_BILL_NOT_FOUND
+        # and a Command Center row linking to "its" credits would open a
+        # filter holding all three buckets.
+        gaps = db_overview.gap_details(session, customer_pk)
+        # ...and the human sentence for that reading, resolved through the
+        # CUSTOMER'S copy_overrides exactly as a run stamps `action`, so
+        # the queue explains a gap in the same words the workbook does.
+        copy_text = resolve_copy(_effective_rules(rule_row, {}).copy_overrides)
+    for e in payload["exceptions"]:
+        e["gap_detail"] = gaps.get(e["id"])
+        # BILL_ONLY rows carry no stored code (their basis lives on the run
+        # frame, not the ledger row), so only the bank side gets copy.
+        code = e["gap_detail"] or e.get("gap_type")
+        if e["exception_type"] == "BANK_ONLY" and code:
+            e["gap_label"] = copy_text["labels"].get(code)
+            e["gap_action"] = copy_text["gap_type"].get(code)
+    return payload
 
 
 def _parse_day(value: Optional[str], name: str) -> Optional[date]:
@@ -1149,10 +1170,17 @@ def gold_frame(frame: str, customer_id: str = "default",
         customer_pk = _get_customer(session, customer_id).id
         df, provenance, total = reconcile_gold.gold_frame(
             session, frame, customer_pk, bronze_file_id, limit)
+        # the credit funnel bucket each credit is counted in (db/overview
+        # credit_scopes) — read-time, not stored, so the Command Center's
+        # funnel figures can open this table filtered to their own rows
+        scopes = (db_overview.credit_scopes(session, customer_pk)
+                  if frame == "bank" else None)
     rows = df_to_records(df)
-    for rec, (bfid, seq) in zip(rows, provenance):
+    for rec, (bfid, seq, gid) in zip(rows, provenance):
         rec["bronze_file_id"] = bfid
         rec["row_seq"] = seq
+        if scopes is not None:
+            rec["credit_scope"] = scopes.get(gid)
     return {"name": frame, "count": len(rows), "total": total, "rows": rows}
 
 

@@ -35,6 +35,9 @@ interface Props {
    *  why (an empty run, a segment with nothing in it); a typed filter
    *  that matches nothing gets a built-in note, not this one */
   emptyNote?: React.ReactNode
+  /** column filters to open with ({column id: values}) — they land as
+   *  ordinary removable chips, read once on mount */
+  initialFilters?: Record<string, string[]>
 }
 
 /**
@@ -44,14 +47,15 @@ interface Props {
  * so the global search and the row counter see the narrowed set.
  */
 export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, externalChips,
-                            renderDetail, totalRows, emptyNote }: Props) {
+                            renderDetail, totalRows, emptyNote, initialFilters }: Props) {
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
     Object.fromEntries((initialHidden ?? []).map((c) => [c, false])),
   )
   const [openRow, setOpenRow] = useState<string | null>(null)
-  const [colFilters, setColFilters] = useState<Record<string, string[]>>({})
+  const [colFilters, setColFilters] = useState<Record<string, string[]>>(
+    () => initialFilters ?? {})
 
   const facetCols = useMemo(() => columns
     .filter((c) => c.meta?.facet && typeof c.id === 'string')

@@ -20,6 +20,7 @@ export const SHARED_PRESETS: Record<'bank' | 'bills' | 'recoveries' | 'lineage',
   bank: {
     curated: [
       ['used_in_recon', 'Used'],
+      ['credit_scope', 'Credit scope'],
       ['txn_type', 'Type'],
       ['amount', 'Amount'],
       ['value_date', 'Value date'],
@@ -30,7 +31,10 @@ export const SHARED_PRESETS: Record<'bank' | 'bills' | 'recoveries' | 'lineage',
       ['page', 'Page'],
     ],
     hidden: ['supplementary', 'timestamp', 'bronze_file_id', 'row_seq'],
-    facets: [['txn_type', 'Type'], ['zone_guess', 'Zone'], ['used_in_recon', 'Used']],
+    // credit_scope is read-time (live gold only, db/overview.credit_scopes):
+    // the Command Center funnel bucket each credit is counted in
+    facets: [['txn_type', 'Type'], ['zone_guess', 'Zone'], ['used_in_recon', 'Used'],
+             ['credit_scope', 'Credit scope']],
   },
   bills: {
     curated: [

@@ -202,8 +202,20 @@ export interface LedgerException {
   resolved_at?: string | null
   /** BANK_ONLY: the frozen gap code (SIGNAL_BILL_NOT_FOUND | UNRECOGNISED_RECEIPT) */
   gap_type?: string | null
+  /** BANK_ONLY, OPEN: the read-time reading the server computed for this
+   *  row (adds AWAITING_STATUS | AWAITING_BILL_DATA, which no stored
+   *  column can express). Absent = fall back to gap_type; see gapOf. */
+  gap_detail?: string | null
+  /** BANK_ONLY: the effective code's display name and advisory sentence,
+   *  resolved server-side through the customer's copy_overrides (the same
+   *  text a run stamps into `action`). Absent = no copy for that code. */
+  gap_label?: string | null
+  gap_action?: string | null
   txn?: LedgerTxnInfo | null
-  bill?: Omit<LedgerBillInfo, 'gold_bill_id' | 'role'> | null
+  bill?: (Omit<LedgerBillInfo, 'gold_bill_id' | 'role'> & {
+    /** advice -> order -> submission date (db/incremental._bill_info) */
+    due_date?: string | null
+  }) | null
 }
 
 export interface LedgerViewData {
@@ -306,12 +318,21 @@ export interface Overview {
   open_exceptions: { BANK_ONLY: number; BILL_ONLY: number; UNRECOGNISED?: number }
   resolved_exceptions: number
   open_value: { bank_only: number; bill_only: number; total: number }
+  /** open exceptions WITHOUT other receipts (UNRECOGNISED_RECEIPT) — the
+   *  Command Center's Open exceptions tile */
+  open_in_scope: { bank_only: number; bill_only: number; count: number; value: number }
   /** credits with any non-rejected match (incl. those awaiting review) */
   matched_credits: number
   /** credits with a LOCKED match — the match rate's numerator */
   settled_credits?: number
   /** open unrecognised receipts — excluded from the match-rate denominator */
   unrecognised_credits?: number
+  /** credits carrying this source's match signal (IREPS), and their value */
+  in_scope_credits?: number
+  in_scope_value?: number
+  /** receipts from anywhere else (interest, sweeps, other payers) */
+  out_of_scope_credits?: number
+  out_of_scope_value?: number
   /** open credits whose only same-amount bill is still in flight in the
    *  source system (PASSED / REGISTERED) — also excluded from the rate */
   awaiting_status_credits?: number

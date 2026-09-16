@@ -78,6 +78,11 @@ def test_unrecognised_receipts_are_counted_not_rated(world):  # noqa: F811
     assert ov["unrecognised_credits"] == 1 and ov["recognised_credits"] == 2
     assert ov["match_rate"] == 0.5                      # 1 of 2 RECOGNISED, not 1 of 3
     assert ov["open_exceptions"] == {"BANK_ONLY": 2, "BILL_ONLY": 0, "UNRECOGNISED": 1}
+    # the Open exceptions tile + Largest open exceptions: IREPS only, so the
+    # unrecognised C3 is counted once (as an other receipt), not here too
+    assert ov["open_in_scope"] == {"bank_only": 1, "bill_only": 0,
+                                   "count": 1, "value": 7000.0}
+    assert [e["ref"] for e in ov["top_exceptions"]] == ["C2"]
     assert ar["kpis"]["match_rate"] == 0.5 and ar["kpis"]["unrecognised"] == 1
     assert ar["runs"][0]["credits"] == 3 and ar["runs"][0]["unrecognised"] == 1
 

@@ -16,7 +16,7 @@ import { AuditTrailView } from './components/AuditTrailView'
 import { CommandCenter } from './components/CommandCenter'
 import { ErrorBanner } from './components/ErrorBanner'
 import { ExceptionQueue } from './components/ExceptionQueue'
-import { GoldTable } from './components/GoldTable'
+import { GoldTable, type GoldIntent } from './components/GoldTable'
 import { IngestForm } from './components/IngestForm'
 import { LedgerView, type LedgerIntent } from './components/LedgerView'
 import { MatchedTable } from './components/MatchedTable'
@@ -183,6 +183,10 @@ export default function App() {
   // Center heading (see LedgerIntent). Same shape as ledgerFocus above:
   // an arrival instruction the view clears once it has applied it.
   const [ledgerIntent, setLedgerIntent] = useState<LedgerIntent | null>(null)
+  // the same, for a Command Center figure that lives in a gold table
+  // (e.g. "IREPS credits" -> Bank Transactions filtered by credit scope)
+  const [goldIntent, setGoldIntent] = useState<GoldIntent | null>(null)
+  const clearGoldIntent = useCallback(() => setGoldIntent(null), [])
 
   const primary = selectedRuns?.[0]?.payload ?? null
   const selection = selectedRuns?.map((r) => r.runId) ?? []
@@ -540,6 +544,10 @@ export default function App() {
             onCustomerChange={setCustomerId}
             onNavigate={setView}
             onOpenQueue={(intent) => { setLedgerIntent(intent); setView('ledger') }}
+            onOpenGold={(intent) => {
+              setGoldIntent(intent)
+              setView(`gold_${intent.frame}` as View)
+            }}
             refreshKey={ingestEpoch + ledgerEpoch + (selectedRuns?.length ?? 0)}
           />
         )}
@@ -609,7 +617,8 @@ export default function App() {
             {dataHead(dataPage, false)}
             <div className="view-card">
               <GoldTable key={`${customerId}:${goldFrame}:${ingestEpoch}`}
-                         customerId={customerId} frame={goldFrame} />
+                         customerId={customerId} frame={goldFrame}
+                         intent={goldIntent} onIntentHandled={clearGoldIntent} />
             </div>
           </>
         )}

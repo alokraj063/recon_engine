@@ -234,6 +234,78 @@ def awaiting_bill_data_clause(bills_through, as_of,
                 GoldBankTxn.value_date >= as_of - timedelta(days=cap_days))
 
 
+# The four-way reading of an OPEN BANK_ONLY exception, in the SAME
+# priority order the match-rate denominator subtracts the buckets, so a
+# credit lands in exactly one of them. Only UNRECOGNISED_RECEIPT and
+# SIGNAL_BILL_NOT_FOUND are STORED (exception_ledger.gap_type); the two
+# awaiting readings are derived at read time from live gold, which is
+# why a caller has to be HANDED them per row — there is no column to
+# filter on. Frozen codes: they travel to the UI and back as filters.
+AWAITING_STATUS = "AWAITING_STATUS"
+AWAITING_BILL_DATA = "AWAITING_BILL_DATA"
+
+
+def gap_details(session, customer_pk: int) -> dict:
+    """``{exception_ledger.id: gap code}`` for the customer's OPEN
+    BANK_ONLY exceptions, built from the very clauses the overview
+    counts with — so a Command Center row and the queue filter it links
+    to select the same credits. Ids absent from the result carry no
+    read-time reading and keep their stored ``gap_type``.
+
+    Deliberately unwindowed: the ledger view is whole-customer, and a
+    date window here would classify by one scope and count by another.
+    """
+    bills_through, data_as_of = coverage(session, customer_pk)
+
+    def ids(*extra):
+        return session.execute(
+            select(ExceptionLedger.id)
+            .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
+            .where(ExceptionLedger.customer_id == customer_pk,
+                   ExceptionLedger.exception_type == "BANK_ONLY",
+                   ExceptionLedger.status == "OPEN", *extra)).scalars().all()
+
+    # same order, same not_() guards as the denominator in overview()
+    out = {i: UNRECOGNISED for i in ids(unrecognised_clause())}
+    out.update({i: AWAITING_STATUS for i in ids(
+        not_(unrecognised_clause()),
+        awaiting_status_clause(customer_pk))})
+    out.update({i: AWAITING_BILL_DATA for i in ids(
+        not_(unrecognised_clause()),
+        not_(awaiting_status_clause(customer_pk)),
+        awaiting_bill_data_clause(bills_through, data_as_of))})
+    return out
+
+
+# The credit funnel's per-row reading for the gold bank browse: every
+# credit (used_in_recon) lands in exactly one bucket, so a Command Center
+# figure (IREPS credits, Recognised) can open the Bank Transactions page
+# already filtered to the very credits it counted. Frozen codes — they
+# travel to the UI and back as column-filter values.
+RECOGNISED = "RECOGNISED"
+
+
+def credit_scopes(session, customer_pk: int) -> dict:
+    """``{gold_bank_txn_id: code}`` for every credit of the customer:
+    UNRECOGNISED_RECEIPT (out of scope — "Other receipts"), AWAITING_STATUS
+    / AWAITING_BILL_DATA (in scope, not rated), else RECOGNISED (the rate's
+    denominator). Debits are absent. Built from gap_details, i.e. the same
+    clauses and priority order overview() subtracts with, and unwindowed
+    for the same reason."""
+    by_exc = gap_details(session, customer_pk)
+    out = {tid: RECOGNISED for tid in session.execute(
+        select(GoldBankTxn.id)
+        .where(GoldBankTxn.customer_id == customer_pk,
+               GoldBankTxn.used_in_recon.is_(True))).scalars()}
+    if by_exc:
+        for eid, tid in session.execute(
+                select(ExceptionLedger.id, ExceptionLedger.gold_bank_txn_id)
+                .where(ExceptionLedger.id.in_(list(by_exc)))):
+            if tid in out:
+                out[tid] = by_exc[eid]
+    return out
+
+
 def overview(session, customer_pk: int, date_from=None, date_to=None,
              units=None) -> dict:
     """Command Center aggregates. With no filter every query is the one it
@@ -245,7 +317,9 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
                              UNASSIGNED = not matched to any bill
       bills / recoveries     submission_date (fallback bill_date); unit
       lineage_docs           doc_date (no unit)
-      match status counts    match created_at; unit via a picked bill
+      match status counts    the credit's value_date (NOT the match's
+                             created_at — same credits as the rate);
+                             unit via a picked bill
       matched_credits/rate   the credit's value_date + unit (so the rate's
                              numerator and denominator agree)
       exceptions             BILL_ONLY: advice -> order -> submission date
@@ -266,7 +340,15 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
                                              GoldBill.payment_order_date,
                                              GoldBill.submission_date),
                                date_from, date_to)
-    match_cl = _date_bounds(MatchLedger.created_at, date_from, date_to, is_datetime=True)
+    # a match is windowed by its CREDIT's value date, never by when the
+    # match row was created: the Settled tile, the rate and the funnel all
+    # count credits by value_date, and a run (or an analyst) acting today
+    # on last month's money must not move a figure into a different window
+    # than the credit it settles
+    match_cl = ([MatchLedger.gold_bank_txn_id.in_(
+                    select(GoldBankTxn.id).where(GoldBankTxn.customer_id == customer_pk,
+                                                 *txn_cl))]
+                if txn_cl else [])
     doc_cl = _date_bounds(GoldLineageDoc.doc_date, date_from, date_to)
     unit_bill_cl = []
     unit_txn_cl = []
@@ -394,6 +476,29 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
                  not_(awaiting_status_clause(customer_pk)),
                  awaiting_bill_data_clause(bills_through, data_as_of)))
 
+    # --- in scope (IREPS) vs other receipts ----------------------------
+    # The split rides the STORED gap code, which the engine stamps through
+    # the CUSTOMER'S field map — never a hardcoded signal column, so a
+    # customer matching on something other than zone splits correctly too.
+    # Everything that is not an unrecognised receipt is in scope: matched,
+    # awaiting, or a genuine gap.
+    out_of_scope_credits = open_exc["UNRECOGNISED"]
+    out_of_scope_value = session.execute(
+        select(func.coalesce(func.sum(GoldBankTxn.amount), 0.0))
+        .select_from(ExceptionLedger)
+        .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
+        .where(ExceptionLedger.customer_id == customer_pk,
+               ExceptionLedger.exception_type == "BANK_ONLY",
+               ExceptionLedger.status == "OPEN",
+               unrecognised_clause(), *txn_cl, *bank_only_cl)).scalar() or 0.0
+    credits_value = session.execute(
+        select(func.coalesce(func.sum(GoldBankTxn.amount), 0.0))
+        .where(GoldBankTxn.customer_id == customer_pk,
+               GoldBankTxn.used_in_recon.is_(True),
+               *txn_cl, *unit_txn_cl)).scalar() or 0.0
+    in_scope_credits = max(0, gold["credits"] - out_of_scope_credits)
+    in_scope_value = credits_value - out_of_scope_value
+
     bank_open_value = session.execute(
         select(func.coalesce(func.sum(GoldBankTxn.amount), 0.0))
         .select_from(ExceptionLedger)
@@ -410,6 +515,16 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
                ExceptionLedger.status == "OPEN",
                ExceptionLedger.exception_type == "BILL_ONLY",
                *bill_due_cl, *unit_bill_cl)).scalar() or 0.0
+    # the open work, IREPS only: other receipts can never match a bill and
+    # are already reported once, as out_of_scope_credits. Same filters as
+    # the figures above, so this is their difference, not a new query.
+    in_scope_bank_only = open_exc["BANK_ONLY"] - open_exc["UNRECOGNISED"]
+    open_in_scope = {
+        "bank_only": in_scope_bank_only,
+        "bill_only": open_exc["BILL_ONLY"],
+        "count": in_scope_bank_only + open_exc["BILL_ONLY"],
+        "value": bank_open_value - out_of_scope_value + bill_open_value,
+    }
 
     def credit_count(*status_cl):
         # numerator on the same column set as the credits denominator
@@ -428,14 +543,18 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
     # still in flight in the source system could not have matched either:
     # the rate is over the credits that COULD have settled, and both
     # groups are reported as their own counts
-    unrecognised_credits = open_exc["UNRECOGNISED"]
-    recognised_credits = max(0, gold["credits"] - unrecognised_credits
+    # ONE definition, two readings: the rate's denominator is the IN SCOPE
+    # credits minus the two "could not have matched yet" buckets
+    unrecognised_credits = out_of_scope_credits
+    recognised_credits = max(0, in_scope_credits
                              - awaiting_status_credits
                              - awaiting_bill_data_credits)
     match_rate = ((settled_credits / recognised_credits)
                   if recognised_credits else None)
 
-    # top open exceptions by absolute value (both sides in one list)
+    # top open exceptions by absolute value (both sides in one list),
+    # IREPS only like open_in_scope — a large interest credit or sweep
+    # would otherwise head a list whose tile does not count it
     top: list = []
     for e, t in session.execute(
             select(ExceptionLedger, GoldBankTxn)
@@ -443,6 +562,7 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
             .where(ExceptionLedger.customer_id == customer_pk,
                    ExceptionLedger.status == "OPEN",
                    ExceptionLedger.exception_type == "BANK_ONLY",
+                   not_(unrecognised_clause()),
                    *txn_cl, *bank_only_cl)):
         top.append({"id": e.id, "exception_type": "BANK_ONLY",
                     "ref": t.bank_ref, "zone": t.zone_guess,
@@ -507,9 +627,16 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
         "open_value": {"bank_only": bank_open_value,
                        "bill_only": bill_open_value,
                        "total": bank_open_value + bill_open_value},
+        "open_in_scope": open_in_scope,
         "matched_credits": matched_credits,
         "settled_credits": settled_credits,
         "unrecognised_credits": unrecognised_credits,
+        # the same split as counts + money: in scope = this source's
+        # payments (IREPS), out of scope = receipts from anywhere else
+        "in_scope_credits": in_scope_credits,
+        "in_scope_value": in_scope_value,
+        "out_of_scope_credits": out_of_scope_credits,
+        "out_of_scope_value": out_of_scope_value,
         "awaiting_status_credits": awaiting_status_credits,
         "awaiting_bill_data_credits": awaiting_bill_data_credits,
         # how far the source data reaches — explains the bucket above

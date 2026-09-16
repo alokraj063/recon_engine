@@ -151,10 +151,18 @@ def test_date_window_moves_the_counts(world):
     assert march["matched_credits"] == 1 and march["match_rate"] == 0.5
     assert march["filters_applied"]["from"] == "2026-03-01"
     assert march["filters_applied"]["bank_only_unassigned"] == 1
-    # match status counts follow the match's created_at (today), not the
-    # credit's value date: nothing was created in March 2026
-    assert march["matches"] == {"OPEN": 0, "LOCKED": 0, "REJECTED": 0}
+    # match status counts follow the CREDIT's value date, not the match's
+    # created_at (today): T1's match is a March figure, like T1 itself
+    assert march["matches"] == {"OPEN": 0, "LOCKED": 1, "REJECTED": 0}
     april = _ov(world["cust"], date_from=date(2026, 4, 1), date_to=date(2026, 4, 30))
+    assert april["matches"] == {"OPEN": 0, "LOCKED": 1, "REJECTED": 0}   # T2
+    # every settled-side figure now describes the same credits
+    for window in (march, april):
+        assert window["matches"]["LOCKED"] == window["settled_credits"]
+        assert (window["locked_by"]["AUTO_HIGH"] + window["locked_by"]["USER"]
+                == window["settled_credits"])
+    today = _ov(world["cust"], date_from=date.today(), date_to=date.today())
+    assert today["matches"] == {"OPEN": 0, "LOCKED": 0, "REJECTED": 0}
     assert april["gold"]["credits"] == 1 and april["gold"]["bills"] == 2
     assert april["open_exceptions"] == {"BANK_ONLY": 0, "BILL_ONLY": 1, "UNRECOGNISED": 0}   # INV-3
     assert [e["ref"] for e in april["top_exceptions"]] == ["INV-3"]

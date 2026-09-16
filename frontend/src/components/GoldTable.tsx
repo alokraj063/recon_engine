@@ -41,12 +41,31 @@ function buildColumns(frame: GoldFrameName, rows: Row[]): { columns: ColumnDef<R
   }
 }
 
+/**
+ * What a Command Center figure asks a gold table to show on arrival:
+ * column filters over the frame's facet columns ({column id: values}).
+ * Like LedgerIntent, every preset lands as a visible, removable chip.
+ */
+export interface GoldIntent {
+  frame: GoldFrameName
+  filters: Record<string, string[]>
+}
+
 interface Props {
   customerId: string
   frame: GoldFrameName
+  /** filters to open with; applied only when it names this frame */
+  intent?: GoldIntent | null
+  /** called once the intent has been taken so the parent clears it —
+   *  an arrival instruction, not a selection */
+  onIntentHandled?: () => void
 }
 
-export function GoldTable({ customerId, frame }: Props) {
+export function GoldTable({ customerId, frame, intent, onIntentHandled }: Props) {
+  // captured on mount: the parent clears the intent right away, but the
+  // table only renders (and reads its initial filters) once rows arrive
+  const [arrival] = useState(() => (intent?.frame === frame ? intent.filters : undefined))
+  useEffect(() => { if (intent) onIntentHandled?.() }, [intent, onIntentHandled])
   // no cache on purpose: gold mutates on every ingest — refetch-on-mount
   // keeps this always-correct, and the frames are a few thousand rows
   const [rows, setRows] = useState<Row[] | null>(null)
@@ -124,6 +143,7 @@ export function GoldTable({ customerId, frame }: Props) {
         initialHidden={hidden}
         toolbar={filter}
         externalChips={externalChips}
+        initialFilters={arrival}
       />
       {rows.length < total && (
         <p className="frame-note">
