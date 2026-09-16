@@ -483,7 +483,9 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                LedgerIntent (Analyst queue: status/type/gap/IREPS-scope
                filters + the page's date window as from/to, always sent
                through CommandCenter.openQueue) or a GoldIntent (Data pages,
-               Current scope, e.g. credit_scope). Every preset lands as a
+               Current scope, e.g. credit_scope, plus the window — always
+               through openGold; Gold pool opens Bills this way). Every
+               preset lands as a
                visible, removable FilterChip — a narrowing the analyst
                cannot see or clear reads as a broken page. Open exceptions
                and Largest open exceptions are IREPS-only (open_in_scope;
@@ -594,6 +596,10 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                a scope switch in its head. "Current" = GoldTable (shared
                presets in framePresets.ts, refetch-on-mount — no cache,
                gold mutates on ingest) browsing the live gold layer with a
+               date window on Bank (value_date) and Bills (submission_date,
+               else bill_date) — GoldTable.DATE_FIELD, the SAME dates
+               db/overview counts those figures with, so a Command Center
+               link carrying from/to lands on exactly its rows — and a
                per-ingestion filter (per-file rows come from the file's
                gold.file_rows sightings, so a re-export of known bills
                still filters to its own rows); "As of run" = SourceTable

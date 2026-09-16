@@ -73,6 +73,8 @@ const G_IN_SCOPE: GoldIntent = {
   filters: { credit_scope: ['RECOGNISED', 'AWAITING_STATUS', 'AWAITING_BILL_DATA'] },
 }
 const G_RECOGNISED: GoldIntent = { frame: 'bank', filters: { credit_scope: ['RECOGNISED'] } }
+/** every bill in the window — the Gold pool figure */
+const G_BILLS: GoldIntent = { frame: 'bills', filters: {} }
 
 const pct = (v: number | null | undefined) =>
   v === null || v === undefined ? '—' : `${(v * 100).toFixed(1)}%`
@@ -273,14 +275,9 @@ export function CommandCenter({
   // this page comes from /api/overview — live gold + ledger state — so the
   // targets are the Analyst queue and the Data pages' CURRENT scope
   // (gold_*), never a run-scoped frame, which may be empty or from an
-  // unrelated run. Navigating straight to gold_bills deliberately does not
-  // touch the user's recon.dataScope preference (App owns that, and only
-  // the scope switch itself writes it).
-  const headLink = (to: View, text: string) => (
-    <button type="button" className="cc-h-link" onClick={() => onNavigate(to)}>
-      {text}
-    </button>
-  )
+  // unrelated run. Opening a gold page deliberately does not touch the
+  // user's recon.dataScope preference (App owns that, and only the scope
+  // switch itself writes it).
 
   /** Every trip to the queue carries this page's date window, so the
    *  table lands on the same credits/bills the figure counted (the queue
@@ -291,6 +288,20 @@ export function CommandCenter({
     const win = resolveWindow(filter)
     onOpenQueue({ ...intent, from: win.from, to: win.to })
   }
+
+  /** The same for a Data page: the window rides along, applied on the
+   *  date db/overview counted that frame with (GoldTable.DATE_FIELD). */
+  const openGold = (intent: GoldIntent) => {
+    const win = resolveWindow(filter)
+    onOpenGold({ ...intent, from: win.from, to: win.to })
+  }
+
+  /** A heading whose figure is a gold table: opens it windowed + filtered. */
+  const goldLink = (text: string, intent: GoldIntent) => (
+    <button type="button" className="cc-h-link" onClick={() => openGold(intent)}>
+      {text}
+    </button>
+  )
 
   /** A heading whose figure lives in the ledger: same link, but it also
    *  carries the filter that makes the queue show THAT figure. */
@@ -312,7 +323,7 @@ export function CommandCenter({
     { key: 'ireps', label: 'IREPS credits', count: inScope, tone: 'seg-ireps',
       value: data?.in_scope_value,
       hint: "credits carrying this customer's match signal — the money a bill can settle; opens the credits themselves",
-      onOpen: () => onOpenGold(G_IN_SCOPE) },
+      onOpen: () => openGold(G_IN_SCOPE) },
     { key: 'other', label: 'Other receipts', count: outOfScope, tone: '',
       value: data?.out_of_scope_value,
       hint: 'no match signal in the narrative — interest, sweeps and payers outside IREPS; never matchable, so never in the rate',
@@ -384,7 +395,7 @@ export function CommandCenter({
           )}
           <div className="tiles cc-tiles">
             <div className="tile tone-neutral">
-              <div className="tile-label">{headLink('gold_bills', 'Gold pool')}</div>
+              <div className="tile-label">{goldLink('Gold pool', G_BILLS)}</div>
               <div className="tile-count">{data.gold.bills.toLocaleString('en-IN')}</div>
               <div className="tile-amount">bills · {data.gold.credits} credits</div>
               <div className="tile-delta">{data.gold.lineage_docs.toLocaleString('en-IN')} lineage docs · {scope}</div>
@@ -483,7 +494,7 @@ export function CommandCenter({
               <SectionHead label="Credits in window" count={credits}
                            value={creditsValue}
                            hint="every credit the reconciliation saw in this window"
-                           onOpen={() => onOpenGold(G_CREDITS)} />
+                           onOpen={() => openGold(G_CREDITS)} />
               <CompositionBar buckets={scopeBuckets} total={credits} />
               {scopeBuckets.map((b) => (
                 <KeyRow key={b.key} bucket={b} total={credits} />
@@ -491,7 +502,7 @@ export function CommandCenter({
 
               <SectionHead label="Recognised" count={recognised}
                            hint="IREPS credits that could already have matched — the rate's denominator"
-                           onOpen={() => onOpenGold(G_RECOGNISED)} />
+                           onOpen={() => openGold(G_RECOGNISED)} />
               <CompositionBar buckets={outcomeBuckets} total={recognised} />
               {outcomeBuckets.map((b) => (
                 <KeyRow key={b.key} bucket={b} total={recognised} />

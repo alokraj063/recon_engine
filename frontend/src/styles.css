@@ -2453,3 +2453,14 @@ table.data td { padding: 6px 8px; }
   font-size: var(--fs-label);
   color: var(--ink-faint);
 }
+
+/* Data pages: the date window beside the ingestion pick (GoldTable) */
+.gold-dates input[type='date'] {
+  font-family: var(--font-mono);
+  font-size: var(--fs-note);
+  padding: 4px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+}
