@@ -298,8 +298,14 @@ export function LedgerView({
 
   useEffect(load, [load])
 
-  // a run filter and an arrival window belong to one customer
+  // a run filter and an arrival window belong to one customer — reset on
+  // a real SWITCH only. Effects also run on mount, and this one runs after
+  // the intent effect above, so an unconditional reset wiped the window a
+  // Command Center link had just set (Open exceptions 18 -> 1,855 rows).
+  const shownCustomer = useRef(customerId)
   useEffect(() => {
+    if (shownCustomer.current === customerId) return
+    shownCustomer.current = customerId
     setRunFilter(EMPTY_RUN_FILTER)
     setWindowFrom('')
     setWindowTo('')
