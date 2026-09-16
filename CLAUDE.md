@@ -476,7 +476,9 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                Current scope, e.g. credit_scope). Every preset lands as a
                visible, removable FilterChip — a narrowing the analyst
                cannot see or clear reads as a broken page. Open exceptions
-               and Largest open exceptions are IREPS-only (open_in_scope);
+               and Largest open exceptions are IREPS-only (open_in_scope;
+               the tile's subtitle names the excluded "N not IREPS" and
+               links to them);
                DateFilter — quick picks
                Today / Yesterday / This month (default) / All / custom +
                operating-unit chips incl. "Unassigned", persisted per

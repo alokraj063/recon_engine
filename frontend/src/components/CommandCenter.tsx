@@ -413,6 +413,16 @@ export function CommandCenter({
                 {queueLink(
                   `${(openInScope?.bill_only ?? 0).toLocaleString('en-IN')} bill only`,
                   qExcSide('BILL_ONLY'))}
+                {/* not in the count above — the same receipts Match
+                    performance shows as "Other receipts" */}
+                {outOfScope > 0 && (
+                  <>
+                    {' · '}
+                    {queueLink(
+                      `${outOfScope.toLocaleString('en-IN')} not IREPS, excluded`,
+                      qExcGap('UNRECOGNISED_RECEIPT'))}
+                  </>
+                )}
                 {' · '}{scope}
               </div>
             </div>
