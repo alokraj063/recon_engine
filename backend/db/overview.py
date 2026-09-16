@@ -7,7 +7,7 @@ Read-only (no audit events).
 from datetime import date
 
 from datetime import datetime, timedelta
-from sqlalchemy import and_, false, or_, true
+from sqlalchemy import and_, exists, false, not_, or_, true
 from sqlalchemy import func, select
 
 from . import incremental
@@ -143,6 +143,95 @@ def unrecognised_clause():
                and_(ExceptionLedger.gap_type.is_(None),
                     or_(GoldBankTxn.zone_guess.is_(None),
                         GoldBankTxn.zone_guess == "")))
+
+
+# Source-system statuses meaning "the bill is in flight but payment has
+# not been advised yet". The matcher only ever considers PAID-status
+# bills, so a credit whose only same-amount bill sits here could not have
+# matched: the status lags the money, which is not a reconciliation
+# failure. Such credits are reported on their own line and kept OUT of
+# the match-rate denominator — like an unrecognised receipt, for a
+# different reason. RETURNED is deliberately absent: money against a
+# RETURNED bill IS surprising and must stay visible in the rate.
+IN_FLIGHT_STATUSES = ("PASSED", "REGISTERED")
+# IREPS rounds Net Amt to whole rupees, so the amount join carries ±1.
+IN_FLIGHT_AMOUNT_SLACK = 1.0
+
+
+def awaiting_status_clause(customer_pk: int,
+                           statuses=IN_FLIGHT_STATUSES,
+                           slack: float = IN_FLIGHT_AMOUNT_SLACK):
+    """WHERE clause (needs GoldBankTxn joined) picking open BANK_ONLY
+    credits whose amount matches a bill still IN FLIGHT (statuses above).
+
+    The date guard keeps coincidences out: the bill must have been
+    submitted on or before the credit's value date, because money cannot
+    arrive for a bill that does not exist yet. A bill carrying no date at
+    all is allowed through — missing data is not evidence against it.
+    """
+    bill_date = func.coalesce(GoldBill.submission_date, GoldBill.bill_date)
+    return exists(
+        select(GoldBill.id)
+        .where(GoldBill.customer_id == customer_pk,
+               func.upper(func.trim(GoldBill.bill_status)).in_(
+                   [s.upper() for s in statuses]),
+               GoldBill.net_payable_amount.isnot(None),
+               func.abs(GoldBill.net_payable_amount - GoldBankTxn.amount) <= slack,
+               or_(bill_date.is_(None),
+                   bill_date <= GoldBankTxn.value_date))
+        .correlate(GoldBankTxn))
+
+
+# How long a credit may be excused as "the bill export has not arrived
+# yet" before it counts as unmatched again. Exports land daily, so the
+# normal wait is one day and the longest observed gap is a weekend; a
+# feed further behind than this is a process problem, not a timing
+# quirk, and must not hide in a quiet bucket.
+AWAITING_BILL_DATA_CAP_DAYS = 5
+
+
+def _as_date(v):
+    """SQLite can hand back an ISO string for max() on a Date column."""
+    if isinstance(v, str):
+        return date.fromisoformat(v[:10])
+    return getattr(v, "date", lambda: v)() if isinstance(v, datetime) else v
+
+
+def coverage(session, customer_pk: int):
+    """How far the SOURCE data reaches, ignoring any date filter:
+
+      bills_covered_through  latest payment advice in gold. An export
+                             dated D carries advices up to D-1, so a
+                             credit valued after this date has no bill
+                             data to match against YET.
+      data_as_of             latest credit value date — the system's own
+                             "today", so a historical replay ages the
+                             same way a live feed does.
+    """
+    bills_through = session.execute(
+        select(func.max(GoldBill.payment_advice_date))
+        .where(GoldBill.customer_id == customer_pk)).scalar()
+    as_of = session.execute(
+        select(func.max(GoldBankTxn.value_date))
+        .where(GoldBankTxn.customer_id == customer_pk,
+               GoldBankTxn.used_in_recon.is_(True))).scalar()
+    return _as_date(bills_through), _as_date(as_of)
+
+
+def awaiting_bill_data_clause(bills_through, as_of,
+                              cap_days: int = AWAITING_BILL_DATA_CAP_DAYS):
+    """WHERE clause (needs GoldBankTxn joined) picking open BANK_ONLY
+    credits that could not have matched because the bill export covering
+    their advice has not been ingested yet — value date past the bill
+    coverage, and not yet stale beyond the cap.
+
+    With no bills or no credits at all there is no coverage to reason
+    from, and the rule stays OFF: a customer with an empty bill layer is
+    genuinely unreconciled, not waiting."""
+    if bills_through is None or as_of is None:
+        return false()
+    return and_(GoldBankTxn.value_date > bills_through,
+                GoldBankTxn.value_date >= as_of - timedelta(days=cap_days))
 
 
 def overview(session, customer_pk: int, date_from=None, date_to=None,
@@ -289,6 +378,21 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
     # the join-based count equals the plain one when nothing is filtered)
     open_exc["UNRECOGNISED"] = exc_count(
         exc_bank(ExceptionLedger.status == "OPEN", unrecognised_clause()))
+    # credits waiting on the SOURCE SYSTEM's status, not on a match: the
+    # not_(unrecognised_clause()) keeps them from being subtracted twice
+    awaiting_status_credits = exc_count(
+        exc_bank(ExceptionLedger.status == "OPEN",
+                 not_(unrecognised_clause()),
+                 awaiting_status_clause(customer_pk)))
+    # credits whose bill export has not arrived yet (see coverage()) —
+    # the three buckets are mutually exclusive, so the denominator never
+    # subtracts the same credit twice
+    bills_through, data_as_of = coverage(session, customer_pk)
+    awaiting_bill_data_credits = exc_count(
+        exc_bank(ExceptionLedger.status == "OPEN",
+                 not_(unrecognised_clause()),
+                 not_(awaiting_status_clause(customer_pk)),
+                 awaiting_bill_data_clause(bills_through, data_as_of)))
 
     bank_open_value = session.execute(
         select(func.coalesce(func.sum(GoldBankTxn.amount), 0.0))
@@ -320,10 +424,14 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
     # matched by hand) — the match RATE is the settled share
     matched_credits = credit_count(MatchLedger.status != "REJECTED")
     settled_credits = credit_count(MatchLedger.status == "LOCKED")
-    # unrecognised receipts are not matchable: the rate is over the
-    # RECOGNISED credits only, and they are reported as their own count
+    # unrecognised receipts are not matchable, and a credit whose bill is
+    # still in flight in the source system could not have matched either:
+    # the rate is over the credits that COULD have settled, and both
+    # groups are reported as their own counts
     unrecognised_credits = open_exc["UNRECOGNISED"]
-    recognised_credits = max(0, gold["credits"] - unrecognised_credits)
+    recognised_credits = max(0, gold["credits"] - unrecognised_credits
+                             - awaiting_status_credits
+                             - awaiting_bill_data_credits)
     match_rate = ((settled_credits / recognised_credits)
                   if recognised_credits else None)
 
@@ -402,6 +510,12 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
         "matched_credits": matched_credits,
         "settled_credits": settled_credits,
         "unrecognised_credits": unrecognised_credits,
+        "awaiting_status_credits": awaiting_status_credits,
+        "awaiting_bill_data_credits": awaiting_bill_data_credits,
+        # how far the source data reaches — explains the bucket above
+        "bills_covered_through": (bills_through.isoformat()
+                                  if bills_through else None),
+        "data_as_of": data_as_of.isoformat() if data_as_of else None,
         "recognised_credits": recognised_credits,
         "match_rate": match_rate,
         "top_exceptions": top[:8],
@@ -535,7 +649,26 @@ def ar_view(session, customer_pk: int,
                ExceptionLedger.exception_type == "BANK_ONLY",
                ExceptionLedger.status == "OPEN",
                unrecognised_clause())).scalar() or 0
-    recognised = max(0, credits - unrecognised)
+    awaiting_status = session.execute(
+        select(func.count()).select_from(ExceptionLedger)
+        .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
+        .where(ExceptionLedger.customer_id == customer_pk,
+               ExceptionLedger.exception_type == "BANK_ONLY",
+               ExceptionLedger.status == "OPEN",
+               not_(unrecognised_clause()),
+               awaiting_status_clause(customer_pk))).scalar() or 0
+    bills_through, data_as_of = coverage(session, customer_pk)
+    awaiting_bill_data = session.execute(
+        select(func.count()).select_from(ExceptionLedger)
+        .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
+        .where(ExceptionLedger.customer_id == customer_pk,
+               ExceptionLedger.exception_type == "BANK_ONLY",
+               ExceptionLedger.status == "OPEN",
+               not_(unrecognised_clause()),
+               not_(awaiting_status_clause(customer_pk)),
+               awaiting_bill_data_clause(bills_through, data_as_of))).scalar() or 0
+    recognised = max(0, credits - unrecognised - awaiting_status
+                     - awaiting_bill_data)
     match_rate = (len(received_txns) / recognised) if recognised else None
 
     buckets = [("0-30", 0, 30), ("31-60", 31, 60), ("61-90", 61, 90),
@@ -575,6 +708,8 @@ def ar_view(session, customer_pk: int,
                          "mtd_value": mtd_value},
             "match_rate": match_rate,
             "unrecognised": unrecognised,
+            "awaiting_status": awaiting_status,
+            "awaiting_bill_data": awaiting_bill_data,
             "overdue": {"count": len(overdue_rows),
                         "value": sum(r["net_payable_amount"] or 0
                                      for r in overdue_rows)},

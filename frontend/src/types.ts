@@ -312,6 +312,17 @@ export interface Overview {
   settled_credits?: number
   /** open unrecognised receipts — excluded from the match-rate denominator */
   unrecognised_credits?: number
+  /** open credits whose only same-amount bill is still in flight in the
+   *  source system (PASSED / REGISTERED) — also excluded from the rate */
+  awaiting_status_credits?: number
+  /** open credits valued past the bill export's coverage: the bill data
+   *  that would match them has not been ingested yet (excluded from the
+   *  rate until they go stale, see AWAITING_BILL_DATA_CAP_DAYS) */
+  awaiting_bill_data_credits?: number
+  /** latest payment advice date in gold — an export dated D covers D-1 */
+  bills_covered_through?: string | null
+  /** latest credit value date: the data's own "today" */
+  data_as_of?: string | null
   /** credits − unrecognised: the match-rate denominator */
   recognised_credits?: number
   match_rate: number | null
