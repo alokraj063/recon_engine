@@ -80,9 +80,11 @@ export interface LedgerIntent {
   excType?: string[]
   /** exceptions → the BANK_ONLY gap code (see gapOf) */
   excGap?: string[]
-  /** exceptions → Scope: true hides other receipts (UNRECOGNISED_RECEIPT),
-   *  the rows db/overview.open_in_scope leaves out; false clears it */
-  excInScope?: boolean
+  /** exceptions → Scope "Needs action": true hides other receipts
+   *  (UNRECOGNISED_RECEIPT) and credits awaiting data (AWAITING_STATUS /
+   *  AWAITING_BILL_DATA) — exactly the rows db/overview.open_in_scope
+   *  leaves out; false clears it */
+  excOpenWork?: boolean
   /** which of the two tables to scroll to once it has rendered */
   section?: 'matches' | 'exceptions'
   /** the Command Center's date window (yyyy-mm-dd, '' = unbounded),
@@ -144,6 +146,10 @@ function resolvedBy(e: LedgerException, runs: RunListItem[]): string {
  *  UNRECOGNISED_RECEIPT. Keeping the rules in step is what lets each
  *  Match performance row link to a queue filter selecting the same
  *  credits it counted. BILL_ONLY rows have no gap. */
+/** gap codes the Open exceptions tile does not count (db/overview.
+ *  open_in_scope): each is reported once elsewhere on the Command Center */
+const NOT_OPEN_WORK = new Set(['UNRECOGNISED_RECEIPT', 'AWAITING_STATUS', 'AWAITING_BILL_DATA'])
+
 export function gapOf(e: LedgerException): string | null {
   if (e.exception_type !== 'BANK_ONLY') return null
   // the server's read-time reading wins: it is the only thing that can
@@ -183,8 +189,9 @@ export function LedgerView({
   const [excFilter, setExcFilter] = useState<string[]>(['OPEN'])
   const [excTypeFilter, setExcTypeFilter] = useState<string[]>([])
   const [excGapFilter, setExcGapFilter] = useState<string[]>([])
-  // "IREPS only": drop other receipts, which can never match a bill
-  const [excInScope, setExcInScope] = useState(false)
+  // "Needs action": drop other receipts (never matchable) and credits
+  // awaiting data (cannot have matched yet) — the Open exceptions tile
+  const [excOpenWork, setExcOpenWork] = useState(false)
   // the window a Command Center heading arrived with — a separate filter
   // from When (the match's created_at), because the figures it came from
   // are dated by the credit / bill, not by the match row
@@ -268,7 +275,7 @@ export function LedgerView({
     if (intent.excStatus) setExcFilter(intent.excStatus)
     if (intent.excType) setExcTypeFilter(intent.excType)
     if (intent.excGap) setExcGapFilter(intent.excGap)
-    if (intent.excInScope !== undefined) setExcInScope(intent.excInScope)
+    if (intent.excOpenWork !== undefined) setExcOpenWork(intent.excOpenWork)
     if (intent.from !== undefined || intent.to !== undefined) {
       setWindowFrom(intent.from ?? '')
       setWindowTo(intent.to ?? '')
@@ -339,7 +346,7 @@ export function LedgerView({
     (e) => (excFilter.length === 0 || excFilter.includes(e.status))
       && (excTypeFilter.length === 0 || excTypeFilter.includes(e.exception_type))
       && (excGapFilter.length === 0 || excGapFilter.includes(facetKey(gapOf(e))))
-      && (!excInScope || gapOf(e) !== 'UNRECOGNISED_RECEIPT')
+      && (!excOpenWork || !NOT_OPEN_WORK.has(gapOf(e) ?? ''))
       && (!(windowFrom || windowTo) || inDayRange(excDay(e), windowFrom, windowTo))
       && (!runSet || (!!e.first_seen_run_id && runSet.has(e.first_seen_run_id))
           || (!!e.resolved_by_run_id && runSet.has(e.resolved_by_run_id))),
@@ -390,8 +397,8 @@ export function LedgerView({
       onRemove: (v) => setExcTypeFilter(v === undefined ? [] : excTypeFilter.filter((x) => x !== v)) },
     { key: 'exc-gap', label: 'Gap', values: excGapFilter, format: deSnake,
       onRemove: (v) => setExcGapFilter(v === undefined ? [] : excGapFilter.filter((x) => x !== v)) },
-    { key: 'exc-scope', label: 'Scope', values: excInScope ? ['IREPS only'] : [],
-      onRemove: () => setExcInScope(false) },
+    { key: 'exc-scope', label: 'Scope', values: excOpenWork ? ['Needs action'] : [],
+      onRemove: () => setExcOpenWork(false) },
     { key: 'exc-date', label: 'Date', values: windowValues, onRemove: clearWindow },
   ]
   const runNote = data && runSet
@@ -610,11 +617,11 @@ export function LedgerView({
                   excFilter.length ? `status ${excFilter.map(titleCase).join(' / ').toLowerCase()}` : null,
                   excTypeFilter.length ? `type ${excTypeFilter.map(deSnake).join(' / ').toLowerCase()}` : null,
                   excGapFilter.length ? `gap ${excGapFilter.map(deSnake).join(' / ').toLowerCase()}` : null,
-                  excInScope ? 'IREPS only' : null,
+                  excOpenWork ? 'needs action' : null,
                 ].filter(Boolean).join(' · ') || 'these filters'}
                 {runSet ? ' for the selected runs' : ''} —{' '}
                 <button className="link-btn"
-                        onClick={() => { setExcFilter([]); setExcTypeFilter([]); setExcGapFilter([]); setExcInScope(false); clearWindow() }}>show all</button>
+                        onClick={() => { setExcFilter([]); setExcTypeFilter([]); setExcGapFilter([]); setExcOpenWork(false); clearWindow() }}>show all</button>
               </p>
             ) : (
               <div className="ledger-wrap">

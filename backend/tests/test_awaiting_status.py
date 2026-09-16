@@ -124,8 +124,24 @@ def test_in_flight_bills_are_counted_not_rated(world):  # noqa: F811
     assert ov["unrecognised_credits"] == 1
     assert ov["recognised_credits"] == 3          # 6 - 1 unrecognised - 2 awaiting
     assert abs(ov["match_rate"] - 1 / 3) < 1e-9   # 1 settled of 3, not of 6
-    # every credit is still an open exception; only the RATE changed
+    # every credit is still an open exception in the ledger...
     assert ov["open_exceptions"]["BANK_ONLY"] == 5
+    # ...but the Open exceptions tile is the work that needs an analyst:
+    # C3 + C4 only. C1/C2 are named as awaiting, C5 as an other receipt,
+    # so Settled's "of 3" and this tile read the same definition
+    assert ov["open_in_scope"]["bank_only"] == 2
+    assert ov["open_in_scope"]["value"] == 15000.0
+    assert ov["open_in_scope"]["awaiting"] == 2
+    assert ov["open_in_scope"]["awaiting_value"] == 11000.0
+    assert sorted(e["ref"] for e in ov["top_exceptions"]) == ["C3", "C4"]
+    # the Command Center's credit tiles partition Received exactly:
+    # settled + in review + unmatched (Open exceptions) + awaiting data
+    settled = ov["settled_credits"]
+    in_review = ov["matched_credits"] - settled
+    unmatched = ov["recognised_credits"] - ov["matched_credits"]
+    assert unmatched == ov["open_in_scope"]["bank_only"]
+    assert (settled + in_review + unmatched + ov["open_in_scope"]["awaiting"]
+            == ov["in_scope_credits"] == 5)
 
     assert ar["kpis"]["awaiting_status"] == 2
     assert ar["kpis"]["unrecognised"] == 1

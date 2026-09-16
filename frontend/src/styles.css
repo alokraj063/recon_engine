@@ -1581,7 +1581,16 @@ tr.active-run td { background: rgba(44, 115, 80, 0.06); }
   color: var(--ink-faint);
 }
 .cc-head-right { display: flex; align-items: flex-end; gap: 10px; }
-.cc-tiles { margin-top: 16px; }
+/* five credit buckets side by side on a laptop; wraps below that */
+.cc-tiles { margin-top: 16px; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); }
+.cc-scope { margin: 2px 0 0; font-size: var(--fs-note); color: var(--ink-faint); }
+/* the unit beside a tile headline ("27 of 31", "3 matches") */
+.tile .tile-count .tile-unit {
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  font-weight: 400;
+  color: var(--ink-soft);
+}
 .tile-delta {
   margin-top: 4px;
   font-size: var(--fs-label);

@@ -39,19 +39,32 @@ interface Props {
 const Q_SETTLED: LedgerIntent = { section: 'matches', matchStatus: ['LOCKED'] }
 const Q_REVIEW: LedgerIntent = { section: 'matches', matchStatus: ['OPEN'] }
 const Q_ALL_MATCHES: LedgerIntent = { section: 'matches', matchStatus: [] }
-/* Open exceptions are IREPS-only (db/overview.open_in_scope): other
-   receipts can never match a bill and are counted once, under Match
-   performance's "Other receipts". excGap is always set so a gap chip
-   left over from an earlier arrival cannot narrow these. */
+/* Open exceptions are the work that needs an analyst (db/overview.
+   open_in_scope): other receipts can never match a bill and credits
+   awaiting data cannot have matched yet, so each is counted once
+   elsewhere ("other receipts excluded", "awaiting data") and never
+   here. excGap is always set so a gap chip left over from an earlier
+   arrival cannot narrow these. */
 const Q_OPEN_EXC: LedgerIntent = {
-  section: 'exceptions', excStatus: ['OPEN'], excType: [], excGap: [], excInScope: true,
+  section: 'exceptions', excStatus: ['OPEN'], excType: [], excGap: [], excOpenWork: true,
+}
+/** the unmatched credits — the credit half of Open exceptions */
+const Q_UNMATCHED: LedgerIntent = {
+  section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
+  excGap: ['SIGNAL_BILL_NOT_FOUND'], excOpenWork: false,
+}
+/** the IREPS credits the rate excuses: bill still in flight, or its
+ *  export not ingested yet */
+const Q_AWAITING: LedgerIntent = {
+  section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
+  excGap: ['AWAITING_STATUS', 'AWAITING_BILL_DATA'], excOpenWork: false,
 }
 const Q_RESOLVED_EXC: LedgerIntent = {
-  section: 'exceptions', excStatus: ['RESOLVED'], excType: [], excGap: [], excInScope: false,
+  section: 'exceptions', excStatus: ['RESOLVED'], excType: [], excGap: [], excOpenWork: false,
 }
 /** open exceptions of ONE side — the tile's "N bank only" / "M bill only" */
 const qExcSide = (side: string): LedgerIntent =>
-  ({ section: 'exceptions', excStatus: ['OPEN'], excType: [side], excGap: [], excInScope: true })
+  ({ section: 'exceptions', excStatus: ['OPEN'], excType: [side], excGap: [], excOpenWork: true })
 /* Open bank-only exceptions narrowed to ONE gap code (LedgerView.gapOf).
    Each key row below owns a distinct code, so a row opens exactly the
    credits it counted. Two of the four are stored on the exception
@@ -61,7 +74,7 @@ const qExcSide = (side: string): LedgerIntent =>
    SIGNAL_BILL_NOT_FOUND and all three rows land on the same table. */
 const qExcGap = (gap: string): LedgerIntent =>
   ({ section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
-     excGap: [gap], excInScope: false })
+     excGap: [gap], excOpenWork: false })
 
 /* The same, for figures whose rows live in the gold bank table. The
    credit funnel levels are the read-time `credit_scope` column
@@ -250,6 +263,12 @@ export function CommandCenter({
   // the bill export covering this credit's advice has not been ingested
   // yet — excused only until it goes stale (server-side cap)
   const awaitingBillData = data?.awaiting_bill_data_credits ?? 0
+  const awaiting = awaitingStatus + awaitingBillData
+  // Open exceptions shows "N credits + M bills": only the credits add up
+  // to Received, so the two halves are kept apart
+  const billOnly = data?.open_in_scope.bill_only ?? 0
+  const openCreditValue = Math.max(0,
+    (data?.open_in_scope.value ?? 0) - (data?.open_value.bill_only ?? 0))
   const recognised = data?.recognised_credits
     ?? Math.max(0, credits - unrecognised - awaitingStatus - awaitingBillData)
   // every credit is either this source's money (IREPS) or a receipt from
@@ -357,6 +376,7 @@ export function CommandCenter({
       <div className="ingest-head">
         <div>
           <h2 className="page-title">Command Center</h2>
+          {data && <p className="cc-scope">Showing {scope}</p>}
         </div>
         <span className="cc-head-right">
           <DateFilter value={filter} onChange={setFilter} units={units} unitCounts={unitCounts} />
@@ -393,55 +413,107 @@ export function CommandCenter({
               and {data.filters_applied.bank_only_unassigned === 1 ? 'is' : 'are'} hidden by the unit filter — tick “Unassigned” to include them.
             </p>
           )}
+          {/* Read left to right: what came in -> what is done -> what
+              needs you. Each headline names its own unit (credits /
+              matches / exceptions), and the window is stated once, above,
+              instead of on every tile. */}
           <div className="tiles cc-tiles">
             <div className="tile tone-neutral">
-              <div className="tile-label">{goldLink('Gold pool', G_BILLS)}</div>
-              <div className="tile-count">{data.gold.bills.toLocaleString('en-IN')}</div>
-              <div className="tile-amount">bills · {data.gold.credits} credits</div>
-              <div className="tile-delta">{data.gold.lineage_docs.toLocaleString('en-IN')} lineage docs · {scope}</div>
+              <div className="tile-label">{goldLink('Received', G_IN_SCOPE)}</div>
+              {/* the headline is the IREPS money — every tile to the right
+                  is IREPS-only; what was left out is named underneath */}
+              <div className="tile-count">
+                {inScope.toLocaleString('en-IN')}
+                <span className="tile-unit"> IREPS credits</span>
+              </div>
+              {data.in_scope_value !== undefined && (
+                <div className="tile-amount">{inr(data.in_scope_value)}</div>
+              )}
+              <div className="tile-delta">
+                {/* the same receipts Match performance shows as "Other
+                    receipts" — never matchable */}
+                {queueLink(
+                  `${outOfScope.toLocaleString('en-IN')} other receipts excluded`,
+                  qExcGap('UNRECOGNISED_RECEIPT'))}
+                {' · '}
+                {goldLink(`${credits.toLocaleString('en-IN')} credits in window`, G_CREDITS)}
+              </div>
+              <div className="tile-delta">
+                {goldLink(`${data.gold.bills.toLocaleString('en-IN')} bills`, G_BILLS)}
+                {' · '}{data.gold.lineage_docs.toLocaleString('en-IN')} lineage docs
+              </div>
             </div>
+            {/* Settled + Needs review + Open exceptions + Awaiting data
+                = Received: one CREDIT bucket per tile, the same partition
+                as Match performance (recognised = settled + in review +
+                unmatched; IREPS credits = recognised + awaiting). Open
+                exceptions reads "N credits + M bills": the bills are named
+                beside the credits, never summed into them. */}
             <div className="tile">
               <div className="tile-label">{queueLink('Settled', Q_SETTLED)}</div>
-              <div className="tile-count">{settled.toLocaleString('en-IN')}</div>
-              <div className="tile-amount">{pct(data.match_rate)} of recognised credits · {windowLabel(filter)}</div>
-              <div className="tile-delta">{data.matches.OPEN} awaiting review · {data.matches.REJECTED} rejected</div>
+              <div className="tile-count">
+                {settled.toLocaleString('en-IN')}
+                <span className="tile-unit"> credits</span>
+              </div>
+              <div className="tile-amount">
+                {pct(data.match_rate)} of {recognised.toLocaleString('en-IN')} recognised credits
+              </div>
+              <div className="tile-delta">
+                auto {data.locked_by.AUTO_HIGH.toLocaleString('en-IN')}
+                {' · '}accepted {accepted.toLocaleString('en-IN')}
+                {' · '}manual {manual.toLocaleString('en-IN')}
+              </div>
             </div>
             <div className="tile tone-review">
-              <div className="tile-label">{queueLink('Analyst queue', Q_REVIEW)}</div>
-              <div className="tile-count">{data.matches.OPEN}</div>
-              <div className="tile-amount">matches awaiting review</div>
-              <div className="tile-delta">accept or reject to settle · {scope}</div>
+              <div className="tile-label">{queueLink('Needs review', Q_REVIEW)}</div>
+              <div className="tile-count">
+                {inReview.toLocaleString('en-IN')}
+                <span className="tile-unit"> credits</span>
+              </div>
+              <div className="tile-amount">
+                {data.matches.OPEN.toLocaleString('en-IN')} {data.matches.OPEN === 1 ? 'match' : 'matches'} to accept or reject
+              </div>
             </div>
             <div className="tile tone-bank">
               <div className="tile-label">{queueLink('Open exceptions', Q_OPEN_EXC)}</div>
-              <div className="tile-count">{(openInScope?.count ?? 0).toLocaleString('en-IN')}</div>
-              <div className="tile-amount">{inr(openInScope?.value ?? 0)}</div>
+              {/* the credits count toward Received; the bills sit beside
+                  them in the headline but outside the credit sum */}
+              <div className="tile-count">
+                {unmatched.toLocaleString('en-IN')}
+                <span className="tile-unit"> {unmatched === 1 ? 'credit' : 'credits'}</span>
+                {' + '}
+                {billOnly.toLocaleString('en-IN')}
+                <span className="tile-unit"> {billOnly === 1 ? 'bill' : 'bills'}</span>
+              </div>
+              <div className="tile-amount">{inr(data.open_in_scope.value)}</div>
+              <div className="tile-delta">
+                {queueLink(`${inr(openCreditValue)} credits`, Q_UNMATCHED)}
+                {' · '}
+                {queueLink(`${inr(data.open_value.bill_only)} bills`, qExcSide('BILL_ONLY'))}
+              </div>
               <div className="tile-delta">
                 {queueLink(
-                  `${(openInScope?.bank_only ?? 0).toLocaleString('en-IN')} bank only`,
-                  qExcSide('BANK_ONLY'))}
-                {' · '}
-                {queueLink(
-                  `${(openInScope?.bill_only ?? 0).toLocaleString('en-IN')} bill only`,
-                  qExcSide('BILL_ONLY'))}
-                {/* not in the count above — the same receipts Match
-                    performance shows as "Other receipts" */}
-                {outOfScope > 0 && (
-                  <>
-                    {' · '}
-                    {queueLink(
-                      `${outOfScope.toLocaleString('en-IN')} not IREPS, excluded`,
-                      qExcGap('UNRECOGNISED_RECEIPT'))}
-                  </>
-                )}
-                {' · '}{scope}
+                  `${data.resolved_exceptions.toLocaleString('en-IN')} resolved in window`,
+                  Q_RESOLVED_EXC)}
               </div>
             </div>
-            <div className="tile tone-bill">
-              <div className="tile-label">{queueLink('Resolved', Q_RESOLVED_EXC)}</div>
-              <div className="tile-count">{data.resolved_exceptions}</div>
-              <div className="tile-amount">exceptions closed by runs or decisions</div>
-              <div className="tile-delta">{scope}</div>
+            <div className="tile tone-neutral">
+              <div className="tile-label">{queueLink('Awaiting data', Q_AWAITING)}</div>
+              <div className="tile-count">
+                {awaiting.toLocaleString('en-IN')}
+                <span className="tile-unit"> credits</span>
+              </div>
+              {openInScope?.awaiting_value !== undefined && (
+                <div className="tile-amount">{inr(openInScope.awaiting_value)}</div>
+              )}
+              <div className="tile-delta">
+                {queueLink(`${awaitingStatus.toLocaleString('en-IN')} source status`,
+                  qExcGap('AWAITING_STATUS'))}
+                {' · '}
+                {queueLink(`${awaitingBillData.toLocaleString('en-IN')} bill data`,
+                  qExcGap('AWAITING_BILL_DATA'))}
+              </div>
+              <div className="tile-delta">not rated · clears as the data arrives</div>
             </div>
           </div>
 

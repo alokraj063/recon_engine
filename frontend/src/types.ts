@@ -318,9 +318,11 @@ export interface Overview {
   open_exceptions: { BANK_ONLY: number; BILL_ONLY: number; UNRECOGNISED?: number }
   resolved_exceptions: number
   open_value: { bank_only: number; bill_only: number; total: number }
-  /** open exceptions WITHOUT other receipts (UNRECOGNISED_RECEIPT) — the
-   *  Command Center's Open exceptions tile */
-  open_in_scope: { bank_only: number; bill_only: number; count: number; value: number }
+  /** open exceptions that need an analyst — WITHOUT other receipts
+   *  (UNRECOGNISED_RECEIPT) and credits awaiting data, which are named in
+   *  `awaiting` / `awaiting_value` instead. The Open exceptions tile */
+  open_in_scope: { bank_only: number; bill_only: number; count: number; value: number
+                   awaiting?: number; awaiting_value?: number }
   /** credits with any non-rejected match (incl. those awaiting review) */
   matched_credits: number
   /** credits with a LOCKED match — the match rate's numerator */

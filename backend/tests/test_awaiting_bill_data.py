@@ -95,6 +95,11 @@ def test_credit_past_bill_coverage_is_counted_not_rated(world):  # noqa: F811
     assert ov["matched_credits"] == 1 and ov["match_rate"] == 0.5
     # nothing was resolved or relabelled — both credits are still open
     assert ov["open_exceptions"]["BANK_ONLY"] == 2
+    # but only C1 is open WORK; C2 waits for its export, named apart
+    assert ov["open_in_scope"]["bank_only"] == 1
+    assert ov["open_in_scope"]["awaiting"] == 1
+    assert ov["open_in_scope"]["awaiting_value"] == 8000.0
+    assert [e["ref"] for e in ov["top_exceptions"]] == ["C1"]
     assert ar["kpis"]["awaiting_bill_data"] == 1
     assert ar["kpis"]["match_rate"] == 0.5
 

@@ -462,19 +462,25 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
         exc_bank(ExceptionLedger.status == "OPEN", unrecognised_clause()))
     # credits waiting on the SOURCE SYSTEM's status, not on a match: the
     # not_(unrecognised_clause()) keeps them from being subtracted twice
-    awaiting_status_credits = exc_count(
-        exc_bank(ExceptionLedger.status == "OPEN",
-                 not_(unrecognised_clause()),
-                 awaiting_status_clause(customer_pk)))
+    awaiting_status_cl = (ExceptionLedger.status == "OPEN",
+                          not_(unrecognised_clause()),
+                          awaiting_status_clause(customer_pk))
+    awaiting_status_credits = exc_count(exc_bank(*awaiting_status_cl))
     # credits whose bill export has not arrived yet (see coverage()) —
     # the three buckets are mutually exclusive, so the denominator never
     # subtracts the same credit twice
     bills_through, data_as_of = coverage(session, customer_pk)
-    awaiting_bill_data_credits = exc_count(
-        exc_bank(ExceptionLedger.status == "OPEN",
-                 not_(unrecognised_clause()),
-                 not_(awaiting_status_clause(customer_pk)),
-                 awaiting_bill_data_clause(bills_through, data_as_of)))
+    awaiting_bill_data_cl = (ExceptionLedger.status == "OPEN",
+                             not_(unrecognised_clause()),
+                             not_(awaiting_status_clause(customer_pk)),
+                             awaiting_bill_data_clause(bills_through, data_as_of))
+    awaiting_bill_data_credits = exc_count(exc_bank(*awaiting_bill_data_cl))
+
+    def exc_bank_value(*extra):
+        # the money behind exc_bank(*extra): same joins, same filters
+        return session.execute(
+            exc_bank(*extra).with_only_columns(
+                func.coalesce(func.sum(GoldBankTxn.amount), 0.0))).scalar() or 0.0
 
     # --- in scope (IREPS) vs other receipts ----------------------------
     # The split rides the STORED gap code, which the engine stamps through
@@ -515,15 +521,24 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
                ExceptionLedger.status == "OPEN",
                ExceptionLedger.exception_type == "BILL_ONLY",
                *bill_due_cl, *unit_bill_cl)).scalar() or 0.0
-    # the open work, IREPS only: other receipts can never match a bill and
-    # are already reported once, as out_of_scope_credits. Same filters as
-    # the figures above, so this is their difference, not a new query.
-    in_scope_bank_only = open_exc["BANK_ONLY"] - open_exc["UNRECOGNISED"]
+    # the open work: what needs an analyst. Left out, each counted once
+    # elsewhere: other receipts (never matchable -> out_of_scope_credits)
+    # and credits awaiting data (IREPS money that could not have matched
+    # YET -> awaiting_*_credits, the same credits the rate excuses, so
+    # Settled's "of N" and this tile read one definition). Same filters
+    # as the figures above, so this is their difference.
+    awaiting_count = awaiting_status_credits + awaiting_bill_data_credits
+    awaiting_value = (exc_bank_value(*awaiting_status_cl)
+                      + exc_bank_value(*awaiting_bill_data_cl))
+    in_scope_bank_only = open_exc["BANK_ONLY"] - open_exc["UNRECOGNISED"] - awaiting_count
     open_in_scope = {
         "bank_only": in_scope_bank_only,
         "bill_only": open_exc["BILL_ONLY"],
         "count": in_scope_bank_only + open_exc["BILL_ONLY"],
-        "value": bank_open_value - out_of_scope_value + bill_open_value,
+        "value": bank_open_value - out_of_scope_value - awaiting_value + bill_open_value,
+        # what the tile names as not counted
+        "awaiting": awaiting_count,
+        "awaiting_value": awaiting_value,
     }
 
     def credit_count(*status_cl):
@@ -553,8 +568,9 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
                   if recognised_credits else None)
 
     # top open exceptions by absolute value (both sides in one list),
-    # IREPS only like open_in_scope — a large interest credit or sweep
-    # would otherwise head a list whose tile does not count it
+    # the same rows as open_in_scope — a large interest credit, sweep or
+    # credit awaiting data would otherwise head a list whose tile does
+    # not count it
     top: list = []
     for e, t in session.execute(
             select(ExceptionLedger, GoldBankTxn)
@@ -563,6 +579,8 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
                    ExceptionLedger.status == "OPEN",
                    ExceptionLedger.exception_type == "BANK_ONLY",
                    not_(unrecognised_clause()),
+                   not_(awaiting_status_clause(customer_pk)),
+                   not_(awaiting_bill_data_clause(bills_through, data_as_of)),
                    *txn_cl, *bank_only_cl)):
         top.append({"id": e.id, "exception_type": "BANK_ONLY",
                     "ref": t.bank_ref, "zone": t.zone_guess,
