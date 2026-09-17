@@ -481,27 +481,34 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                + lucide-react (nav/button icons — professional stroke set,
                tree-shaken per import; the only other runtime dep);
                IA: "Operate" group — Command Center (default landing;
-               redesigned 2026-09-17 as a 7/5 board where EVERY FIGURE
-               APPEARS ONCE — header (customer · data-through date; date
-               filter, customer picker only when >1, refresh, Ingest /
-               Reconcile), then: Reconciliation health (rate ring + "N
-               settled of M recognised" + auto/accepted/manual, and IREPS
-               credits received with a bar partitioning them into Settled /
-               In review / Unmatched / Awaiting data — legend shows shares,
-               counts on hover — plus other receipts, credits in window and
-               the Gold pool in its foot) | Needs attention (Matches to
-               review, Open exceptions "N credits · M bills" + resolved,
-               Awaiting data status/bill-data — stretched-button rows) |
-               Largest open exceptions (Age from data_as_of) | Recent
-               activity (components/RecentActivity.tsx: the human-meaningful
-               slice of GET /api/audit — ingestions, runs enriched from
-               ledger.finalized, match decisions, config; bronze/silver/
-               conflict rows are left to the Audit trail; absolutely
-               positioned so it never stretches the row). The KPI tiles,
-               partition strip, Match performance funnel table, donut and
-               Pipeline panel are gone. All figures from GET /api/overview;
-               every figure, legend item and row opens where it lives,
-               ALREADY FILTERED to it — a
+               v4 "Analyst inbox" design, 2026-09-17 — task-first, EVERY
+               FIGURE APPEARS ONCE. Header: "Command Center" eyebrow, a
+               time-of-day greeting as the page-title, "N items need you"
+               (matches.OPEN + open_in_scope.count — shown nowhere else) ·
+               customer · data-through date; date filter, customer picker
+               only when >1, refresh, Ingest / Reconcile. LEFT (2/3) the
+               inbox, most urgent first: Decide (one "Review N weak
+               matches" task when matches.OPEN > 0), Resolve (one task card
+               PER top_exception — "Find the bill for credit …" /
+               "Find the payment for bill …", amount · zone · date, an age
+               badge from data_as_of, red past 30 days, a stretched Open
+               button — with the unmatched-credit / bill-only counts +
+               values as the group's links and "+N more in the Analyst
+               queue"), an "Inbox zero" state when both are empty, and a
+               collapsed muted "Waiting on data (N)" group expanding to
+               source-status / bill-data explanations + links. RIGHT (1/3,
+               sticky) the scorecard: match rate as a horizontal gauge
+               (settled + in review over recognised) with "N settled of M
+               recognised" + auto/accepted/manual, then a definition list —
+               IREPS credits received, Other receipts (muted), Credits in
+               window, Gold pool, Resolved in window, each row a drill-down
+               — and Recent activity (components/RecentActivity.tsx: the
+               human-meaningful slice of GET /api/audit — ingestions, runs
+               enriched from ledger.finalized, match decisions, config;
+               bronze/silver/conflict rows left to the Audit trail) at a
+               fixed height with internal scroll. All figures from GET
+               /api/overview; every figure, task and row opens where it
+               lives, ALREADY FILTERED to it — a
                LedgerIntent (Analyst queue: status/type/gap/IREPS-scope
                filters + the page's date window as from/to, always sent
                through CommandCenter.openQueue) or a GoldIntent (Data pages,
@@ -509,11 +516,11 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                through openGold; Gold pool opens Bills this way). Every
                preset lands as a
                visible, removable FilterChip — a narrowing the analyst
-               cannot see or clear reads as a broken page. The IREPS bar is
-               ONE credit partition: IREPS credits = Settled + In review
-               (credits, not matches) + Unmatched + Awaiting data (Open
-               exceptions' bills are named beside its credits, never summed)
-               — guarded server-side in tests/test_awaiting_status.py.
+               cannot see or clear reads as a broken page. The credit
+               partition behind the page (IREPS credits = settled + in
+               review + unmatched + awaiting data; bill-only exceptions are
+               named beside the credits, never summed) is
+               guarded server-side in tests/test_awaiting_status.py.
                Largest open exceptions is the work needing an analyst
                (open_in_scope: no other receipts, no credits awaiting
                data, bills included);

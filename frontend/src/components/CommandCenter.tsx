@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Clock3, GitMerge, ListChecks, RotateCw, Upload,
+  AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Clock3, GitMerge, Inbox, ListChecks,
+  RotateCw, Search, Upload,
 } from 'lucide-react'
-import type { CustomerInfo, Overview } from '../types'
+import type { CustomerInfo, Overview, OverviewException } from '../types'
 import { fetchOperatingUnits, fetchOverview } from '../api'
 import { inr, inrCompact } from '../format'
 import type { View } from './Sidebar'
@@ -45,7 +46,7 @@ const Q_ALL_MATCHES: LedgerIntent = { section: 'matches', matchStatus: [] }
 /* Open exceptions are the work that needs an analyst (db/overview.
    open_in_scope): other receipts can never match a bill and credits
    awaiting data cannot have matched yet, so each is counted once
-   elsewhere ("other receipts", "awaiting data") and never here. excGap
+   elsewhere ("other receipts", "waiting on data") and never here. excGap
    is always set so a gap chip left over from an earlier arrival cannot
    narrow these. */
 const Q_OPEN_EXC: LedgerIntent = {
@@ -110,11 +111,17 @@ function ageDays(date: string, asOf: string): number | null {
   if (Number.isNaN(a) || Number.isNaN(b)) return null
   return Math.max(0, Math.round((b - a) / 86_400_000))
 }
+const ageText = (d: number) => (d === 0 ? 'today' : `${d} ${plural(d, 'day', 'days')}`)
+
+function greeting(): string {
+  const h = new Date().getHours()
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
+}
 
 /** A small inline link — teal, so it always reads as one. */
 function Link({ children, onClick, title, quiet }: {
   children: ReactNode; onClick: () => void; title?: string
-  /** keeps the surrounding text colour until hovered (figures inside prose) */
+  /** keeps the surrounding text colour until hovered */
   quiet?: boolean
 }) {
   return (
@@ -125,59 +132,63 @@ function Link({ children, onClick, title, quiet }: {
   )
 }
 
-/** The match-rate ring (inline SVG, no deps). */
-function RateRing({ rate }: { rate: number | null }) {
-  const value = rate === null ? 0 : Math.max(0, Math.min(1, rate))
-  const r = 38
-  const c = 2 * Math.PI * r
+/* One task in the inbox. The Open button is stretched over the card, so
+   the whole card is one target while staying a real, focusable button. */
+function TaskCard({ tone, icon, title, meta, age, onOpen, action = 'Open' }: {
+  tone: 'review' | 'credit' | 'bill'
+  icon: ReactNode
+  title: ReactNode
+  meta: ReactNode
+  /** days old; omitted for tasks without a date */
+  age?: number | null
+  onOpen: () => void
+  action?: string
+}) {
   return (
-    <div className="cc-ring" role="img" aria-label={`match rate ${pct(rate)}`}>
-      <svg viewBox="0 0 96 96">
-        <circle cx="48" cy="48" r={r} className="cc-ring-track" />
-        <circle cx="48" cy="48" r={r} className="cc-ring-value"
-                strokeDasharray={`${value * c} ${c}`} transform="rotate(-90 48 48)" />
-      </svg>
-      <span className="cc-ring-label">{pct(rate)}</span>
-    </div>
+    <li className={`cc-task tone-${tone}`}>
+      <span className="cc-task-icon">{icon}</span>
+      <div className="cc-task-body">
+        <div className="cc-task-title">{title}</div>
+        <div className="cc-task-meta">{meta}</div>
+      </div>
+      {age !== undefined && (
+        <span className={`cc-age${age !== null && age > 30 ? ' is-late' : ''}`}
+              title={age !== null && age > 30 ? 'older than 30 days' : undefined}>
+          {age === null ? '—' : ageText(age)}
+        </span>
+      )}
+      <button type="button" className="cc-task-open" onClick={onOpen}>
+        {action} <ArrowRight size={14} strokeWidth={2} />
+      </button>
+    </li>
   )
 }
 
-/* One row of the "Needs attention" list. The title is a stretched
-   button (the whole row opens the queue); links in the meta line sit
-   above the stretch and open their narrower slices. */
-function AttentionRow({ tone, icon, title, meta, count, unit, onOpen }: {
-  tone: 'review' | 'open' | 'awaiting'
-  icon: ReactNode
-  title: string
-  meta: ReactNode
-  count: number
-  unit: string
-  onOpen: () => void
+/** One row of the scorecard's definition list — the whole row is a link. */
+function ScoreRow({ label, value, sub, onOpen, muted, title }: {
+  label: string; value: ReactNode; sub?: ReactNode; onOpen: () => void
+  muted?: boolean; title?: string
 }) {
-  const clear = count === 0
   return (
-    <li className={`cc-att tone-${tone}${clear ? ' is-clear' : ''}`}>
-      <span className="cc-att-icon">{clear ? <CheckCircle2 size={16} strokeWidth={2} /> : icon}</span>
-      <div className="cc-att-body">
-        <button type="button" className="cc-att-open" onClick={onOpen}>{title}</button>
-        <div className="cc-att-meta">{meta}</div>
-      </div>
-      <div className="cc-att-count">
-        <span className="cc-att-n">{n(count)}</span>
-        <span className="cc-att-unit">{clear ? 'all clear' : unit}</span>
-      </div>
-      <ChevronRight className="cc-att-chev" size={16} strokeWidth={2} />
-    </li>
+    <button type="button" className={`cc-dl-row${muted ? ' is-muted' : ''}`}
+            onClick={onOpen} title={title}>
+      <span className="cc-dl-label">{label}</span>
+      <span className="cc-dl-value">
+        <span>{value}</span>
+        {sub && <span className="cc-dl-sub">{sub}</span>}
+      </span>
+      <ChevronRight className="cc-dl-chev" size={14} strokeWidth={2} />
+    </button>
   )
 }
 
 function Skeleton() {
   return (
-    <div className="cc-board" aria-busy="true" aria-label="Loading overview">
-      <div className="cc-card sk" style={{ minHeight: 196 }} />
-      <div className="cc-card sk" style={{ minHeight: 196 }} />
-      <div className="cc-card sk" style={{ minHeight: 280 }} />
-      <div className="cc-card sk" style={{ minHeight: 280 }} />
+    <div className="cc-layout" aria-busy="true" aria-label="Loading overview">
+      <div className="cc-inbox">
+        {Array.from({ length: 4 }, (_, i) => <div key={i} className="sk" style={{ height: 68 }} />)}
+      </div>
+      <div className="cc-card sk" style={{ minHeight: 420 }} />
     </div>
   )
 }
@@ -188,6 +199,7 @@ export function CommandCenter({
   const [data, setData] = useState<Overview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [waitingOpen, setWaitingOpen] = useState(false)
   // date window + operating units (item 2.1), remembered per customer
   const [filter, setFilter] = useState<DateFilterValue>(() => loadFilter(customerId))
   const [units, setUnits] = useState<string[]>([])
@@ -227,7 +239,7 @@ export function CommandCenter({
   const credits = data?.gold.credits ?? 0
   // unrecognised receipts (no match signal) are not matchable: every
   // performance figure is over the RECOGNISED credits. This IS
-  // out_of_scope_credits — shown once, as "other receipts"
+  // out_of_scope_credits — shown once, as "Other receipts"
   const unrecognised = data?.unrecognised_credits ?? 0
   // the matching bill is still in flight in the source system, so the
   // credit could not have matched — reported, not rated
@@ -282,26 +294,47 @@ export function CommandCenter({
        credits       = other receipts + IREPS credits
        IREPS credits = settled + in review + unmatched + awaiting data
        recognised    = settled + in review + unmatched   (the rate's base)
-     is split across the page so nothing repeats: the health card owns
-     the rate, the settled count and what came in; the bar draws the IREPS
-     partition (identity + share in its legend, counts on hover); the
-     attention list owns review / open / awaiting. */
-  const partition = [
-    { key: 'settled', label: 'Settled', count: settled, onOpen: () => openQueue(Q_SETTLED) },
-    { key: 'review', label: 'In review', count: inReview, onOpen: () => openQueue(Q_REVIEW) },
-    { key: 'open', label: 'Unmatched', count: unmatched, onOpen: () => openQueue(Q_UNMATCHED) },
-    { key: 'awaiting', label: 'Awaiting data', count: awaiting, onOpen: () => openQueue(Q_AWAITING) },
-  ]
-
+     The inbox owns the WORK (review, open exceptions, waiting on data);
+     the scorecard owns the STATE (rate, settled, what came in, the pool).
+     The header's "N items need you" is their sum, never shown elsewhere. */
   const asOf = data?.data_as_of ?? new Date().toISOString().slice(0, 10)
+  const needYou = data ? data.matches.OPEN + data.open_in_scope.count : 0
+  const more = data ? Math.max(0, data.open_in_scope.count - data.top_exceptions.length) : 0
+  const rated = (c: number) => (recognised > 0 ? (c / recognised) * 100 : 0)
+
+  const exceptionTask = (e: OverviewException) => {
+    const credit = e.exception_type === 'BANK_ONLY'
+    const age = e.date ? ageDays(e.date, asOf) : null
+    return (
+      <TaskCard key={e.id} tone={credit ? 'credit' : 'bill'}
+        icon={credit ? <Search size={16} strokeWidth={2} /> : <AlertTriangle size={16} strokeWidth={2} />}
+        title={<>
+          {credit ? 'Find the bill for credit ' : 'Find the payment for bill '}
+          <span className="cc-ref">{e.ref ?? '—'}</span>
+        </>}
+        meta={<>
+          <span className="cc-task-amt" title={inr(e.amount)}>{inrCompact(e.amount)}</span>
+          {e.zone && <><span className="cc-dot" />{e.zone}</>}
+          {e.date && <><span className="cc-dot" />{credit ? 'valued' : 'advised'} {fmtDay(e.date)}</>}
+        </>}
+        age={age}
+        onOpen={() => openQueue(qExcSide(e.exception_type))} />
+    )
+  }
 
   return (
     <section className="cc-page">
       <header className="cc-head">
         <div className="cc-head-title">
-          <h2 className="page-title">Command Center</h2>
+          <span className="cc-eyebrow">Command Center</span>
+          <h2 className="page-title">{greeting()}</h2>
           <p className="cc-context">
-            {customerName}
+            {data
+              ? needYou > 0
+                ? <strong>{n(needYou)} {plural(needYou, 'item needs', 'items need')} you</strong>
+                : <strong className="is-clear">You’re all caught up</strong>
+              : 'Loading your work…'}
+            <span className="cc-dot" />{customerName}
             {data?.data_as_of && <><span className="cc-dot" />data through {fmtDay(data.data_as_of)}</>}
           </p>
         </div>
@@ -357,182 +390,155 @@ export function CommandCenter({
       )}
 
       {data && (
-        <div className={`cc-board${loading ? ' is-loading' : ''}`}>
-          {/* ---- how healthy is it ---- */}
-          <section className="cc-card cc-health" aria-label="Reconciliation health">
-            <div className="cc-rate">
-              <RateRing rate={data.match_rate} />
-              <div className="cc-rate-text">
-                <span className="cc-eyebrow">Match rate</span>
-                <span className="cc-rate-main">
+        <div className={`cc-layout${loading ? ' is-loading' : ''}`}>
+          {/* ---- the inbox: work, most urgent first ---- */}
+          <div className="cc-inbox">
+            {data.matches.OPEN > 0 && (
+              <section className="cc-group">
+                <header className="cc-group-head">
+                  <h3>Decide</h3>
+                </header>
+                <ul className="cc-task-list">
+                  <TaskCard tone="review" icon={<ListChecks size={16} strokeWidth={2} />}
+                    title={<>Review {n(data.matches.OPEN)} weak {plural(data.matches.OPEN, 'match', 'matches')}</>}
+                    meta={<>{n(inReview)} {plural(inReview, 'credit waits', 'credits wait')} for accept or reject before settling</>}
+                    onOpen={() => openQueue(Q_REVIEW)} action="Review" />
+                </ul>
+              </section>
+            )}
+
+            {data.top_exceptions.length > 0 && (
+              <section className="cc-group">
+                <header className="cc-group-head">
+                  <h3>Resolve</h3>
+                  <span className="cc-group-meta">
+                    <Link onClick={() => openQueue(Q_UNMATCHED)} title={inr(openCreditValue)}>
+                      {n(unmatched)} {plural(unmatched, 'credit', 'credits')} · {inrCompact(openCreditValue)}
+                    </Link>
+                    <Link onClick={() => openQueue(qExcSide('BILL_ONLY'))} title={inr(data.open_value.bill_only)}>
+                      {n(billOnly)} {plural(billOnly, 'bill', 'bills')} · {inrCompact(data.open_value.bill_only)}
+                    </Link>
+                  </span>
+                </header>
+                <ul className="cc-task-list">
+                  {data.top_exceptions.map(exceptionTask)}
+                </ul>
+                {more > 0 && (
+                  <button type="button" className="cc-more" onClick={() => openQueue(Q_OPEN_EXC)}>
+                    {n(more)} more open {plural(more, 'exception', 'exceptions')} in the Analyst queue
+                    <ArrowRight size={14} strokeWidth={2} />
+                  </button>
+                )}
+              </section>
+            )}
+
+            {data.matches.OPEN === 0 && data.top_exceptions.length === 0 && (
+              <div className="cc-zero">
+                <span className="cc-zero-icon"><Inbox size={26} strokeWidth={1.75} /></span>
+                <strong>Inbox zero</strong>
+                <span>No matches to decide and no open exceptions in {windowLabel(filter)}.</span>
+                <button type="button" className="cc-btn" onClick={() => onNavigate('reconcile')}>
+                  <GitMerge size={15} strokeWidth={1.75} /> Run a reconciliation
+                </button>
+              </div>
+            )}
+
+            {awaiting > 0 && (
+              <section className={`cc-waiting${waitingOpen ? ' is-open' : ''}`}>
+                <button type="button" className="cc-waiting-toggle" aria-expanded={waitingOpen}
+                        onClick={() => setWaitingOpen((o) => !o)}>
+                  <Clock3 size={15} strokeWidth={2} />
+                  <span className="cc-waiting-title">Waiting on data ({n(awaiting)})</span>
+                  {data.open_in_scope.awaiting_value !== undefined && (
+                    <span className="cc-waiting-value" title={inr(data.open_in_scope.awaiting_value)}>
+                      {inrCompact(data.open_in_scope.awaiting_value)}
+                    </span>
+                  )}
+                  <span className="cc-waiting-hint">nothing to do yet — clears as data arrives</span>
+                  <ChevronDown className="cc-waiting-chev" size={16} strokeWidth={2} />
+                </button>
+                {waitingOpen && (
+                  <ul className="cc-waiting-list">
+                    <li>
+                      <Link onClick={() => openQueue(qExcGap('AWAITING_STATUS'))}>
+                        {n(awaitingStatus)} awaiting source status
+                      </Link>
+                      <span>The same-amount bill is still passed or registered in IREPS, not yet
+                        advised — the credit could not have matched.</span>
+                    </li>
+                    <li>
+                      <Link onClick={() => openQueue(qExcGap('AWAITING_BILL_DATA'))}>
+                        {n(awaitingBillData)} awaiting bill data
+                      </Link>
+                      <span>Valued after the latest bill export{data.bills_covered_through
+                        ? ` (advices through ${fmtDay(data.bills_covered_through)})` : ''} — ingest a
+                        newer export to match them.</span>
+                    </li>
+                    <li>
+                      <Link onClick={() => openQueue(Q_AWAITING)}>
+                        See every waiting credit <ArrowRight size={13} strokeWidth={2} />
+                      </Link>
+                    </li>
+                  </ul>
+                )}
+              </section>
+            )}
+          </div>
+
+          {/* ---- the scorecard: state, not work ---- */}
+          <aside className="cc-side">
+            <section className="cc-card cc-score">
+              <header className="cc-card-head">
+                <h3>Scorecard</h3>
+                <Link onClick={() => openQueue(Q_ALL_MATCHES)}>
+                  All matches <ArrowRight size={13} strokeWidth={2} />
+                </Link>
+              </header>
+
+              <div className="cc-gauge">
+                <div className="cc-gauge-top">
+                  <span className="cc-gauge-value">{pct(data.match_rate)}</span>
+                  <span className="cc-eyebrow">match rate</span>
+                </div>
+                <div className="cc-gauge-bar" role="img"
+                     aria-label={`${settled} settled and ${inReview} in review of ${recognised} recognised`}>
+                  <span className="seg seg-settled" style={{ width: `${rated(settled)}%` }} />
+                  {inReview > 0 && <span className="seg seg-review" style={{ width: `${rated(inReview)}%` }} />}
+                </div>
+                <div className="cc-gauge-caption">
                   <Link quiet onClick={() => openQueue(Q_SETTLED)}>{n(settled)} settled</Link>
-                  {' of '}
+                  &nbsp;of&nbsp;
                   <Link quiet onClick={() => openGold(G_RECOGNISED)}
                         title="IREPS credits that could already have matched">
                     {n(recognised)} recognised
                   </Link>
-                </span>
-                <span className="cc-rate-by">
+                </div>
+                <div className="cc-gauge-by">
                   auto {n(data.locked_by.AUTO_HIGH)}<span className="cc-dot" />
                   accepted {n(accepted)}<span className="cc-dot" />manual {n(manual)}
-                </span>
-                <Link onClick={() => openQueue(Q_ALL_MATCHES)}>
-                  All matches <ArrowRight size={13} strokeWidth={2} />
-                </Link>
-              </div>
-            </div>
-
-            <div className="cc-received">
-              <div className="cc-received-top">
-                <span className="cc-eyebrow">IREPS credits received</span>
-                <button type="button" className="cc-received-figure" onClick={() => openGold(G_IN_SCOPE)}
-                        title={inr(data.in_scope_value)}>
-                  <span className="cc-big">{inrCompact(data.in_scope_value)}</span>
-                  <span className="cc-big-unit">{n(inScope)} {plural(inScope, 'credit', 'credits')}</span>
-                </button>
+                </div>
               </div>
 
-              <div className="cc-bar" role="img"
-                   aria-label={partition.map((p) => `${p.label} ${p.count}`).join(', ')}>
-                {partition.filter((p) => p.count > 0).map((p) => (
-                  <span key={p.key} className={`seg seg-${p.key}`} style={{ flexGrow: p.count }}
-                        title={`${p.label} · ${n(p.count)} ${plural(p.count, 'credit', 'credits')}`} />
-                ))}
+              <div className="cc-dl">
+                <ScoreRow label="IREPS credits received" onOpen={() => openGold(G_IN_SCOPE)}
+                  value={n(inScope)} sub={inrCompact(data.in_scope_value)} title={inr(data.in_scope_value)} />
+                <ScoreRow label="Other receipts" muted
+                  onOpen={() => openQueue(qExcGap('UNRECOGNISED_RECEIPT'))}
+                  title="no match signal — interest, sweeps, payers outside IREPS; never in the rate"
+                  value={n(outOfScope)}
+                  sub={data.out_of_scope_value !== undefined ? inrCompact(data.out_of_scope_value) : undefined} />
+                <ScoreRow label="Credits in window" onOpen={() => openGold(G_CREDITS)} value={n(credits)} />
+                <ScoreRow label="Gold pool" onOpen={() => openGold(G_BILLS)}
+                  value={<>{n(data.gold.bills)} bills</>}
+                  sub={<>{n(data.gold.lineage_docs)} lineage docs</>} />
+                <ScoreRow label="Resolved in window" onOpen={() => openQueue(Q_RESOLVED_EXC)}
+                  value={n(data.resolved_exceptions)} />
               </div>
-              <div className="cc-legend">
-                {partition.map((p) => (
-                  <button key={p.key} type="button" className="cc-legend-item" onClick={p.onOpen}
-                          title={`${n(p.count)} ${plural(p.count, 'credit', 'credits')}`}>
-                    <span className={`cc-swatch sw-${p.key}`} />
-                    {p.label}
-                    <span className="cc-legend-pct">{inScope > 0 ? pct(p.count / inScope) : '—'}</span>
-                  </button>
-                ))}
-              </div>
+            </section>
 
-              <p className="cc-received-foot">
-                <Link quiet onClick={() => openQueue(qExcGap('UNRECOGNISED_RECEIPT'))}
-                      title="no match signal — interest, sweeps, payers outside IREPS; never in the rate">
-                  +{n(outOfScope)} other receipts
-                </Link>
-                {data.out_of_scope_value !== undefined && <>&nbsp;({inrCompact(data.out_of_scope_value)})</>}
-                &nbsp;not matchable
-                <span className="cc-dot" />
-                <Link quiet onClick={() => openGold(G_CREDITS)}>{n(credits)} credits in window</Link>
-                <span className="cc-dot" />
-                <Link quiet onClick={() => openGold(G_BILLS)}>{n(data.gold.bills)} bills</Link>
-                &nbsp;·&nbsp;{n(data.gold.lineage_docs)} lineage docs
-              </p>
-            </div>
-          </section>
-
-          {/* ---- what needs me ---- */}
-          <section className="cc-card cc-attention">
-            <header className="cc-card-head">
-              <h3>Needs attention</h3>
-            </header>
-            <ul className="cc-att-list">
-              <AttentionRow tone="review" icon={<ListChecks size={16} strokeWidth={2} />}
-                title="Matches to review" count={data.matches.OPEN}
-                unit={plural(data.matches.OPEN, 'match', 'matches')}
-                onOpen={() => openQueue(Q_REVIEW)}
-                meta={data.matches.OPEN > 0
-                  ? <>{n(inReview)} {plural(inReview, 'credit', 'credits')} waiting for accept or reject</>
-                  : 'No weak matches waiting for a decision'} />
-              <AttentionRow tone="open" icon={<AlertTriangle size={16} strokeWidth={2} />}
-                title="Open exceptions" count={data.open_in_scope.count} unit="open"
-                onOpen={() => openQueue(Q_OPEN_EXC)}
-                meta={<>
-                  <Link onClick={() => openQueue(Q_UNMATCHED)} title={inr(openCreditValue)}>
-                    {n(unmatched)} {plural(unmatched, 'credit', 'credits')} · {inrCompact(openCreditValue)}
-                  </Link>
-                  <Link onClick={() => openQueue(qExcSide('BILL_ONLY'))} title={inr(data.open_value.bill_only)}>
-                    {n(billOnly)} {plural(billOnly, 'bill', 'bills')} · {inrCompact(data.open_value.bill_only)}
-                  </Link>
-                  <Link onClick={() => openQueue(Q_RESOLVED_EXC)}>
-                    {n(data.resolved_exceptions)} resolved
-                  </Link>
-                </>} />
-              <AttentionRow tone="awaiting" icon={<Clock3 size={16} strokeWidth={2} />}
-                title="Awaiting data" count={awaiting} unit={plural(awaiting, 'credit', 'credits')}
-                onOpen={() => openQueue(Q_AWAITING)}
-                meta={<>
-                  <Link onClick={() => openQueue(qExcGap('AWAITING_STATUS'))}
-                        title="the same-amount bill is still passed/registered, not advised">
-                    {n(awaitingStatus)} source status
-                  </Link>
-                  <Link onClick={() => openQueue(qExcGap('AWAITING_BILL_DATA'))}
-                        title={`valued after the latest bill export${data.bills_covered_through
-                          ? ` (advices through ${data.bills_covered_through})` : ''}`}>
-                    {n(awaitingBillData)} bill data
-                  </Link>
-                  {data.open_in_scope.awaiting_value !== undefined && (
-                    <span className="cc-att-quiet" title={inr(data.open_in_scope.awaiting_value)}>
-                      {inrCompact(data.open_in_scope.awaiting_value)}
-                    </span>
-                  )}
-                </>} />
-            </ul>
-          </section>
-
-          {/* ---- the detail ---- */}
-          <section className="cc-card cc-worklist">
-            <header className="cc-card-head">
-              <h3>Largest open exceptions</h3>
-              <Link onClick={() => openQueue(Q_OPEN_EXC)}>
-                Open Analyst queue <ArrowRight size={13} strokeWidth={2} />
-              </Link>
-            </header>
-            {data.top_exceptions.length === 0 ? (
-              <div className="cc-empty">
-                <CheckCircle2 size={22} strokeWidth={1.75} />
-                <strong>Nothing open</strong>
-                <span>Every recognised credit and advised bill is accounted for.</span>
-                <Link onClick={() => onNavigate('reconcile')}>
-                  Run an incremental reconciliation <ArrowRight size={13} strokeWidth={2} />
-                </Link>
-              </div>
-            ) : (
-              <div className="cc-table-wrap">
-                <table className="cc-table">
-                  <thead>
-                    <tr>
-                      <th>Type</th><th>Reference</th><th>Zone</th><th>Date</th>
-                      <th className="num">Age</th><th className="num">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.top_exceptions.map((e) => {
-                      const age = e.date ? ageDays(e.date, asOf) : null
-                      const open = () => openQueue(qExcSide(e.exception_type))
-                      return (
-                        <tr key={e.id} onClick={open} tabIndex={0}
-                            onKeyDown={(k) => { if (k.key === 'Enter') open() }}>
-                          <td>
-                            <span className={`cc-type type-${e.exception_type}`}>
-                              {e.exception_type === 'BANK_ONLY' ? 'Credit' : 'Bill'}
-                            </span>
-                          </td>
-                          <td className="mono">{e.ref ?? '—'}</td>
-                          <td>{e.zone ?? '—'}</td>
-                          <td className="nowrap">{e.date ? fmtDay(e.date) : '—'}</td>
-                          <td className="num">
-                            {age === null ? '—'
-                              : <span className={`cc-age${age > 30 ? ' is-late' : ''}`}>{age}d</span>}
-                          </td>
-                          <td className="num strong" title={inr(e.amount)}>{inrCompact(e.amount)}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-
-          {/* ---- what changed ---- */}
-          <RecentActivity customerId={customerId} refreshKey={refreshKey}
-                          onOpenAudit={() => onNavigate('audit')} />
+            <RecentActivity customerId={customerId} refreshKey={refreshKey}
+                            onOpenAudit={() => onNavigate('audit')} />
+          </aside>
         </div>
       )}
     </section>
