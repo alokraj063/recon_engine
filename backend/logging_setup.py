@@ -2,9 +2,10 @@
 Shared logging setup for recon/, db/, and app/ — a standalone top-level
 module (not part of any of those three packages) so importing it never
 creates a recon -> db dependency. Two outputs, one root logger:
-  - human text to stdout (local dev tailing)
+  - human text to stdout (local dev tailing); JSON with LOG_FORMAT=json
   - JSON lines to a rotating file under data/logs/ (gitignored, same
-    RECON_DATA_DIR-style env override pattern as db/base.py)
+    RECON_DATA_DIR-style env override pattern as db/base.py); off with
+    LOG_TO_FILE=false, as containers run it
 
 configure_logging() is called by real entry points only (app/main.py at
 import time, recon/cli.py's main()) — never at db/ import time, never by
@@ -119,12 +120,28 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
 def configure_logging(level: Optional[str] = None) -> None:
     """Call at process start (see module docstring), and again after
     anything that might have called logging.config.fileConfig() in the
     meantime (init_db(), via alembic). Always removes and reinstalls its
-    own two handlers — cheap, and the only way to reliably win back the
-    root logger from a library that reconfigures it out from under us."""
+    own handlers — cheap, and the only way to reliably win back the
+    root logger from a library that reconfigures it out from under us.
+
+    Settings:
+      LOG_LEVEL    INFO (default) | DEBUG | WARNING | ...
+      LOG_FORMAT   text (default): human console lines
+                   json: the console gets the same JSON lines as the file —
+                   what a container wants, so CloudWatch Logs Insights can
+                   query request_id / customer_id / run_id / event_type
+      LOG_TO_FILE  true (default) | false. Containers set false: their disk
+                   is ephemeral, and stdout already reaches CloudWatch."""
     root = logging.getLogger()
     for h in list(root.handlers):
         if getattr(h, "_recon_logging", False):
@@ -136,20 +153,24 @@ def configure_logging(level: Optional[str] = None) -> None:
     ctx_filter = ContextFilter()
 
     console = logging.StreamHandler(sys.stdout)
-    console.setFormatter(ConsoleFormatter(
-        "%(asctime)s %(levelname)-7s %(name)-22s "
-        "req=%(request_id)s cust=%(customer_id)s run=%(run_id)s :: %(message)s"))
+    if os.environ.get("LOG_FORMAT", "text").strip().lower() == "json":
+        console.setFormatter(JsonFormatter())
+    else:
+        console.setFormatter(ConsoleFormatter(
+            "%(asctime)s %(levelname)-7s %(name)-22s "
+            "req=%(request_id)s cust=%(customer_id)s run=%(run_id)s :: %(message)s"))
     console.addFilter(ctx_filter)
     console._recon_logging = True
     root.addHandler(console)
 
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    file_handler = RotatingFileHandler(
-        LOG_FILE, maxBytes=10_000_000, backupCount=5, encoding="utf-8")
-    file_handler.setFormatter(JsonFormatter())
-    file_handler.addFilter(ctx_filter)
-    file_handler._recon_logging = True
-    root.addHandler(file_handler)
+    if _env_flag("LOG_TO_FILE", True):
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            LOG_FILE, maxBytes=10_000_000, backupCount=5, encoding="utf-8")
+        file_handler.setFormatter(JsonFormatter())
+        file_handler.addFilter(ctx_filter)
+        file_handler._recon_logging = True
+        root.addHandler(file_handler)
 
     # alembic registers ~7 "setup plugin ..." INFO lines on every startup;
     # keep alembic.runtime.migration's useful "Running upgrade" at INFO
