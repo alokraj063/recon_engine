@@ -7,3 +7,5 @@ uvicorn[standard]>=0.29
 python-multipart>=0.0.9
 sqlalchemy>=2.0,<2.1
 alembic>=1.13
+psycopg[binary]>=3.2    # Postgres (RDS) driver; unused with local SQLite
+python-dotenv>=1.0      # optional backend/.env for local dev (see env_file.py)

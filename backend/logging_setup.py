@@ -44,6 +44,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
+import env_file  # noqa: F401  (loads backend/.env before LOG_* are read)
+
 BACKEND_DIR = Path(__file__).resolve().parent
 LOG_DIR = Path(os.environ.get("RECON_LOG_DIR", str(BACKEND_DIR / "data" / "logs")))
 LOG_FILE = LOG_DIR / "app.log"

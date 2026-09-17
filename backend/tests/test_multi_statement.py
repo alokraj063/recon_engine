@@ -64,7 +64,8 @@ def world(tmp_path):
         s.execute(delete(RunMatchBill).where(RunMatchBill.run_id.in_(run_ids)))
         s.execute(delete(RunFrame).where(RunFrame.run_id.in_(run_ids)))
         s.execute(delete(MatchLedgerBill).where(MatchLedgerBill.match_ledger_id.in_(match_ids)))
-        for model in (MatchLedger, ExceptionLedger, Run, AuditLog, GoldFileRow,
+        # AuditLog before Run: audit_log.run_id FKs runs (enforced on Postgres)
+        for model in (MatchLedger, ExceptionLedger, AuditLog, Run, GoldFileRow,
                       GoldRecovery, GoldBill, GoldBankTxn, SilverRecord, BronzeFile,
                       SourceConfig, MatchRuleSetRow):
             s.execute(delete(model).where(model.customer_id == pk))

@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 
 import recon
 from db import init_db
+from db.base import run_migrations_on_startup
 from logging_setup import configure_logging, customer_id_var, get_logger, request_id_var
 
 from .routes import router
@@ -27,8 +28,10 @@ error_logger = get_logger("app.errors")
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # bring any blank database (SQLite file or RDS) to the current schema
-    # and seed the default customer; idempotent on every start
-    init_db()
+    # and seed the default customer; idempotent on every start. Deployed
+    # containers turn this off and run `python -m db.migrate` once instead.
+    if run_migrations_on_startup():
+        init_db()
     # init_db() now tells alembic to skip its fileConfig() entirely
     # (configure_logger=False), so this re-call is belt-and-braces
     # against any OTHER library that reconfigures root logging; harmless

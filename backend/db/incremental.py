@@ -81,11 +81,13 @@ def start_run(customer_id: int, params: dict) -> str:
     with SessionLocal() as session:
         session.add(Run(id=run_id, customer_id=customer_id,
                         status="running", mode="incremental", params=params))
-        record_event(session, logger, event_type="run.started",
-                     customer_id=customer_id, run_id=run_id,
-                     details={"mode": "incremental"})
         try:
-            session.commit()
+            # the runs row must reach the DB before the audit row that
+            # references it: there is no relationship() to order the flush,
+            # and Postgres (unlike SQLite) enforces the FK. Flushing here
+            # also keeps the IntegrityError below meaning ONLY the partial
+            # unique index, not an unrelated FK failure misread as a conflict
+            session.flush()
         except IntegrityError:
             session.rollback()
             # no run was actually claimed, so nothing durable to anchor
@@ -96,6 +98,10 @@ def start_run(customer_id: int, params: dict) -> str:
             raise RunInProgress(
                 "an incremental run is already in progress for this customer"
             ) from None
+        record_event(session, logger, event_type="run.started",
+                     customer_id=customer_id, run_id=run_id,
+                     details={"mode": "incremental"})
+        session.commit()
     return run_id
 
 

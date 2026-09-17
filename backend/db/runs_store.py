@@ -63,6 +63,9 @@ def persist_success(customer_id: int,
                 status="succeeded", mode=mode, params=params, payload=payload,
                 selfcheck=selfcheck, workbook_path=workbook_path,
             ))
+        # write the runs row before the rows that FK to it (no
+        # relationship() orders this flush; Postgres enforces the FKs)
+        session.flush()
         if match_links:
             session.bulk_insert_mappings(RunMatchBill, [
                 {"run_id": run_id, **link} for link in match_links
@@ -93,6 +96,7 @@ def persist_failure(customer_id: int, mode: str, params: dict,
             session.add(Run(id=run_id, customer_id=customer_id,
                             status="failed", mode=mode, params=params,
                             error=error))
+        session.flush()   # runs row before the audit row that FKs to it
         record_event(session, logger, event_type="run.failed",
                      level=logging.WARNING, customer_id=customer_id,
                      run_id=run_id, details={"mode": mode, "error": error})

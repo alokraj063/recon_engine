@@ -30,7 +30,7 @@ if config.config_file_name is not None and config.attributes.get("configure_logg
 
 # One URL drives everything; the CLI and init_db() both land here.
 if not config.get_main_option("sqlalchemy.url"):
-    config.set_main_option("sqlalchemy.url", DATABASE_URL)
+    config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 
 target_metadata = Base.metadata
 
