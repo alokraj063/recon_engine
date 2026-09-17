@@ -31,7 +31,7 @@ from db.bronze import register_file
 from db.ingest import ingest_gold_frames
 from db.models import BronzeFile, Customer, MatchRuleSetRow, SourceConfig
 from db.silver import persist_silver
-from db.storage import file_sha256
+from db.storage import file_sha256, is_s3_ref, storage
 from logging_setup import customer_id_var, get_logger
 from recon import (REGISTRY, MatchRuleSet, PipelineSinks, SelfCheckError,
                    get_adapter, run_pipeline, write_workbook)
@@ -717,18 +717,33 @@ def download_workbook(run_id: str):
     snapshot run, or one with nothing in the ledger, streams it
     unchanged (byte-identical)."""
     rec = runs.get_run(run_id)
-    if (rec is None or rec.workbook_path is None
-            or not Path(rec.workbook_path).exists()):
+    if rec is None or not storage.exists(rec.workbook_path):
         _fail(404, "RUN_NOT_FOUND", f"no workbook for run {run_id}")
     stem = Path((rec.payload or {}).get("meta", {})
                 .get("filenames", {}).get("statement") or "statement").stem
     safe = re.sub(r"[^\w. -]", "_", stem)[:60]
     filename = f"Recon_{safe}.xlsx"
     extra = ledger_export.run_ledger_frames(run_id)
+
+    # a local workbook is served in place; an S3 one is fetched to a temp
+    # file first (openpyxl and FileResponse both need a real file)
+    ref = rec.workbook_path
+    if is_s3_ref(ref):
+        stored = storage.download_to(ref, _tmp_xlsx("recon_stored_"))
+        stored_is_temp = True
+    else:
+        stored, stored_is_temp = Path(ref), False
+
     if not extra:
-        return FileResponse(rec.workbook_path, media_type=XLSX, filename=filename)
+        return FileResponse(str(stored), media_type=XLSX, filename=filename,
+                            background=(BackgroundTask(_cleanup, stored)
+                                        if stored_is_temp else None))
     out = _tmp_xlsx("recon_run_")
-    append_ledger_sheets(rec.workbook_path, extra, out)
+    try:
+        append_ledger_sheets(stored, extra, out)
+    finally:
+        if stored_is_temp:
+            _cleanup(stored)
     return FileResponse(str(out), media_type=XLSX, filename=filename,
                         background=BackgroundTask(_cleanup, out))
 
@@ -1298,7 +1313,7 @@ async def reconcile_from_gold(request: Request, params: ReconcileParams):
             if not wanted:
                 _fail(400, "INVALID_INPUT",
                       "statement_bronze_ids: select at least one statement")
-            statements = []   # [(bronze_id, stored path, original name)]
+            stored = []   # [(bronze_id, storage reference, original name)]
             for sid in wanted:
                 stmt_bronze = reconcile_gold.get_statement_bronze(
                     session, customer.id, sid)
@@ -1306,12 +1321,12 @@ async def reconcile_from_gold(request: Request, params: ReconcileParams):
                     _fail(404, "STATEMENT_NOT_FOUND",
                           f"no ingested bank statement with id {sid} for "
                           f"customer '{params.customer_id}'")
-                statements.append((sid, Path(stmt_bronze.stored_path),
-                                   stmt_bronze.original_name))
+                stored.append((sid, stmt_bronze.stored_path,
+                               stmt_bronze.original_name))
             customer_pk = customer.id
             rule_set_id = rule_row.id if rule_row else None
             names = _gold_filenames(session, customer_pk,
-                                    [n for _, _, n in statements])
+                                    [n for _, _, n in stored])
             # the customer's bank adapter re-runs its own selfcheck
             # against the stored bronze file (best-effort, see
             # _gold_selfcheck)
@@ -1324,6 +1339,16 @@ async def reconcile_from_gold(request: Request, params: ReconcileParams):
                     bank_adapter_params = bank_sc.params or {}
                 except KeyError:
                     bank_adapter = None
+
+        # [(bronze_id, local file path, original name)]: local references
+        # are used in place, S3 ones are downloaded into this request's
+        # tmpdir (removed below) — off the event loop, after the session
+        # is closed
+        statements = [
+            (sid, await run_in_threadpool(storage.local_path, ref,
+                                          tmpdir / "statements" / str(sid)),
+             name)
+            for sid, ref, name in stored]
 
         form_config = {
             "window_days": params.window_days,

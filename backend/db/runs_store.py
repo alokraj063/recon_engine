@@ -8,7 +8,6 @@ imports app).
 """
 
 import logging
-import shutil
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -42,11 +41,9 @@ def persist_success(customer_id: int,
     run_id = run_id or uuid.uuid4().hex
     payload["run_id"] = run_id
 
-    workbook_path = None
+    workbook_path = None   # a storage reference: local path or s3:// URI
     if workbook_src is not None and Path(workbook_src).exists():
-        dest = storage.run_dir(run_id) / "Recon_Output.xlsx"
-        shutil.copy2(workbook_src, dest)
-        workbook_path = str(dest)
+        workbook_path = storage.save_run_workbook(run_id, workbook_src)
 
     with SessionLocal() as session:
         existing = session.get(Run, run_id)
@@ -135,12 +132,6 @@ def list_runs(customer_id: Optional[int] = None, limit: int = 50) -> List[Run]:
 
 def prune_run_files(keep: int = 20):
     """File retention only — DB rows are kept (they are the audit trail).
-    Drops the oldest run directories (workbooks) beyond `keep`."""
-    runs_dir = storage.root / "runs"
-    if not runs_dir.is_dir():
-        return
-    dirs = sorted((d for d in runs_dir.iterdir() if d.is_dir()),
-                  key=lambda d: d.stat().st_mtime)
-    if len(dirs) > keep:
-        for d in dirs[:-keep]:
-            shutil.rmtree(d, ignore_errors=True)
+    Local storage drops the oldest run workbooks beyond `keep`; on S3 this
+    is a lifecycle rule instead (see db/storage.py)."""
+    storage.prune_run_files(keep)

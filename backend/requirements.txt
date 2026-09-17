@@ -9,3 +9,4 @@ sqlalchemy>=2.0,<2.1
 alembic>=1.13
 psycopg[binary]>=3.2    # Postgres (RDS) driver; unused with local SQLite
 python-dotenv>=1.0      # optional backend/.env for local dev (see env_file.py)
+boto3>=1.34             # S3 file storage (STORAGE_BACKEND=s3; see db/storage.py)

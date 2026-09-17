@@ -41,7 +41,7 @@ def register_file(session, customer: Customer, source_type: str,
         source_type=source_type,
         adapter_key=adapter_key,
         original_name=original_name,
-        stored_path=str(stored),
+        stored_path=stored,   # storage reference: local path or s3:// URI
         sha256=sha,
         size_bytes=path.stat().st_size,
     )
