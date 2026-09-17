@@ -47,6 +47,11 @@ Excel, and the FastAPI app only moves files in and frames out.
     # terminal 2 - frontend (proxies /api to :8000)
     cd frontend && npm run dev        # open http://localhost:5173
 
+Settings (database, S3 storage, logging) are environment variables, optionally
+in `backend/.env` (template: `backend/.env.example`). Zero config means SQLite
+and local files. Every setting, the Docker image and the AWS/CI setup are
+documented in [docs/configuration.md](docs/configuration.md).
+
 Ingesting and reconciling are two steps. On **Ingest files**, attach a
 document to each slot you want in this ingestion — an ingestion is
 exactly the files you attach, nothing is ever substituted for an empty
