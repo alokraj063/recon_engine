@@ -1,0 +1,48 @@
+# Build context for the Dockerfile at the repo root.
+#
+# ALLOWLIST: everything is excluded, then only the source the image needs is
+# let back in. The repo root holds real Wabtec business data (the sample
+# documents folder, backend/data*, golden CSVs) and local secrets (.env).
+# With an allowlist, a new data folder can never reach an image by accident.
+
+*
+
+# --- backend: application code only (no tests, data or .env). scripts/ is
+# kept: repair scripts (e.g. merge_duplicate_bills.py) can only reach RDS by
+# running as an ECS task from this image.
+!backend/requirements.txt
+!backend/alembic.ini
+!backend/alembic
+!backend/app
+!backend/db
+!backend/recon
+!backend/scripts
+!backend/env_file.py
+!backend/logging_setup.py
+
+# --- frontend: sources needed for `npm ci && npm run build`
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/index.html
+!frontend/vite.config.ts
+!frontend/tsconfig.json
+!frontend/tsconfig.app.json
+!frontend/tsconfig.node.json
+!frontend/public
+!frontend/src
+
+# --- belt and braces inside the allowed folders
+**/__pycache__
+**/*.py[cod]
+**/.env
+**/.env.*
+**/*.xlsx
+**/*.xlsm
+**/*.xls
+**/*.pdf
+**/*.PDF
+**/*.csv
+**/*.db
+**/*.sqlite*
+**/*.log
+**/~$*
