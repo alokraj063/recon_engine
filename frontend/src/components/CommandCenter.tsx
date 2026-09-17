@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useState, type ReactNode } from 'react'
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Clock3, GitMerge, ListChecks, RotateCw, Upload,
+  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Clock3, GitMerge, RotateCw, Upload,
 } from 'lucide-react'
 import type { CustomerInfo, Overview } from '../types'
 import { fetchOperatingUnits, fetchOverview } from '../api'
@@ -98,10 +98,11 @@ const n = (v: number) => v.toLocaleString('en-IN')
 const plural = (v: number, one: string, many: string) => (v === 1 ? one : many)
 
 const DAY = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+const DAY_SHORT = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' })
 /** yyyy-mm-dd -> "21 Aug 2026" (parsed as a calendar day, no timezone shift) */
-function fmtDay(iso: string): string {
+function fmtDay(iso: string, short = false): string {
   const [y, m, d] = iso.split('-').map(Number)
-  return y && m && d ? DAY.format(new Date(y, m - 1, d)) : iso
+  return y && m && d ? (short ? DAY_SHORT : DAY).format(new Date(y, m - 1, d)) : iso
 }
 
 /** whole days from a yyyy-mm-dd date to the data's own "today" */
@@ -112,72 +113,141 @@ function ageDays(date: string, asOf: string): number | null {
 }
 
 /** A small inline link — teal, so it always reads as one. */
-function Link({ children, onClick, title, quiet }: {
+function Link({ children, onClick, title }: {
   children: ReactNode; onClick: () => void; title?: string
-  /** keeps the surrounding text colour until hovered (figures inside prose) */
-  quiet?: boolean
 }) {
   return (
-    <button type="button" className={`cc-link${quiet ? ' is-quiet' : ''}`}
-            onClick={onClick} title={title}>
+    <button type="button" className="cc-link" onClick={onClick} title={title}>
       {children}
     </button>
   )
 }
 
-/** The match-rate ring (inline SVG, no deps). */
-function RateRing({ rate }: { rate: number | null }) {
-  const value = rate === null ? 0 : Math.max(0, Math.min(1, rate))
-  const r = 38
-  const c = 2 * Math.PI * r
+/* ---------------------------------------------------------------------
+   Flow geometry. Every column of the flow is FLOW_H px tall; block
+   positions are computed here and the SVG ribbons are drawn from the
+   very same numbers (viewBox height = FLOW_H, stretched horizontally
+   only), so a ribbon always lands exactly on its block.
+   --------------------------------------------------------------------- */
+
+const FLOW_H = 320
+
+interface Slot { y: number; h: number }
+
+/** Stack blocks with gaps: every block gets `minH`, the rest of the
+ *  column is shared out in proportion to the counts (evenly when all
+ *  are zero), so a 0 still has a readable block. */
+function stack(counts: number[], H: number, gap: number, minH: number): Slot[] {
+  const k = counts.length
+  const free = Math.max(0, H - gap * (k - 1) - minH * k)
+  const total = counts.reduce((a, b) => a + b, 0)
+  let y = 0
+  return counts.map((c) => {
+    const h = minH + (total > 0 ? free * (c / total) : free / k)
+    const slot = { y, h }
+    y += h + gap
+    return slot
+  })
+}
+
+/** A parent block's edge split into gapless bands by the counts — where
+ *  each child's ribbon leaves the parent. */
+function bands(counts: number[], parent: Slot): Slot[] {
+  const total = counts.reduce((a, b) => a + b, 0)
+  let y = parent.y
+  return counts.map((c) => {
+    const h = total > 0 ? parent.h * (c / total) : 0
+    const slot = { y, h }
+    y += h
+    return slot
+  })
+}
+
+type FlowKey = 'credits' | 'ireps' | 'other' | 'settled' | 'review' | 'open' | 'awaiting'
+
+interface Ribbon { key: FlowKey; tone: string; from: Slot; to: Slot; count: number }
+
+/** Soft Sankey ribbons between two stage columns. Zero-count ribbons are
+ *  not drawn; hovering a block brightens its own ribbons and dims the rest. */
+function Ribbons({ ribbons, hot, parentKey }: {
+  ribbons: Ribbon[]; hot: FlowKey | null; parentKey: FlowKey
+}) {
+  const pid = useId().replace(/:/g, '')
   return (
-    <div className="cc-ring" role="img" aria-label={`match rate ${pct(rate)}`}>
-      <svg viewBox="0 0 96 96">
-        <circle cx="48" cy="48" r={r} className="cc-ring-track" />
-        <circle cx="48" cy="48" r={r} className="cc-ring-value"
-                strokeDasharray={`${value * c} ${c}`} transform="rotate(-90 48 48)" />
-      </svg>
-      <span className="cc-ring-label">{pct(rate)}</span>
-    </div>
+    <svg className="cc-ribbons" viewBox={`0 0 100 ${FLOW_H}`} preserveAspectRatio="none"
+         style={{ height: FLOW_H }} aria-hidden="true" focusable="false">
+      <defs>
+        <pattern id={`${pid}-stripe`} width="8" height="8" patternUnits="userSpaceOnUse"
+                 patternTransform="rotate(45)">
+          <rect width="8" height="8" className="cc-rib-stripe-bg" />
+          <rect width="4" height="8" className="cc-rib-stripe" />
+        </pattern>
+      </defs>
+      {ribbons.filter((r) => r.count > 0).map((r) => {
+        const { from: s, to: t } = r
+        const d = `M0 ${s.y} C50 ${s.y} 50 ${t.y} 100 ${t.y} L100 ${t.y + t.h} `
+          + `C50 ${t.y + t.h} 50 ${s.y + s.h} 0 ${s.y + s.h} Z`
+        const state = hot === null ? ''
+          : hot === r.key || hot === parentKey ? ' is-hot' : ' is-dim'
+        return (
+          <path key={r.key} d={d} className={`cc-rib rib-${r.tone}${state}`}
+                style={r.tone === 'open' ? { fill: `url(#${pid}-stripe)` } : undefined} />
+        )
+      })}
+    </svg>
   )
 }
 
-/* One row of the "Needs attention" list. The title is a stretched
-   button (the whole row opens the queue); links in the meta line sit
-   above the stretch and open their narrower slices. */
-function AttentionRow({ tone, icon, title, meta, count, unit, onOpen }: {
-  tone: 'review' | 'open' | 'awaiting'
-  icon: ReactNode
-  title: string
-  meta: ReactNode
+/** One block of the flow — a real button, positioned by its slot. */
+function FlowNode({ k, slot, tone, label, count, share, value, valueTitle, badge, meta, onOpen, setHot }: {
+  k: FlowKey
+  slot?: Slot
+  tone: string
+  label: string
   count: number
-  unit: string
+  /** share of the parent block */
+  share?: string
+  value?: number
+  valueTitle?: string
+  badge?: ReactNode
+  meta?: ReactNode
   onOpen: () => void
+  setHot: (k: FlowKey | null) => void
 }) {
-  const clear = count === 0
+  // short blocks keep label + count on one line and drop the extras
+  const size = !slot ? 'full' : slot.h < 64 ? 'xs' : slot.h < 96 ? 'sm' : 'full'
   return (
-    <li className={`cc-att tone-${tone}${clear ? ' is-clear' : ''}`}>
-      <span className="cc-att-icon">{clear ? <CheckCircle2 size={16} strokeWidth={2} /> : icon}</span>
-      <div className="cc-att-body">
-        <button type="button" className="cc-att-open" onClick={onOpen}>{title}</button>
-        <div className="cc-att-meta">{meta}</div>
-      </div>
-      <div className="cc-att-count">
-        <span className="cc-att-n">{n(count)}</span>
-        <span className="cc-att-unit">{clear ? 'all clear' : unit}</span>
-      </div>
-      <ChevronRight className="cc-att-chev" size={16} strokeWidth={2} />
-    </li>
+    <button type="button"
+            className={`cc-node tone-${tone} size-${size}${count === 0 ? ' is-zero' : ''}`}
+            style={slot ? { top: slot.y, height: slot.h } : undefined}
+            onClick={onOpen}
+            onMouseEnter={() => setHot(k)} onMouseLeave={() => setHot(null)}
+            onFocus={() => setHot(k)} onBlur={() => setHot(null)}>
+      <span className="cc-node-head">
+        <span className="cc-node-label">{label}</span>
+        {share && <span className="cc-node-share">{share}</span>}
+      </span>
+      <span className="cc-node-figures">
+        <span className="cc-node-count">{n(count)}</span>
+        {value !== undefined && (
+          <span className="cc-node-value" title={valueTitle}>{inrCompact(value)}</span>
+        )}
+      </span>
+      {badge && <span className="cc-node-badge">{badge}</span>}
+      {meta && <span className="cc-node-meta">{meta}</span>}
+    </button>
   )
 }
 
 function Skeleton() {
   return (
-    <div className="cc-board" aria-busy="true" aria-label="Loading overview">
-      <div className="cc-card sk" style={{ minHeight: 196 }} />
-      <div className="cc-card sk" style={{ minHeight: 196 }} />
-      <div className="cc-card sk" style={{ minHeight: 280 }} />
-      <div className="cc-card sk" style={{ minHeight: 280 }} />
+    <div className="cc-stack" aria-busy="true" aria-label="Loading overview">
+      <div className="cc-card sk" style={{ minHeight: 420 }} />
+      <div className="cc-trio">
+        <div className="cc-card sk" style={{ minHeight: 280 }} />
+        <div className="cc-card sk" style={{ minHeight: 280 }} />
+        <div className="cc-card sk" style={{ minHeight: 280 }} />
+      </div>
     </div>
   )
 }
@@ -188,6 +258,7 @@ export function CommandCenter({
   const [data, setData] = useState<Overview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [hot, setHot] = useState<FlowKey | null>(null)
   // date window + operating units (item 2.1), remembered per customer
   const [filter, setFilter] = useState<DateFilterValue>(() => loadFilter(customerId))
   const [units, setUnits] = useState<string[]>([])
@@ -227,7 +298,7 @@ export function CommandCenter({
   const credits = data?.gold.credits ?? 0
   // unrecognised receipts (no match signal) are not matchable: every
   // performance figure is over the RECOGNISED credits. This IS
-  // out_of_scope_credits — shown once, as "other receipts"
+  // out_of_scope_credits — shown once, as "Other receipts"
   const unrecognised = data?.unrecognised_credits ?? 0
   // the matching bill is still in flight in the source system, so the
   // credit could not have matched — reported, not rated
@@ -252,6 +323,12 @@ export function CommandCenter({
   const accepted = Math.max(0, (data?.locked_by.USER ?? 0) - manual)
   // a CREDIT count — matches.OPEN is a MATCH count
   const inReview = data ? Math.max(0, data.matched_credits - settled) : 0
+  // the server reports the two halves of the window's money, never the
+  // whole, so add them back up here
+  const creditsValue =
+    data && data.in_scope_value !== undefined && data.out_of_scope_value !== undefined
+      ? data.in_scope_value + data.out_of_scope_value
+      : undefined
 
   // Every figure routes to where it actually LIVES. Every number on this
   // page comes from /api/overview — live gold + ledger state — so the
@@ -278,20 +355,35 @@ export function CommandCenter({
     onOpenGold({ ...intent, from: win.from, to: win.to })
   }
 
-  /* ONE figure, ONE place. The credit funnel as db/overview.py computes it
-       credits       = other receipts + IREPS credits
+  /* ONE figure, ONE place. The flow draws the credit funnel exactly as
+     db/overview.py computes it, one level per column:
+       credits       = IREPS credits + other receipts
        IREPS credits = settled + in review + unmatched + awaiting data
        recognised    = settled + in review + unmatched   (the rate's base)
-     is split across the page so nothing repeats: the health card owns
-     the rate, the settled count and what came in; the bar draws the IREPS
-     partition (identity + share in its legend, counts on hover); the
-     attention list owns review / open / awaiting. */
-  const partition = [
-    { key: 'settled', label: 'Settled', count: settled, onOpen: () => openQueue(Q_SETTLED) },
-    { key: 'review', label: 'In review', count: inReview, onOpen: () => openQueue(Q_REVIEW) },
-    { key: 'open', label: 'Unmatched', count: unmatched, onOpen: () => openQueue(Q_UNMATCHED) },
-    { key: 'awaiting', label: 'Awaiting data', count: awaiting, onOpen: () => openQueue(Q_AWAITING) },
+     The cards underneath carry only what the flow cannot: the bills side
+     of open exceptions, the awaiting-data split and resolutions. */
+  const stage2 = stack([inScope, outOfScope], FLOW_H, 12, 96)
+  const outcomes: Array<{ key: FlowKey; tone: string; count: number }> = [
+    { key: 'settled', tone: 'settled', count: settled },
+    { key: 'review', tone: 'review', count: inReview },
+    { key: 'open', tone: 'open', count: unmatched },
+    { key: 'awaiting', tone: 'awaiting', count: awaiting },
   ]
+  const stage3 = stack(outcomes.map((o) => o.count), FLOW_H, 8, 56)
+  const creditBands = bands([inScope, outOfScope], { y: 0, h: FLOW_H })
+  const irepsBands = bands(outcomes.map((o) => o.count), stage2[0])
+  const ribbons1: Ribbon[] = [
+    { key: 'ireps', tone: 'ireps', from: creditBands[0], to: stage2[0], count: inScope },
+    { key: 'other', tone: 'other', from: creditBands[1], to: stage2[1], count: outOfScope },
+  ]
+  const ribbons2: Ribbon[] = outcomes.map((o, i) =>
+    ({ key: o.key, tone: o.tone, from: irepsBands[i], to: stage3[i], count: o.count }))
+  const shareOf = (c: number, total: number) => (total > 0 ? pct(c / total) : undefined)
+
+  const flowSummary = `${n(credits)} credits in window: ${n(inScope)} IREPS credits `
+    + `(${n(settled)} settled, ${n(inReview)} in review, ${n(unmatched)} unmatched, `
+    + `${n(awaiting)} awaiting data) and ${n(outOfScope)} other receipts. `
+    + `Match rate ${pct(data?.match_rate)}.`
 
   const asOf = data?.data_as_of ?? new Date().toISOString().slice(0, 10)
 
@@ -357,182 +449,195 @@ export function CommandCenter({
       )}
 
       {data && (
-        <div className={`cc-board${loading ? ' is-loading' : ''}`}>
-          {/* ---- how healthy is it ---- */}
-          <section className="cc-card cc-health" aria-label="Reconciliation health">
-            <div className="cc-rate">
-              <RateRing rate={data.match_rate} />
-              <div className="cc-rate-text">
-                <span className="cc-eyebrow">Match rate</span>
-                <span className="cc-rate-main">
-                  <Link quiet onClick={() => openQueue(Q_SETTLED)}>{n(settled)} settled</Link>
-                  {' of '}
-                  <Link quiet onClick={() => openGold(G_RECOGNISED)}
-                        title="IREPS credits that could already have matched">
-                    {n(recognised)} recognised
-                  </Link>
-                </span>
-                <span className="cc-rate-by">
-                  auto {n(data.locked_by.AUTO_HIGH)}<span className="cc-dot" />
-                  accepted {n(accepted)}<span className="cc-dot" />manual {n(manual)}
+        <div className={`cc-stack${loading ? ' is-loading' : ''}`}>
+          {/* ---- the money, left to right ---- */}
+          <section className="cc-card cc-flow-card" aria-label="Reconciliation flow">
+            <header className="cc-card-head">
+              <div>
+                <h3>Reconciliation flow</h3>
+                <p className="cc-card-sub">Where this window’s credits went</p>
+              </div>
+              <div className="cc-flow-head-links">
+                <span className="cc-muted">
+                  Gold pool <Link onClick={() => openGold(G_BILLS)}>{n(data.gold.bills)} bills</Link>
+                  {' · '}{n(data.gold.lineage_docs)} lineage docs
                 </span>
                 <Link onClick={() => openQueue(Q_ALL_MATCHES)}>
                   All matches <ArrowRight size={13} strokeWidth={2} />
                 </Link>
               </div>
-            </div>
-
-            <div className="cc-received">
-              <div className="cc-received-top">
-                <span className="cc-eyebrow">IREPS credits received</span>
-                <button type="button" className="cc-received-figure" onClick={() => openGold(G_IN_SCOPE)}
-                        title={inr(data.in_scope_value)}>
-                  <span className="cc-big">{inrCompact(data.in_scope_value)}</span>
-                  <span className="cc-big-unit">{n(inScope)} {plural(inScope, 'credit', 'credits')}</span>
-                </button>
-              </div>
-
-              <div className="cc-bar" role="img"
-                   aria-label={partition.map((p) => `${p.label} ${p.count}`).join(', ')}>
-                {partition.filter((p) => p.count > 0).map((p) => (
-                  <span key={p.key} className={`seg seg-${p.key}`} style={{ flexGrow: p.count }}
-                        title={`${p.label} · ${n(p.count)} ${plural(p.count, 'credit', 'credits')}`} />
-                ))}
-              </div>
-              <div className="cc-legend">
-                {partition.map((p) => (
-                  <button key={p.key} type="button" className="cc-legend-item" onClick={p.onOpen}
-                          title={`${n(p.count)} ${plural(p.count, 'credit', 'credits')}`}>
-                    <span className={`cc-swatch sw-${p.key}`} />
-                    {p.label}
-                    <span className="cc-legend-pct">{inScope > 0 ? pct(p.count / inScope) : '—'}</span>
-                  </button>
-                ))}
-              </div>
-
-              <p className="cc-received-foot">
-                <Link quiet onClick={() => openQueue(qExcGap('UNRECOGNISED_RECEIPT'))}
-                      title="no match signal — interest, sweeps, payers outside IREPS; never in the rate">
-                  +{n(outOfScope)} other receipts
-                </Link>
-                {data.out_of_scope_value !== undefined && <>&nbsp;({inrCompact(data.out_of_scope_value)})</>}
-                &nbsp;not matchable
-                <span className="cc-dot" />
-                <Link quiet onClick={() => openGold(G_CREDITS)}>{n(credits)} credits in window</Link>
-                <span className="cc-dot" />
-                <Link quiet onClick={() => openGold(G_BILLS)}>{n(data.gold.bills)} bills</Link>
-                &nbsp;·&nbsp;{n(data.gold.lineage_docs)} lineage docs
-              </p>
-            </div>
-          </section>
-
-          {/* ---- what needs me ---- */}
-          <section className="cc-card cc-attention">
-            <header className="cc-card-head">
-              <h3>Needs attention</h3>
             </header>
-            <ul className="cc-att-list">
-              <AttentionRow tone="review" icon={<ListChecks size={16} strokeWidth={2} />}
-                title="Matches to review" count={data.matches.OPEN}
-                unit={plural(data.matches.OPEN, 'match', 'matches')}
-                onOpen={() => openQueue(Q_REVIEW)}
-                meta={data.matches.OPEN > 0
-                  ? <>{n(inReview)} {plural(inReview, 'credit', 'credits')} waiting for accept or reject</>
-                  : 'No weak matches waiting for a decision'} />
-              <AttentionRow tone="open" icon={<AlertTriangle size={16} strokeWidth={2} />}
-                title="Open exceptions" count={data.open_in_scope.count} unit="open"
-                onOpen={() => openQueue(Q_OPEN_EXC)}
-                meta={<>
-                  <Link onClick={() => openQueue(Q_UNMATCHED)} title={inr(openCreditValue)}>
-                    {n(unmatched)} {plural(unmatched, 'credit', 'credits')} · {inrCompact(openCreditValue)}
-                  </Link>
-                  <Link onClick={() => openQueue(qExcSide('BILL_ONLY'))} title={inr(data.open_value.bill_only)}>
-                    {n(billOnly)} {plural(billOnly, 'bill', 'bills')} · {inrCompact(data.open_value.bill_only)}
-                  </Link>
-                  <Link onClick={() => openQueue(Q_RESOLVED_EXC)}>
-                    {n(data.resolved_exceptions)} resolved
-                  </Link>
-                </>} />
-              <AttentionRow tone="awaiting" icon={<Clock3 size={16} strokeWidth={2} />}
-                title="Awaiting data" count={awaiting} unit={plural(awaiting, 'credit', 'credits')}
-                onOpen={() => openQueue(Q_AWAITING)}
-                meta={<>
-                  <Link onClick={() => openQueue(qExcGap('AWAITING_STATUS'))}
-                        title="the same-amount bill is still passed/registered, not advised">
-                    {n(awaitingStatus)} source status
-                  </Link>
-                  <Link onClick={() => openQueue(qExcGap('AWAITING_BILL_DATA'))}
-                        title={`valued after the latest bill export${data.bills_covered_through
-                          ? ` (advices through ${data.bills_covered_through})` : ''}`}>
-                    {n(awaitingBillData)} bill data
-                  </Link>
-                  {data.open_in_scope.awaiting_value !== undefined && (
-                    <span className="cc-att-quiet" title={inr(data.open_in_scope.awaiting_value)}>
-                      {inrCompact(data.open_in_scope.awaiting_value)}
-                    </span>
-                  )}
-                </>} />
-            </ul>
-          </section>
 
-          {/* ---- the detail ---- */}
-          <section className="cc-card cc-worklist">
-            <header className="cc-card-head">
-              <h3>Largest open exceptions</h3>
-              <Link onClick={() => openQueue(Q_OPEN_EXC)}>
-                Open Analyst queue <ArrowRight size={13} strokeWidth={2} />
+            <div className="cc-flow-stages" aria-hidden="true">
+              <span>Received</span><span /><span>Source</span><span /><span>Outcome</span>
+            </div>
+            <div className="cc-flow" role="group" aria-label={flowSummary}>
+              <div className="cc-stage cc-stage-1" style={{ height: FLOW_H }}>
+                <FlowNode k="credits" tone="credits" label="Credits in window" count={credits}
+                  value={creditsValue} valueTitle={creditsValue !== undefined ? inr(creditsValue) : undefined}
+                  meta="every credit the reconciliation saw"
+                  onOpen={() => openGold(G_CREDITS)} setHot={setHot} />
+              </div>
+
+              <Ribbons ribbons={ribbons1} hot={hot} parentKey="credits" />
+
+              <div className="cc-stage" style={{ height: FLOW_H }}>
+                <FlowNode k="ireps" slot={stage2[0]} tone="ireps" label="IREPS credits" count={inScope}
+                  share={shareOf(inScope, credits)}
+                  value={data.in_scope_value} valueTitle={inr(data.in_scope_value)}
+                  meta="carry this customer’s match signal"
+                  onOpen={() => openGold(G_IN_SCOPE)} setHot={setHot} />
+                <FlowNode k="other" slot={stage2[1]} tone="other" label="Other receipts" count={outOfScope}
+                  share={shareOf(outOfScope, credits)}
+                  value={data.out_of_scope_value} valueTitle={inr(data.out_of_scope_value)}
+                  meta="not matchable — interest, sweeps, other payers"
+                  onOpen={() => openQueue(qExcGap('UNRECOGNISED_RECEIPT'))} setHot={setHot} />
+              </div>
+
+              <Ribbons ribbons={ribbons2} hot={hot} parentKey="ireps" />
+
+              <div className="cc-stage" style={{ height: FLOW_H }}>
+                <FlowNode k="settled" slot={stage3[0]} tone="settled" label="Settled" count={settled}
+                  share={shareOf(settled, inScope)}
+                  badge={<><strong>{pct(data.match_rate)}</strong> match rate</>}
+                  meta={<>auto {n(data.locked_by.AUTO_HIGH)} · accepted {n(accepted)} · manual {n(manual)}</>}
+                  onOpen={() => openQueue(Q_SETTLED)} setHot={setHot} />
+                <FlowNode k="review" slot={stage3[1]} tone="review" label="In review" count={inReview}
+                  share={shareOf(inReview, inScope)}
+                  meta={`${n(data.matches.OPEN)} ${plural(data.matches.OPEN, 'match', 'matches')} to accept or reject`}
+                  onOpen={() => openQueue(Q_REVIEW)} setHot={setHot} />
+                <FlowNode k="open" slot={stage3[2]} tone="open" label="Unmatched" count={unmatched}
+                  share={shareOf(unmatched, inScope)}
+                  value={openCreditValue} valueTitle={inr(openCreditValue)}
+                  meta="recognised, no bill found"
+                  onOpen={() => openQueue(Q_UNMATCHED)} setHot={setHot} />
+                <FlowNode k="awaiting" slot={stage3[3]} tone="awaiting" label="Awaiting data" count={awaiting}
+                  share={shareOf(awaiting, inScope)}
+                  value={data.open_in_scope.awaiting_value}
+                  valueTitle={data.open_in_scope.awaiting_value !== undefined
+                    ? inr(data.open_in_scope.awaiting_value) : undefined}
+                  meta="could not have matched yet"
+                  onOpen={() => openQueue(Q_AWAITING)} setHot={setHot} />
+              </div>
+            </div>
+
+            <p className="cc-flow-foot">
+              Shares are of the block each one flows from. The match rate is settled ÷{' '}
+              <Link onClick={() => openGold(G_RECOGNISED)}
+                    title="settled + in review + unmatched">
+                {n(recognised)} recognised credits
               </Link>
-            </header>
-            {data.top_exceptions.length === 0 ? (
-              <div className="cc-empty">
-                <CheckCircle2 size={22} strokeWidth={1.75} />
-                <strong>Nothing open</strong>
-                <span>Every recognised credit and advised bill is accounted for.</span>
-                <Link onClick={() => onNavigate('reconcile')}>
-                  Run an incremental reconciliation <ArrowRight size={13} strokeWidth={2} />
-                </Link>
-              </div>
-            ) : (
-              <div className="cc-table-wrap">
-                <table className="cc-table">
-                  <thead>
-                    <tr>
-                      <th>Type</th><th>Reference</th><th>Zone</th><th>Date</th>
-                      <th className="num">Age</th><th className="num">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.top_exceptions.map((e) => {
-                      const age = e.date ? ageDays(e.date, asOf) : null
-                      const open = () => openQueue(qExcSide(e.exception_type))
-                      return (
-                        <tr key={e.id} onClick={open} tabIndex={0}
-                            onKeyDown={(k) => { if (k.key === 'Enter') open() }}>
-                          <td>
-                            <span className={`cc-type type-${e.exception_type}`}>
-                              {e.exception_type === 'BANK_ONLY' ? 'Credit' : 'Bill'}
-                            </span>
-                          </td>
-                          <td className="mono">{e.ref ?? '—'}</td>
-                          <td>{e.zone ?? '—'}</td>
-                          <td className="nowrap">{e.date ? fmtDay(e.date) : '—'}</td>
-                          <td className="num">
-                            {age === null ? '—'
-                              : <span className={`cc-age${age > 30 ? ' is-late' : ''}`}>{age}d</span>}
-                          </td>
-                          <td className="num strong" title={inr(e.amount)}>{inrCompact(e.amount)}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+              {' '}— credits awaiting data are not rated until their data arrives.
+            </p>
           </section>
 
-          {/* ---- what changed ---- */}
-          <RecentActivity customerId={customerId} refreshKey={refreshKey}
-                          onOpenAudit={() => onNavigate('audit')} />
+          <div className="cc-trio">
+            {/* ---- open exceptions: the bills side lives only here ---- */}
+            <section className="cc-card cc-exc">
+              <header className="cc-card-head">
+                <div>
+                  <h3>Largest open exceptions</h3>
+                  <p className="cc-card-sub">
+                    <Link onClick={() => openQueue(qExcSide('BILL_ONLY'))} title={inr(data.open_value.bill_only)}>
+                      {n(billOnly)} open {plural(billOnly, 'bill', 'bills')} · {inrCompact(data.open_value.bill_only)}
+                    </Link>
+                    {' '}besides the unmatched credits
+                  </p>
+                </div>
+                <Link onClick={() => openQueue(Q_OPEN_EXC)}>
+                  Queue <ArrowRight size={13} strokeWidth={2} />
+                </Link>
+              </header>
+              {data.top_exceptions.length === 0 ? (
+                <div className="cc-empty">
+                  <CheckCircle2 size={22} strokeWidth={1.75} />
+                  <strong>Nothing open</strong>
+                  <span>Every recognised credit and advised bill is accounted for.</span>
+                  <Link onClick={() => onNavigate('reconcile')}>
+                    Run an incremental reconciliation <ArrowRight size={13} strokeWidth={2} />
+                  </Link>
+                </div>
+              ) : (
+                <ul className="cc-list">
+                  {data.top_exceptions.map((e) => {
+                    const age = e.date ? ageDays(e.date, asOf) : null
+                    const side = e.exception_type === 'BANK_ONLY' ? 'Credit' : 'Bill'
+                    return (
+                      <li key={e.id}>
+                        <button type="button" className="cc-list-row"
+                                onClick={() => openQueue(qExcSide(e.exception_type))}
+                                aria-label={`${side} ${e.ref ?? ''} ${inr(e.amount)}`}>
+                          <span className={`cc-side side-${e.exception_type}`} title={side} />
+                          <span className="cc-list-main">
+                            <span className="cc-list-ref">{e.ref ?? '—'}</span>
+                            <span className="cc-list-meta">
+                              {side}{e.zone && <> · {e.zone}</>}
+                              {e.date && <> · {fmtDay(e.date, true)}</>}
+                              {age !== null && (
+                                <> · <span className={age > 30 ? 'is-late' : undefined}>{age}d</span></>
+                              )}
+                            </span>
+                          </span>
+                          <span className="cc-list-amt" title={inr(e.amount)}>{inrCompact(e.amount)}</span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </section>
+
+            {/* ---- why the awaiting credits have not matched yet ---- */}
+            <section className="cc-card cc-wait">
+              <header className="cc-card-head">
+                <div>
+                  <h3>Awaiting data</h3>
+                  <p className="cc-card-sub">Clears on its own as the data arrives</p>
+                </div>
+                <Clock3 size={16} strokeWidth={1.75} className="cc-muted" />
+              </header>
+              <ul className="cc-reasons">
+                <li>
+                  <button type="button" className="cc-reason" onClick={() => openQueue(qExcGap('AWAITING_STATUS'))}>
+                    <span className="cc-reason-text">
+                      <span className="cc-reason-title">Source status</span>
+                      <span className="cc-reason-why">
+                        The same-amount bill is still passed or registered in IREPS — not advised yet.
+                      </span>
+                    </span>
+                    <span className="cc-reason-n">{n(awaitingStatus)}</span>
+                    <ChevronRight size={15} strokeWidth={2} className="cc-chev" />
+                  </button>
+                </li>
+                <li>
+                  <button type="button" className="cc-reason" onClick={() => openQueue(qExcGap('AWAITING_BILL_DATA'))}>
+                    <span className="cc-reason-text">
+                      <span className="cc-reason-title">Bill data</span>
+                      <span className="cc-reason-why">
+                        Valued after the latest bill export
+                        {data.bills_covered_through
+                          ? ` (advices through ${fmtDay(data.bills_covered_through)})` : ''} — ingest a newer one.
+                      </span>
+                    </span>
+                    <span className="cc-reason-n">{n(awaitingBillData)}</span>
+                    <ChevronRight size={15} strokeWidth={2} className="cc-chev" />
+                  </button>
+                </li>
+              </ul>
+              <button type="button" className="cc-resolved" onClick={() => openQueue(Q_RESOLVED_EXC)}>
+                <CheckCircle2 size={16} strokeWidth={2} />
+                <span>
+                  <strong>{n(data.resolved_exceptions)}</strong>{' '}
+                  {plural(data.resolved_exceptions, 'exception', 'exceptions')} resolved in this window
+                </span>
+                <ChevronRight size={15} strokeWidth={2} className="cc-chev" />
+              </button>
+            </section>
+
+            {/* ---- what changed ---- */}
+            <RecentActivity customerId={customerId} refreshKey={refreshKey}
+                            onOpenAudit={() => onNavigate('audit')} />
+          </div>
         </div>
       )}
     </section>

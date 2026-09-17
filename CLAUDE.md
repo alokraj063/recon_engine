@@ -481,26 +481,29 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                + lucide-react (nav/button icons — professional stroke set,
                tree-shaken per import; the only other runtime dep);
                IA: "Operate" group — Command Center (default landing;
-               redesigned 2026-09-17 as a 7/5 board where EVERY FIGURE
-               APPEARS ONCE — header (customer · data-through date; date
-               filter, customer picker only when >1, refresh, Ingest /
-               Reconcile), then: Reconciliation health (rate ring + "N
-               settled of M recognised" + auto/accepted/manual, and IREPS
-               credits received with a bar partitioning them into Settled /
-               In review / Unmatched / Awaiting data — legend shows shares,
-               counts on hover — plus other receipts, credits in window and
-               the Gold pool in its foot) | Needs attention (Matches to
-               review, Open exceptions "N credits · M bills" + resolved,
-               Awaiting data status/bill-data — stretched-button rows) |
-               Largest open exceptions (Age from data_as_of) | Recent
-               activity (components/RecentActivity.tsx: the human-meaningful
-               slice of GET /api/audit — ingestions, runs enriched from
-               ledger.finalized, match decisions, config; bronze/silver/
-               conflict rows are left to the Audit trail; absolutely
-               positioned so it never stretches the row). The KPI tiles,
-               partition strip, Match performance funnel table, donut and
-               Pipeline panel are gone. All figures from GET /api/overview;
-               every figure, legend item and row opens where it lives,
+               v3 "Reconciliation flow", 2026-09-17, EVERY FIGURE APPEARS
+               ONCE — header (customer · data-through date; date filter,
+               customer picker only when >1, refresh, Ingest / Reconcile),
+               then a full-width Sankey-lite flow card: Credits in window ->
+               IREPS credits / Other receipts -> Settled (match-rate badge,
+               auto/accepted/manual) / In review / Unmatched / Awaiting data.
+               Stage columns are CommandCenter.FLOW_H px tall; stack()/bands()
+               compute block slots and the inline-SVG ribbons are drawn from
+               the SAME slots (viewBox height = FLOW_H, stretched
+               horizontally only) so they cannot drift; block heights are
+               proportional with a min height, zero-count ribbons are not
+               drawn, hover/focus brightens a block's ribbons; unmatched
+               ribbons/blocks are always striped. Below ~900px container
+               width the stages stack and ribbons hide. Under it, three
+               cards: Largest open exceptions (compact list rows; the bills
+               side of open exceptions is named only here), Awaiting data
+               (source status / bill data with a plain reason each +
+               resolved-in-window), Recent activity (components/
+               RecentActivity.tsx: the human-meaningful slice of GET
+               /api/audit — ingestions, runs enriched from ledger.finalized,
+               match decisions, config; absolutely positioned so it never
+               stretches the row). All figures from GET /api/overview;
+               every block, row and link opens where it lives,
                ALREADY FILTERED to it — a
                LedgerIntent (Analyst queue: status/type/gap/IREPS-scope
                filters + the page's date window as from/to, always sent
@@ -509,11 +512,11 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                through openGold; Gold pool opens Bills this way). Every
                preset lands as a
                visible, removable FilterChip — a narrowing the analyst
-               cannot see or clear reads as a broken page. The IREPS bar is
-               ONE credit partition: IREPS credits = Settled + In review
-               (credits, not matches) + Unmatched + Awaiting data (Open
-               exceptions' bills are named beside its credits, never summed)
-               — guarded server-side in tests/test_awaiting_status.py.
+               cannot see or clear reads as a broken page. The outcome
+               column is ONE credit partition: IREPS credits = Settled + In
+               review (credits, not matches) + Unmatched + Awaiting data
+               (open exceptions' bills are named in their own card, never
+               summed) — guarded server-side in tests/test_awaiting_status.py.
                Largest open exceptions is the work needing an analyst
                (open_in_scope: no other receipts, no credits awaiting
                data, bills included);
