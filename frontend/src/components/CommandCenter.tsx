@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useState } from 'react'
-import { GitMerge, RotateCw, Upload } from 'lucide-react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import {
+  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Clock3, GitMerge, ListChecks, RotateCw, Upload,
+} from 'lucide-react'
 import type { CustomerInfo, Overview } from '../types'
 import { fetchOperatingUnits, fetchOverview } from '../api'
-import { inr } from '../format'
+import { inr, inrCompact } from '../format'
 import type { View } from './Sidebar'
 import type { LedgerIntent } from './LedgerView'
 import type { GoldIntent } from './GoldTable'
 import {
-  DEFAULT_DATE_FILTER, DateFilter, resolveWindow, unitsLabel, windowLabel,
+  DEFAULT_DATE_FILTER, DateFilter, resolveWindow, windowLabel,
   type DateFilterValue,
 } from './DateFilter'
+import { RecentActivity } from './RecentActivity'
 
 const FILTER_KEY = (customer: string) => `recon.cc.filter.${customer}`
 
@@ -33,7 +36,7 @@ interface Props {
   refreshKey: number
 }
 
-/* The presets each heading carries into the Analyst queue. They are
+/* The presets each figure carries into the Analyst queue. They are
    plain filter values, so each one arrives as a removable chip there —
    the analyst sees WHY the table is narrowed. `[]` clears a filter. */
 const Q_SETTLED: LedgerIntent = { section: 'matches', matchStatus: ['LOCKED'] }
@@ -42,9 +45,9 @@ const Q_ALL_MATCHES: LedgerIntent = { section: 'matches', matchStatus: [] }
 /* Open exceptions are the work that needs an analyst (db/overview.
    open_in_scope): other receipts can never match a bill and credits
    awaiting data cannot have matched yet, so each is counted once
-   elsewhere ("other receipts excluded", "awaiting data") and never
-   here. excGap is always set so a gap chip left over from an earlier
-   arrival cannot narrow these. */
+   elsewhere ("other receipts", "awaiting data") and never here. excGap
+   is always set so a gap chip left over from an earlier arrival cannot
+   narrow these. */
 const Q_OPEN_EXC: LedgerIntent = {
   section: 'exceptions', excStatus: ['OPEN'], excType: [], excGap: [], excOpenWork: true,
 }
@@ -62,16 +65,16 @@ const Q_AWAITING: LedgerIntent = {
 const Q_RESOLVED_EXC: LedgerIntent = {
   section: 'exceptions', excStatus: ['RESOLVED'], excType: [], excGap: [], excOpenWork: false,
 }
-/** open exceptions of ONE side — the tile's "N bank only" / "M bill only" */
+/** open exceptions of ONE side — "N credits" / "M bills" */
 const qExcSide = (side: string): LedgerIntent =>
   ({ section: 'exceptions', excStatus: ['OPEN'], excType: [side], excGap: [], excOpenWork: true })
 /* Open bank-only exceptions narrowed to ONE gap code (LedgerView.gapOf).
-   Each key row below owns a distinct code, so a row opens exactly the
+   Each figure below owns a distinct code, so a link opens exactly the
    credits it counted. Two of the four are stored on the exception
    (UNRECOGNISED_RECEIPT | SIGNAL_BILL_NOT_FOUND); the awaiting pair is
    computed per row by db/overview.gap_details and ridden to the client
    as `gap_detail` — without that they collapse into
-   SIGNAL_BILL_NOT_FOUND and all three rows land on the same table. */
+   SIGNAL_BILL_NOT_FOUND and all three land on the same table. */
 const qExcGap = (gap: string): LedgerIntent =>
   ({ section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
      excGap: [gap], excOpenWork: false })
@@ -91,120 +94,90 @@ const G_BILLS: GoldIntent = { frame: 'bills', filters: {} }
 
 const pct = (v: number | null | undefined) =>
   v === null || v === undefined ? '—' : `${(v * 100).toFixed(1)}%`
+const n = (v: number) => v.toLocaleString('en-IN')
+const plural = (v: number, one: string, many: string) => (v === 1 ? one : many)
 
-/** Donut ring in the letterpress palette (inline SVG, no deps). */
-function MatchDonut({ rate }: { rate: number | null }) {
+const DAY = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+/** yyyy-mm-dd -> "21 Aug 2026" (parsed as a calendar day, no timezone shift) */
+function fmtDay(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  return y && m && d ? DAY.format(new Date(y, m - 1, d)) : iso
+}
+
+/** whole days from a yyyy-mm-dd date to the data's own "today" */
+function ageDays(date: string, asOf: string): number | null {
+  const a = Date.parse(date), b = Date.parse(asOf)
+  if (Number.isNaN(a) || Number.isNaN(b)) return null
+  return Math.max(0, Math.round((b - a) / 86_400_000))
+}
+
+/** A small inline link — teal, so it always reads as one. */
+function Link({ children, onClick, title, quiet }: {
+  children: ReactNode; onClick: () => void; title?: string
+  /** keeps the surrounding text colour until hovered (figures inside prose) */
+  quiet?: boolean
+}) {
+  return (
+    <button type="button" className={`cc-link${quiet ? ' is-quiet' : ''}`}
+            onClick={onClick} title={title}>
+      {children}
+    </button>
+  )
+}
+
+/** The match-rate ring (inline SVG, no deps). */
+function RateRing({ rate }: { rate: number | null }) {
   const value = rate === null ? 0 : Math.max(0, Math.min(1, rate))
-  const c = 2 * Math.PI * 42
+  const r = 38
+  const c = 2 * Math.PI * r
   return (
-    <div className="cc-donut">
-      <svg viewBox="0 0 100 100">
-        <circle cx="50" cy="50" r="42" fill="none"
-                stroke="var(--rule)" strokeWidth="9" />
-        <circle cx="50" cy="50" r="42" fill="none"
-                stroke="var(--green-bright)" strokeWidth="9"
-                strokeLinecap="round"
-                strokeDasharray={`${value * c} ${(1 - value) * c}`}
-                transform="rotate(-90 50 50)" />
+    <div className="cc-ring" role="img" aria-label={`match rate ${pct(rate)}`}>
+      <svg viewBox="0 0 96 96">
+        <circle cx="48" cy="48" r={r} className="cc-ring-track" />
+        <circle cx="48" cy="48" r={r} className="cc-ring-value"
+                strokeDasharray={`${value * c} ${c}`} transform="rotate(-90 48 48)" />
       </svg>
-      <div className="cc-donut-label">
-        <span className="cc-donut-value">{pct(rate)}</span>
-        <span className="cc-donut-sub">recognised credits settled</span>
-      </div>
+      <span className="cc-ring-label">{pct(rate)}</span>
     </div>
   )
 }
 
-/* One bucket of the credit funnel. The buckets inside a section are
-   mutually exclusive and sum to that section's total, so the bar above
-   them is an honest part-to-whole — unlike the five overlapping meters
-   this replaces, where AUTO_HIGH + USER simply WAS `settled` and USER
-   already contained the manual matches.
-   Colour: only the acted-on buckets carry a fill, the remainder is left
-   as bare track. That holds every bar to a pair that survives colour-
-   blind simulation — green/gold is OKLab dE 13.7 (deuteranopia), 20.8
-   (normal vision), while the obvious third fill, gold/sienna, is 1.7
-   and 12.4 and would be unreadable. */
-interface Bucket {
-  key: string
-  label: string
+/* One row of the "Needs attention" list. The title is a stretched
+   button (the whole row opens the queue); links in the meta line sit
+   above the stretch and open their narrower slices. */
+function AttentionRow({ tone, icon, title, meta, count, unit, onOpen }: {
+  tone: 'review' | 'open' | 'awaiting'
+  icon: ReactNode
+  title: string
+  meta: ReactNode
   count: number
-  /** '' = no fill: this bucket IS the bar's remainder, keyed hollow */
-  tone: string
-  /** why the bucket exists, on hover — three lines instead of three paragraphs */
-  hint: string
-  value?: number
-  /** sits BELOW the bar's total, excluded from it (the "not rated" credits) */
-  aside?: boolean
-  onOpen?: () => void
-}
-
-/** Part-to-whole bar: filled buckets in order, remainder left as track. */
-function CompositionBar({ buckets, total }: { buckets: Bucket[]; total: number }) {
-  return (
-    <div className="cc-comp" role="img"
-         aria-label={buckets.map((b) => `${b.label} ${b.count}`).join(', ')}>
-      {buckets.filter((b) => b.tone && b.count > 0).map((b) => (
-        <span key={b.key} className={`cc-comp-seg ${b.tone}`}
-              title={`${b.label} · ${b.count.toLocaleString('en-IN')}`}
-              style={{ width: `${total > 0 ? (b.count / total) * 100 : 0}%` }} />
-      ))}
-    </div>
-  )
-}
-
-/** The bar's legend row — identity in text, never colour alone. */
-function KeyRow({ bucket, total }: { bucket: Bucket; total: number }) {
-  const body = (
-    <>
-      <span className={`cc-key-dot ${bucket.tone || 'seg-track'}`} />
-      <span className="cc-key-label">{bucket.label}</span>
-      <span className="cc-key-n">{bucket.count.toLocaleString('en-IN')}</span>
-      <span className="cc-key-pct">
-        {bucket.aside ? 'not rated' : pct(total > 0 ? bucket.count / total : null)}
-      </span>
-      {bucket.value !== undefined && <span className="cc-key-v">{inr(bucket.value)}</span>}
-    </>
-  )
-  const cls = `cc-key-row${bucket.aside ? ' is-aside' : ''}`
-  return bucket.onOpen
-    ? <button type="button" className={`${cls} is-link`} title={bucket.hint}
-              onClick={bucket.onOpen}>{body}</button>
-    : <div className={cls} title={bucket.hint}>{body}</div>
-}
-
-/** The level of the funnel a bar divides, and its total. Both levels
- *  count CREDITS, so the label opens the page the credits live on — the
- *  precise outcome drill-downs (settled, in review) stay on the key rows
- *  below, where the filter can actually be exact. */
-function SectionHead({ label, hint, count, value, onOpen }: {
-  label: string; hint: string; count: number; value?: number
-  onOpen?: () => void
+  unit: string
+  onOpen: () => void
 }) {
+  const clear = count === 0
   return (
-    <div className="cc-sec-head" title={hint}>
-      {onOpen
-        ? <button type="button" className="cc-sec-label cc-h-link" onClick={onOpen}>
-            {label}
-          </button>
-        : <span className="cc-sec-label">{label}</span>}
-      <span className="cc-sec-n">{count.toLocaleString('en-IN')}</span>
-      {value !== undefined && <span className="cc-sec-v">{inr(value)}</span>}
-    </div>
+    <li className={`cc-att tone-${tone}${clear ? ' is-clear' : ''}`}>
+      <span className="cc-att-icon">{clear ? <CheckCircle2 size={16} strokeWidth={2} /> : icon}</span>
+      <div className="cc-att-body">
+        <button type="button" className="cc-att-open" onClick={onOpen}>{title}</button>
+        <div className="cc-att-meta">{meta}</div>
+      </div>
+      <div className="cc-att-count">
+        <span className="cc-att-n">{n(count)}</span>
+        <span className="cc-att-unit">{clear ? 'all clear' : unit}</span>
+      </div>
+      <ChevronRight className="cc-att-chev" size={16} strokeWidth={2} />
+    </li>
   )
 }
 
-function PipeNode({ label, state, value, onOpen }: {
-  label: string; state: 'done' | 'active' | 'idle'; value?: string
-  /** omit to leave the stage as a plain label */
-  onOpen?: () => void
-}) {
+function Skeleton() {
   return (
-    <div className={`pipe-node pipe-${state}`}>
-      <span className="pipe-dot">{state === 'done' ? '✓' : value ?? '·'}</span>
-      {onOpen
-        ? <button type="button" className="pipe-label cc-h-link" onClick={onOpen}>{label}</button>
-        : <span className="pipe-label">{label}</span>}
+    <div className="cc-board" aria-busy="true" aria-label="Loading overview">
+      <div className="cc-card sk" style={{ minHeight: 196 }} />
+      <div className="cc-card sk" style={{ minHeight: 196 }} />
+      <div className="cc-card sk" style={{ minHeight: 280 }} />
+      <div className="cc-card sk" style={{ minHeight: 280 }} />
     </div>
   )
 }
@@ -214,6 +187,7 @@ export function CommandCenter({
 }: Props) {
   const [data, setData] = useState<Overview | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
   // date window + operating units (item 2.1), remembered per customer
   const [filter, setFilter] = useState<DateFilterValue>(() => loadFilter(customerId))
   const [units, setUnits] = useState<string[]>([])
@@ -234,6 +208,7 @@ export function CommandCenter({
 
   const load = useCallback(() => {
     setError(null)
+    setLoading(true)
     const win = resolveWindow(filter)
     fetchOverview(customerId, {
       from: win.from || undefined, to: win.to || undefined,
@@ -241,31 +216,26 @@ export function CommandCenter({
     })
       .then(setData)
       .catch((e) => setError(String(e.message ?? e)))
+      .finally(() => setLoading(false))
   }, [customerId, filter])
 
   useEffect(load, [load, refreshKey])
-  const scope = `${windowLabel(filter)}${units.length ? ` · ${unitsLabel(filter, units)}` : ''}`
   const filtered = !!data?.filters_applied
   const quiet = filtered && data && data.gold.credits === 0 && data.gold.bills === 0
+  const customerName = customers.find((c) => c.key === customerId)?.name ?? customerId
 
-  // IREPS-only: other receipts are counted once, in Match performance
-  const openInScope = data?.open_in_scope
   const credits = data?.gold.credits ?? 0
   // unrecognised receipts (no match signal) are not matchable: every
   // performance figure is over the RECOGNISED credits. This IS
-  // out_of_scope_credits — the panel below shows it once, as "Other
-  // receipts"; here it only qualifies the bank-only exception count
+  // out_of_scope_credits — shown once, as "other receipts"
   const unrecognised = data?.unrecognised_credits ?? 0
   // the matching bill is still in flight in the source system, so the
-  // credit could not have matched — reported, not rated (same treatment
-  // as an unrecognised receipt, different reason)
+  // credit could not have matched — reported, not rated
   const awaitingStatus = data?.awaiting_status_credits ?? 0
   // the bill export covering this credit's advice has not been ingested
   // yet — excused only until it goes stale (server-side cap)
   const awaitingBillData = data?.awaiting_bill_data_credits ?? 0
   const awaiting = awaitingStatus + awaitingBillData
-  // Open exceptions shows "N credits + M bills": only the credits add up
-  // to Received, so the two halves are kept apart
   const billOnly = data?.open_in_scope.bill_only ?? 0
   const openCreditValue = Math.max(0,
     (data?.open_in_scope.value ?? 0) - (data?.open_value.bill_only ?? 0))
@@ -280,18 +250,11 @@ export function CommandCenter({
   const manual = data?.manual_matches ?? 0
   // locked_by.USER counts every user-locked match, manual ones included
   const accepted = Math.max(0, (data?.locked_by.USER ?? 0) - manual)
-  // a CREDIT count, like every other figure in the performance panel —
-  // matches.OPEN is a MATCH count and belongs to the tiles above
+  // a CREDIT count — matches.OPEN is a MATCH count
   const inReview = data ? Math.max(0, data.matched_credits - settled) : 0
-  // the panel's top line: the server reports the two halves of the
-  // window's money, never the whole, so add them back up here
-  const creditsValue =
-    data && data.in_scope_value !== undefined && data.out_of_scope_value !== undefined
-      ? data.in_scope_value + data.out_of_scope_value
-      : undefined
 
-  // A heading routes to where its figure actually LIVES. Every number on
-  // this page comes from /api/overview — live gold + ledger state — so the
+  // Every figure routes to where it actually LIVES. Every number on this
+  // page comes from /api/overview — live gold + ledger state — so the
   // targets are the Analyst queue and the Data pages' CURRENT scope
   // (gold_*), never a run-scoped frame, which may be empty or from an
   // unrelated run. Opening a gold page deliberately does not touch the
@@ -315,322 +278,262 @@ export function CommandCenter({
     onOpenGold({ ...intent, from: win.from, to: win.to })
   }
 
-  /** A heading whose figure is a gold table: opens it windowed + filtered. */
-  const goldLink = (text: string, intent: GoldIntent) => (
-    <button type="button" className="cc-h-link" onClick={() => openGold(intent)}>
-      {text}
-    </button>
-  )
-
-  /** A heading whose figure lives in the ledger: same link, but it also
-   *  carries the filter that makes the queue show THAT figure. */
-  const queueLink = (text: string, intent: LedgerIntent) => (
-    <button type="button" className="cc-h-link" onClick={() => openQueue(intent)}>
-      {text}
-    </button>
-  )
-
-  /* The credit funnel exactly as db/overview.py computes it:
+  /* ONE figure, ONE place. The credit funnel as db/overview.py computes it
        credits       = other receipts + IREPS credits
-       IREPS credits = awaiting status + awaiting bill data + recognised
-       recognised    = settled + in review + unmatched
-     Each section below renders one level, which is why no figure needs to
-     appear twice (unrecognised_credits IS out_of_scope_credits — the old
-     panel printed that one number as both "Unrecognised receipts" and the
-     "other receipts" half of "Credit mix"). */
-  const scopeBuckets: Bucket[] = [
-    { key: 'ireps', label: 'IREPS credits', count: inScope, tone: 'seg-ireps',
-      value: data?.in_scope_value,
-      hint: "credits carrying this customer's match signal — the money a bill can settle; opens the credits themselves",
-      onOpen: () => openGold(G_IN_SCOPE) },
-    { key: 'other', label: 'Other receipts', count: outOfScope, tone: '',
-      value: data?.out_of_scope_value,
-      hint: 'no match signal in the narrative — interest, sweeps and payers outside IREPS; never matchable, so never in the rate',
-      onOpen: () => openQueue(qExcGap('UNRECOGNISED_RECEIPT')) },
+       IREPS credits = settled + in review + unmatched + awaiting data
+       recognised    = settled + in review + unmatched   (the rate's base)
+     is split across the page so nothing repeats: the health card owns
+     the rate, the settled count and what came in; the bar draws the IREPS
+     partition (identity + share in its legend, counts on hover); the
+     attention list owns review / open / awaiting. */
+  const partition = [
+    { key: 'settled', label: 'Settled', count: settled, onOpen: () => openQueue(Q_SETTLED) },
+    { key: 'review', label: 'In review', count: inReview, onOpen: () => openQueue(Q_REVIEW) },
+    { key: 'open', label: 'Unmatched', count: unmatched, onOpen: () => openQueue(Q_UNMATCHED) },
+    { key: 'awaiting', label: 'Awaiting data', count: awaiting, onOpen: () => openQueue(Q_AWAITING) },
   ]
-  const outcomeBuckets: Bucket[] = [
-    { key: 'settled', label: 'Settled', count: settled, tone: 'seg-settled',
-      hint: 'credits with a LOCKED match — auto-locked on HIGH confidence, accepted by a user, or matched by hand',
-      onOpen: () => openQueue(Q_SETTLED) },
-    { key: 'review', label: 'In review', count: inReview, tone: 'seg-review',
-      hint: 'credits whose match is still open — accept or reject it to settle them',
-      onOpen: () => openQueue(Q_REVIEW) },
-    { key: 'unmatched', label: 'Unmatched', count: unmatched, tone: '',
-      hint: 'recognised credits with no match at all — the real gap',
-      onOpen: () => openQueue(qExcGap('SIGNAL_BILL_NOT_FOUND')) },
-  ]
-  const notRated: Bucket[] = [
-    { key: 'awaiting_status', label: 'Awaiting source status', tone: '', aside: true,
-      count: awaitingStatus,
-      hint: 'the same-amount bill is still passed/registered, not advised — the credit could not have matched yet',
-      onOpen: () => openQueue(qExcGap('AWAITING_STATUS')) },
-    { key: 'awaiting_bill_data', label: 'Awaiting bill data', tone: '', aside: true,
-      count: awaitingBillData,
-      hint: `valued after the latest bill export${data?.bills_covered_through
-        ? ` (advices through ${data.bills_covered_through})` : ''} — excused until it goes stale`,
-      onOpen: () => openQueue(qExcGap('AWAITING_BILL_DATA')) },
-  ].filter((b) => b.count > 0)
+
+  const asOf = data?.data_as_of ?? new Date().toISOString().slice(0, 10)
 
   return (
-    <section className="intake cc">
-      <div className="ingest-head">
-        <div>
+    <section className="cc-page">
+      <header className="cc-head">
+        <div className="cc-head-title">
           <h2 className="page-title">Command Center</h2>
-          {data && <p className="cc-scope">Showing {scope}</p>}
+          <p className="cc-context">
+            {customerName}
+            {data?.data_as_of && <><span className="cc-dot" />data through {fmtDay(data.data_as_of)}</>}
+          </p>
         </div>
-        <span className="cc-head-right">
+        <div className="cc-head-tools">
           <DateFilter value={filter} onChange={setFilter} units={units} unitCounts={unitCounts} />
-          <label className="ctx-field">
-            <span className="slot-label">Customer</span>
-            <select value={customerId} onChange={(e) => onCustomerChange(e.target.value)}>
-              {customers.map((c) => (
-                <option key={c.key} value={c.key}>{c.name} ({c.key})</option>
-              ))}
-            </select>
-          </label>
-          <button className="btn-refresh btn-ic" onClick={load}>
-            <RotateCw size={13} strokeWidth={1.75} /> refresh
+          {customers.length > 1 && (
+            <label className="cc-customer">
+              <span>Customer</span>
+              <select value={customerId} onChange={(e) => onCustomerChange(e.target.value)}>
+                {customers.map((c) => (
+                  <option key={c.key} value={c.key}>{c.name} ({c.key})</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <button type="button" className="cc-icon-btn" onClick={load}
+                  title="Refresh figures" aria-label="Refresh figures">
+            <RotateCw size={15} strokeWidth={1.75} className={loading ? 'spin' : undefined} />
           </button>
-        </span>
-      </div>
+          <span className="cc-head-sep" />
+          <button type="button" className="cc-btn" onClick={() => onNavigate('ingest')}>
+            <Upload size={15} strokeWidth={1.75} /> Ingest
+          </button>
+          <button type="button" className="cc-btn cc-btn-primary" onClick={() => onNavigate('reconcile')}>
+            <GitMerge size={15} strokeWidth={1.75} /> Reconcile
+          </button>
+        </div>
+      </header>
 
-      {error && <p className="frame-note">could not load overview: {error}</p>}
-      {!data && !error && <p className="frame-note"><span className="quill" /> loading…</p>}
+      {error && (
+        <div className="cc-notice is-error" role="alert">
+          <AlertTriangle size={15} strokeWidth={2} />
+          Could not load the overview: {error}
+          <Link onClick={load}>Try again</Link>
+        </div>
+      )}
+      {!data && !error && <Skeleton />}
+
+      {data && quiet && (
+        <div className="cc-notice">
+          Nothing in {windowLabel(filter)}. Widen the date range, or pick “All” in the filter.
+        </div>
+      )}
+      {data && filtered && data.filters_applied && data.filters_applied.bank_only_unassigned > 0
+        && !data.filters_applied.unassigned_included && (
+        <div className="cc-notice is-warn">
+          <AlertTriangle size={15} strokeWidth={2} />
+          {n(data.filters_applied.bank_only_unassigned)} bank-only{' '}
+          {plural(data.filters_applied.bank_only_unassigned, 'credit has', 'credits have')} no
+          operating unit and {plural(data.filters_applied.bank_only_unassigned, 'is', 'are')} hidden
+          by the unit filter — tick “Unassigned” to include them.
+        </div>
+      )}
 
       {data && (
-        <>
-          {quiet && (
-            <p className="frame-note">
-              nothing in this window ({scope}) — widen the date range or switch to
-              “All time” in the filter to see the whole customer.
-            </p>
-          )}
-          {filtered && data.filters_applied && data.filters_applied.bank_only_unassigned > 0
-            && !data.filters_applied.unassigned_included && (
-            <p className="chip-note cc-filter-note">
-              {data.filters_applied.bank_only_unassigned} bank-only credit
-              {data.filters_applied.bank_only_unassigned === 1 ? ' has' : 's have'} no operating unit
-              and {data.filters_applied.bank_only_unassigned === 1 ? 'is' : 'are'} hidden by the unit filter — tick “Unassigned” to include them.
-            </p>
-          )}
-          {/* Read left to right: what came in -> what is done -> what
-              needs you. Each headline names its own unit (credits /
-              matches / exceptions), and the window is stated once, above,
-              instead of on every tile. */}
-          <div className="tiles cc-tiles">
-            <div className="tile tone-neutral">
-              <div className="tile-label">{goldLink('Received', G_IN_SCOPE)}</div>
-              {/* the headline is the IREPS money — every tile to the right
-                  is IREPS-only; what was left out is named underneath */}
-              <div className="tile-count">
-                {inScope.toLocaleString('en-IN')}
-                <span className="tile-unit"> IREPS credits</span>
-              </div>
-              {data.in_scope_value !== undefined && (
-                <div className="tile-amount">{inr(data.in_scope_value)}</div>
-              )}
-              <div className="tile-delta">
-                {/* the same receipts Match performance shows as "Other
-                    receipts" — never matchable */}
-                {queueLink(
-                  `${outOfScope.toLocaleString('en-IN')} other receipts excluded`,
-                  qExcGap('UNRECOGNISED_RECEIPT'))}
-                {' · '}
-                {goldLink(`${credits.toLocaleString('en-IN')} credits in window`, G_CREDITS)}
-              </div>
-              <div className="tile-delta">
-                {goldLink(`${data.gold.bills.toLocaleString('en-IN')} bills`, G_BILLS)}
-                {' · '}{data.gold.lineage_docs.toLocaleString('en-IN')} lineage docs
+        <div className={`cc-board${loading ? ' is-loading' : ''}`}>
+          {/* ---- how healthy is it ---- */}
+          <section className="cc-card cc-health" aria-label="Reconciliation health">
+            <div className="cc-rate">
+              <RateRing rate={data.match_rate} />
+              <div className="cc-rate-text">
+                <span className="cc-eyebrow">Match rate</span>
+                <span className="cc-rate-main">
+                  <Link quiet onClick={() => openQueue(Q_SETTLED)}>{n(settled)} settled</Link>
+                  {' of '}
+                  <Link quiet onClick={() => openGold(G_RECOGNISED)}
+                        title="IREPS credits that could already have matched">
+                    {n(recognised)} recognised
+                  </Link>
+                </span>
+                <span className="cc-rate-by">
+                  auto {n(data.locked_by.AUTO_HIGH)}<span className="cc-dot" />
+                  accepted {n(accepted)}<span className="cc-dot" />manual {n(manual)}
+                </span>
+                <Link onClick={() => openQueue(Q_ALL_MATCHES)}>
+                  All matches <ArrowRight size={13} strokeWidth={2} />
+                </Link>
               </div>
             </div>
-            {/* Settled + Needs review + Open exceptions + Awaiting data
-                = Received: one CREDIT bucket per tile, the same partition
-                as Match performance (recognised = settled + in review +
-                unmatched; IREPS credits = recognised + awaiting). Open
-                exceptions reads "N credits + M bills": the bills are named
-                beside the credits, never summed into them. */}
-            <div className="tile">
-              <div className="tile-label">{queueLink('Settled', Q_SETTLED)}</div>
-              <div className="tile-count">
-                {settled.toLocaleString('en-IN')}
-                <span className="tile-unit"> credits</span>
-              </div>
-              <div className="tile-amount">
-                {pct(data.match_rate)} of {recognised.toLocaleString('en-IN')} recognised credits
-              </div>
-              <div className="tile-delta">
-                auto {data.locked_by.AUTO_HIGH.toLocaleString('en-IN')}
-                {' · '}accepted {accepted.toLocaleString('en-IN')}
-                {' · '}manual {manual.toLocaleString('en-IN')}
-              </div>
-            </div>
-            <div className="tile tone-review">
-              <div className="tile-label">{queueLink('Needs review', Q_REVIEW)}</div>
-              <div className="tile-count">
-                {inReview.toLocaleString('en-IN')}
-                <span className="tile-unit"> credits</span>
-              </div>
-              <div className="tile-amount">
-                {data.matches.OPEN.toLocaleString('en-IN')} {data.matches.OPEN === 1 ? 'match' : 'matches'} to accept or reject
-              </div>
-            </div>
-            <div className="tile tone-bank">
-              <div className="tile-label">{queueLink('Open exceptions', Q_OPEN_EXC)}</div>
-              {/* the credits count toward Received; the bills sit beside
-                  them in the headline but outside the credit sum */}
-              <div className="tile-count">
-                {unmatched.toLocaleString('en-IN')}
-                <span className="tile-unit"> {unmatched === 1 ? 'credit' : 'credits'}</span>
-                {' + '}
-                {billOnly.toLocaleString('en-IN')}
-                <span className="tile-unit"> {billOnly === 1 ? 'bill' : 'bills'}</span>
-              </div>
-              <div className="tile-amount">{inr(data.open_in_scope.value)}</div>
-              <div className="tile-delta">
-                {queueLink(`${inr(openCreditValue)} credits`, Q_UNMATCHED)}
-                {' · '}
-                {queueLink(`${inr(data.open_value.bill_only)} bills`, qExcSide('BILL_ONLY'))}
-              </div>
-              <div className="tile-delta">
-                {queueLink(
-                  `${data.resolved_exceptions.toLocaleString('en-IN')} resolved in window`,
-                  Q_RESOLVED_EXC)}
-              </div>
-            </div>
-            <div className="tile tone-neutral">
-              <div className="tile-label">{queueLink('Awaiting data', Q_AWAITING)}</div>
-              <div className="tile-count">
-                {awaiting.toLocaleString('en-IN')}
-                <span className="tile-unit"> credits</span>
-              </div>
-              {openInScope?.awaiting_value !== undefined && (
-                <div className="tile-amount">{inr(openInScope.awaiting_value)}</div>
-              )}
-              <div className="tile-delta">
-                {queueLink(`${awaitingStatus.toLocaleString('en-IN')} source status`,
-                  qExcGap('AWAITING_STATUS'))}
-                {' · '}
-                {queueLink(`${awaitingBillData.toLocaleString('en-IN')} bill data`,
-                  qExcGap('AWAITING_BILL_DATA'))}
-              </div>
-              <div className="tile-delta">not rated · clears as the data arrives</div>
-            </div>
-          </div>
 
-          <div className="cc-grid">
-            <div className="cc-panel">
-              <div className="cc-panel-head">
-                <h3 className="ledger-h">{queueLink('Largest open exceptions', Q_OPEN_EXC)}</h3>
-                <button className="btn-open" onClick={() => openQueue(Q_OPEN_EXC)}>
-                  open Analyst queue →
+            <div className="cc-received">
+              <div className="cc-received-top">
+                <span className="cc-eyebrow">IREPS credits received</span>
+                <button type="button" className="cc-received-figure" onClick={() => openGold(G_IN_SCOPE)}
+                        title={inr(data.in_scope_value)}>
+                  <span className="cc-big">{inrCompact(data.in_scope_value)}</span>
+                  <span className="cc-big-unit">{n(inScope)} {plural(inScope, 'credit', 'credits')}</span>
                 </button>
               </div>
-              {data.top_exceptions.length === 0 ? (
-                <p className="frame-note">
-                  nothing open —{' '}
-                  <button className="link-btn" onClick={() => onNavigate('reconcile')}>
-                    initiate an incremental reconciliation →
+
+              <div className="cc-bar" role="img"
+                   aria-label={partition.map((p) => `${p.label} ${p.count}`).join(', ')}>
+                {partition.filter((p) => p.count > 0).map((p) => (
+                  <span key={p.key} className={`seg seg-${p.key}`} style={{ flexGrow: p.count }}
+                        title={`${p.label} · ${n(p.count)} ${plural(p.count, 'credit', 'credits')}`} />
+                ))}
+              </div>
+              <div className="cc-legend">
+                {partition.map((p) => (
+                  <button key={p.key} type="button" className="cc-legend-item" onClick={p.onOpen}
+                          title={`${n(p.count)} ${plural(p.count, 'credit', 'credits')}`}>
+                    <span className={`cc-swatch sw-${p.key}`} />
+                    {p.label}
+                    <span className="cc-legend-pct">{inScope > 0 ? pct(p.count / inScope) : '—'}</span>
                   </button>
-                </p>
-              ) : (
-                <table className="ledger">
+                ))}
+              </div>
+
+              <p className="cc-received-foot">
+                <Link quiet onClick={() => openQueue(qExcGap('UNRECOGNISED_RECEIPT'))}
+                      title="no match signal — interest, sweeps, payers outside IREPS; never in the rate">
+                  +{n(outOfScope)} other receipts
+                </Link>
+                {data.out_of_scope_value !== undefined && <>&nbsp;({inrCompact(data.out_of_scope_value)})</>}
+                &nbsp;not matchable
+                <span className="cc-dot" />
+                <Link quiet onClick={() => openGold(G_CREDITS)}>{n(credits)} credits in window</Link>
+                <span className="cc-dot" />
+                <Link quiet onClick={() => openGold(G_BILLS)}>{n(data.gold.bills)} bills</Link>
+                &nbsp;·&nbsp;{n(data.gold.lineage_docs)} lineage docs
+              </p>
+            </div>
+          </section>
+
+          {/* ---- what needs me ---- */}
+          <section className="cc-card cc-attention">
+            <header className="cc-card-head">
+              <h3>Needs attention</h3>
+            </header>
+            <ul className="cc-att-list">
+              <AttentionRow tone="review" icon={<ListChecks size={16} strokeWidth={2} />}
+                title="Matches to review" count={data.matches.OPEN}
+                unit={plural(data.matches.OPEN, 'match', 'matches')}
+                onOpen={() => openQueue(Q_REVIEW)}
+                meta={data.matches.OPEN > 0
+                  ? <>{n(inReview)} {plural(inReview, 'credit', 'credits')} waiting for accept or reject</>
+                  : 'No weak matches waiting for a decision'} />
+              <AttentionRow tone="open" icon={<AlertTriangle size={16} strokeWidth={2} />}
+                title="Open exceptions" count={data.open_in_scope.count} unit="open"
+                onOpen={() => openQueue(Q_OPEN_EXC)}
+                meta={<>
+                  <Link onClick={() => openQueue(Q_UNMATCHED)} title={inr(openCreditValue)}>
+                    {n(unmatched)} {plural(unmatched, 'credit', 'credits')} · {inrCompact(openCreditValue)}
+                  </Link>
+                  <Link onClick={() => openQueue(qExcSide('BILL_ONLY'))} title={inr(data.open_value.bill_only)}>
+                    {n(billOnly)} {plural(billOnly, 'bill', 'bills')} · {inrCompact(data.open_value.bill_only)}
+                  </Link>
+                  <Link onClick={() => openQueue(Q_RESOLVED_EXC)}>
+                    {n(data.resolved_exceptions)} resolved
+                  </Link>
+                </>} />
+              <AttentionRow tone="awaiting" icon={<Clock3 size={16} strokeWidth={2} />}
+                title="Awaiting data" count={awaiting} unit={plural(awaiting, 'credit', 'credits')}
+                onOpen={() => openQueue(Q_AWAITING)}
+                meta={<>
+                  <Link onClick={() => openQueue(qExcGap('AWAITING_STATUS'))}
+                        title="the same-amount bill is still passed/registered, not advised">
+                    {n(awaitingStatus)} source status
+                  </Link>
+                  <Link onClick={() => openQueue(qExcGap('AWAITING_BILL_DATA'))}
+                        title={`valued after the latest bill export${data.bills_covered_through
+                          ? ` (advices through ${data.bills_covered_through})` : ''}`}>
+                    {n(awaitingBillData)} bill data
+                  </Link>
+                  {data.open_in_scope.awaiting_value !== undefined && (
+                    <span className="cc-att-quiet" title={inr(data.open_in_scope.awaiting_value)}>
+                      {inrCompact(data.open_in_scope.awaiting_value)}
+                    </span>
+                  )}
+                </>} />
+            </ul>
+          </section>
+
+          {/* ---- the detail ---- */}
+          <section className="cc-card cc-worklist">
+            <header className="cc-card-head">
+              <h3>Largest open exceptions</h3>
+              <Link onClick={() => openQueue(Q_OPEN_EXC)}>
+                Open Analyst queue <ArrowRight size={13} strokeWidth={2} />
+              </Link>
+            </header>
+            {data.top_exceptions.length === 0 ? (
+              <div className="cc-empty">
+                <CheckCircle2 size={22} strokeWidth={1.75} />
+                <strong>Nothing open</strong>
+                <span>Every recognised credit and advised bill is accounted for.</span>
+                <Link onClick={() => onNavigate('reconcile')}>
+                  Run an incremental reconciliation <ArrowRight size={13} strokeWidth={2} />
+                </Link>
+              </div>
+            ) : (
+              <div className="cc-table-wrap">
+                <table className="cc-table">
                   <thead>
                     <tr>
-                      <th>Type</th><th>Ref</th><th>Zone</th><th>Date</th>
-                      <th style={{ textAlign: 'right' }}>Amount</th>
+                      <th>Type</th><th>Reference</th><th>Zone</th><th>Date</th>
+                      <th className="num">Age</th><th className="num">Amount</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.top_exceptions.map((e) => (
-                      <tr key={e.id} className="cc-row"
-                          onClick={() => openQueue(qExcSide(e.exception_type))}>
-                        <td><span className={`stamp stamp-${e.exception_type}`}>
-                          {e.exception_type.replace('_', ' ')}</span></td>
-                        <td className="mono-cell">{e.ref ?? '—'}</td>
-                        <td>{e.zone ?? '—'}</td>
-                        <td className="date">{e.date || '—'}</td>
-                        <td className="num">{inr(e.amount)}</td>
-                      </tr>
-                    ))}
+                    {data.top_exceptions.map((e) => {
+                      const age = e.date ? ageDays(e.date, asOf) : null
+                      const open = () => openQueue(qExcSide(e.exception_type))
+                      return (
+                        <tr key={e.id} onClick={open} tabIndex={0}
+                            onKeyDown={(k) => { if (k.key === 'Enter') open() }}>
+                          <td>
+                            <span className={`cc-type type-${e.exception_type}`}>
+                              {e.exception_type === 'BANK_ONLY' ? 'Credit' : 'Bill'}
+                            </span>
+                          </td>
+                          <td className="mono">{e.ref ?? '—'}</td>
+                          <td>{e.zone ?? '—'}</td>
+                          <td className="nowrap">{e.date ? fmtDay(e.date) : '—'}</td>
+                          <td className="num">
+                            {age === null ? '—'
+                              : <span className={`cc-age${age > 30 ? ' is-late' : ''}`}>{age}d</span>}
+                          </td>
+                          <td className="num strong" title={inr(e.amount)}>{inrCompact(e.amount)}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
-              )}
-            </div>
-
-            <div className="cc-panel">
-              <div className="cc-panel-head">
-                <h3 className="ledger-h">{queueLink('Match performance', Q_ALL_MATCHES)}</h3>
               </div>
-              <MatchDonut rate={data.match_rate} />
+            )}
+          </section>
 
-              <SectionHead label="Credits in window" count={credits}
-                           value={creditsValue}
-                           hint="every credit the reconciliation saw in this window"
-                           onOpen={() => openGold(G_CREDITS)} />
-              <CompositionBar buckets={scopeBuckets} total={credits} />
-              {scopeBuckets.map((b) => (
-                <KeyRow key={b.key} bucket={b} total={credits} />
-              ))}
-
-              <SectionHead label="Recognised" count={recognised}
-                           hint="IREPS credits that could already have matched — the rate's denominator"
-                           onOpen={() => openGold(G_RECOGNISED)} />
-              <CompositionBar buckets={outcomeBuckets} total={recognised} />
-              {outcomeBuckets.map((b) => (
-                <KeyRow key={b.key} bucket={b} total={recognised} />
-              ))}
-              {notRated.length > 0 && (
-                <div className="cc-aside">
-                  {notRated.map((b) => (
-                    <KeyRow key={b.key} bucket={b} total={recognised} />
-                  ))}
-                </div>
-              )}
-
-              <p className="cc-perf-foot">
-                settled by · auto {data.locked_by.AUTO_HIGH.toLocaleString('en-IN')}
-                {' · '}accepted {accepted.toLocaleString('en-IN')}
-                {' · '}manual {manual.toLocaleString('en-IN')}
-              </p>
-            </div>
-          </div>
-
-          <div className="cc-panel">
-            <div className="cc-panel-head">
-              <h3 className="ledger-h">Pipeline</h3>
-              <span className="cc-actions">
-                <button className="btn-open btn-ic" onClick={() => onNavigate('ingest')}>
-                  <Upload size={13} strokeWidth={1.75} /> Ingest documents
-                </button>
-                <button className="btn-open btn-ic" onClick={() => onNavigate('reconcile')}>
-                  <GitMerge size={13} strokeWidth={1.75} /> Initiate Reconciliation
-                </button>
-              </span>
-            </div>
-            <div className="pipe">
-              <PipeNode label="Ingest" state={data.gold.bank_txns > 0 ? 'done' : 'active'}
-                        onOpen={() => onNavigate('ingest')} />
-              <span className="pipe-link" />
-              <PipeNode label="Gold layer"
-                        state={data.gold.bills > 0 ? 'done' : 'idle'}
-                        value={data.gold.bills ? undefined : '·'}
-                        onOpen={() => onNavigate('gold_bills')} />
-              <span className="pipe-link" />
-              <PipeNode label="Reconcile" state={data.last_run ? 'done' : 'idle'}
-                        onOpen={() => onNavigate('reconcile')} />
-              <span className="pipe-link" />
-              <PipeNode label="Analyst review"
-                        state={data.matches.OPEN > 0 ? 'active' : data.last_run ? 'done' : 'idle'}
-                        value={data.matches.OPEN > 0 ? String(data.matches.OPEN) : undefined}
-                        onOpen={() => openQueue(Q_REVIEW)} />
-              <span className="pipe-link" />
-              <PipeNode label="Resolved"
-                        state={data.resolved_exceptions > 0 ? 'done' : 'idle'}
-                        value={data.resolved_exceptions > 0 ? String(data.resolved_exceptions) : undefined}
-                        onOpen={() => openQueue(Q_RESOLVED_EXC)} />
-            </div>
-          </div>
-        </>
+          {/* ---- what changed ---- */}
+          <RecentActivity customerId={customerId} refreshKey={refreshKey}
+                          onOpenAudit={() => onNavigate('audit')} />
+        </div>
       )}
     </section>
   )
