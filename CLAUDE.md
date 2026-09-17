@@ -481,26 +481,29 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
                + lucide-react (nav/button icons — professional stroke set,
                tree-shaken per import; the only other runtime dep);
                IA: "Operate" group — Command Center (default landing;
-               redesigned 2026-09-17 as a 7/5 board where EVERY FIGURE
-               APPEARS ONCE — header (customer · data-through date; date
-               filter, customer picker only when >1, refresh, Ingest /
-               Reconcile), then: Reconciliation health (rate ring + "N
-               settled of M recognised" + auto/accepted/manual, and IREPS
-               credits received with a bar partitioning them into Settled /
-               In review / Unmatched / Awaiting data — legend shows shares,
-               counts on hover — plus other receipts, credits in window and
-               the Gold pool in its foot) | Needs attention (Matches to
-               review, Open exceptions "N credits · M bills" + resolved,
-               Awaiting data status/bill-data — stretched-button rows) |
-               Largest open exceptions (Age from data_as_of) | Recent
-               activity (components/RecentActivity.tsx: the human-meaningful
-               slice of GET /api/audit — ingestions, runs enriched from
-               ledger.finalized, match decisions, config; bronze/silver/
-               conflict rows are left to the Audit trail; absolutely
-               positioned so it never stretches the row). The KPI tiles,
-               partition strip, Match performance funnel table, donut and
-               Pipeline panel are gone. All figures from GET /api/overview;
-               every figure, legend item and row opens where it lives,
+               v2 design 2026-09-17, "executive band + tabbed work queue",
+               where EVERY FIGURE APPEARS ONCE — header (customer ·
+               data-through date; date filter, customer picker only when
+               >1, refresh, Ingest / Reconcile), then a dark navy summary
+               band (sidebar palette) owning one HEADLINE per funnel level:
+               Match rate ("N settled of M recognised" + auto/accepted/
+               manual), IREPS credits received (Cr/L + count + credits in
+               window), Open exceptions (count + exposure), Awaiting data
+               (count + value), Other receipts (muted) — each cell a
+               stretched button — over the IREPS partition bar (Settled /
+               In review / Unmatched / Awaiting data; legend shares, counts
+               on hover; Gold pool on the right). Below, a Work queue card
+               with local-state segmented tabs owning the BREAKDOWN behind
+               each headline (Open exceptions: credits vs bills + resolved
+               strip over the top_exceptions table with Age; Needs review:
+               CTA into the queue — the API has no per-match list; Awaiting
+               data: source status vs bill data explained) beside Recent
+               activity as a timeline (components/RecentActivity.tsx: the
+               human-meaningful slice of GET /api/audit; absolutely
+               positioned so it never stretches the row). Tab badges only
+               say how much sits behind a tab. All figures from GET
+               /api/overview; every figure, legend item and row opens where
+               it lives,
                ALREADY FILTERED to it — a
                LedgerIntent (Analyst queue: status/type/gap/IREPS-scope
                filters + the page's date window as from/to, always sent
