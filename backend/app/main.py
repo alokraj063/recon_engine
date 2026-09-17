@@ -18,6 +18,7 @@ from db import init_db
 from db.base import run_migrations_on_startup
 from logging_setup import configure_logging, customer_id_var, get_logger, request_id_var
 
+from .frontend import frontend_dist, mount_frontend
 from .routes import router
 
 configure_logging()
@@ -104,3 +105,10 @@ app.include_router(router)
 @app.get("/api/health")
 def health():
     return {"status": "ok", "version": recon.__version__}
+
+
+# LAST: the SPA mount at "/" would shadow any route registered after it
+if mount_frontend(app):
+    request_logger.info("frontend.mounted", extra={
+        "event_type": "frontend.mounted",
+        "details": {"dist": str(frontend_dist())}})
