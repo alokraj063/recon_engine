@@ -33,5 +33,5 @@ backend/tests/golden/
 backend/data/
 01_data/
 
-# rendered by deploy/deploy_dev.py, regenerated every run
-deploy/rendered-dev-task-definition.json
+# local AWS deployment scripts / IAM policies (not versioned here)
+deploy/
