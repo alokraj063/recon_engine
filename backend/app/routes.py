@@ -16,7 +16,8 @@ from typing import Optional
 
 from datetime import date
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import (APIRouter, Depends, File, Form, HTTPException, Query,
+                     Request, UploadFile)
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
@@ -43,9 +44,14 @@ from recon.rules import COPY_SECTIONS, FieldMapping
 from recon.sources import resolve_adapter, role_of
 
 from . import runs
+from .auth import require_user
 from .serialize import clean, df_to_records, summary_records
 
-router = APIRouter(prefix="/api")
+# Every route below is gated in ONE place. A route added later is
+# protected because it hangs off this router, not because someone
+# remembered to decorate it. Public by construction: /api/health and
+# /api/auth/* are registered elsewhere (app/main.py, app/auth.py).
+router = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
 logger = get_logger(__name__)
 
 # legacy upload field -> slot source_type. Slots beyond these four (extra

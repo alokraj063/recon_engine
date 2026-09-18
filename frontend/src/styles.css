@@ -2473,3 +2473,119 @@ table.data td { padding: 6px 8px; }
   background: var(--paper);
   color: var(--ink);
 }
+
+/* ------------------------------------------------------------------ */
+/*  Sign-in (auth.tsx / LoginView) — the one screen rendered outside   */
+/*  the app shell, so it carries its own centering and its own head.   */
+/* ------------------------------------------------------------------ */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--paper-deep);
+}
+
+.login-checking { color: var(--ink-faint); font-size: var(--fs-body); }
+
+.login-card {
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 26px 26px 20px;
+  background: var(--paper-card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgba(20, 30, 45, 0.08);
+}
+
+/* the logo PNG is lifted for the dark rail; on white it needs no filter */
+.login-head { display: flex; flex-direction: column; gap: 10px; margin-bottom: 2px; }
+.login-head .logo-img { filter: none; max-width: 120px; }
+.login-head h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-h2);
+  margin: 0;
+  color: var(--ink);
+}
+.login-head .amp { color: var(--green); font-style: normal; font-weight: 400; }
+
+.login-field { display: flex; flex-direction: column; gap: 5px; }
+.login-field span {
+  font-size: var(--fs-label);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+.login-field input {
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  padding: 8px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.login-field input:focus {
+  outline: none;
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px hsl(175 70% 28% / 0.12);
+}
+
+.login-error {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: var(--fs-note);
+  color: var(--sienna);
+  background: var(--danger-bg);
+  border-radius: 6px;
+}
+
+.login-note {
+  margin: 0;
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+}
+
+.login-foot {
+  margin: 4px 0 0;
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+/* who is signed in, above the workbook link in the nav rail */
+.side-user {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px 8px;
+}
+.side-user-name {
+  font-size: var(--fs-note);
+  color: var(--side-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-signout {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(200 15% 78% / 0.7);
+  background: none;
+  border: 1px solid var(--side-border);
+  border-radius: 5px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.side-signout:hover { color: var(--side-active); border-color: var(--side-active); }

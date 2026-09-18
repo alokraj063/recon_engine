@@ -70,6 +70,39 @@ class Customer(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class User(Base):
+    """A person who may sign in. App/control-plane schema — a login is not
+    a medallion-layer fact about anyone's money.
+
+    Deliberately NOT tied to a customer. This phase is a pure login gate
+    (see app/auth.py): every signed-in user still chooses the tenant, and
+    `customer_id` still arrives as a request field exactly as before, so
+    all 28 routes and their tests are unchanged. Binding a user to a
+    customer is the follow-up, and is what turns authentication into
+    tenant isolation.
+
+    is_active is re-read on EVERY request (app/auth.py require_user loads
+    this row), which is the revocation path: the session cookie is
+    stateless and signed, so it cannot otherwise be recalled before it
+    expires. Clearing the flag takes effect on the user's next call.
+
+    email is stored already normalized (stripped + lowercased by
+    passwords/auth callers) so the unique index is the real uniqueness
+    rule, not a near-miss.
+    """
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    # bcrypt output is 60 chars; the column is wider so a future algorithm
+    # swap is a code change, not a migration
+    password_hash: Mapped[str] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class SourceConfig(Base):
     """Which adapter parses which input kind for a customer."""
     __tablename__ = "source_configs"

@@ -2,10 +2,11 @@ import type { ComponentType } from 'react'
 import {
   ArrowDownLeft, Boxes, FileSearch, FileStack, Gauge, GitMerge,
   Landmark, LayoutDashboard, Link2, ListChecks, ListMinus, ReceiptText,
-  TriangleAlert, Upload, Download,
+  TriangleAlert, Upload, Download, LogOut,
 } from 'lucide-react'
 import type { ReconResponse } from '../types'
 import { workbookUrl } from '../api'
+import { useAuth } from '../auth'
 import {
   DATA_PAGES, type DataPage, type DataScope, dataPageOf, scopeOf, viewForScope,
 } from '../dataPages'
@@ -62,6 +63,7 @@ function NavIcon({ icon: Icon }: { icon: IconType }) {
 
 export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
   const counts = result?.meta.counts
+  const { user, signOut } = useAuth()
 
   const resultItems: NavItem[] = [
     { view: 'summary', label: 'Summary', icon: Gauge },
@@ -159,6 +161,12 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
       </nav>
 
       <div className="sidebar-foot">
+        <div className="side-user">
+          <span className="side-user-name" title={user.email}>{user.name}</span>
+          <button className="side-signout btn-ic" onClick={() => void signOut()} title="Sign out">
+            <LogOut size={13} strokeWidth={1.75} /> Sign out
+          </button>
+        </div>
         {result ? (
           <a className="btn-download btn-download-side btn-ic" href={workbookUrl(result.run_id)} download>
             <Download size={14} strokeWidth={1.75} /> Workbook (.xlsx)

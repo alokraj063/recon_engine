@@ -2,11 +2,19 @@
 Idempotent defaults so a blank database serves today's single-customer
 flow unchanged: customer 'default' wired to the HSBC/IREPS adapters with
 the stock rule set.
+
+seed_admin_user() is the one seed that does NOTHING by default: a login
+is only created when ADMIN_EMAIL and ADMIN_PASSWORD are both set AND the
+users table is empty. No account is ever shipped, and an existing
+deployment is never handed a second way in.
 """
 
-from sqlalchemy import select
+import logging
+import os
 
-from .models import Customer, MatchRuleSetRow, SourceConfig
+from sqlalchemy import func, select
+
+from .models import Customer, MatchRuleSetRow, SourceConfig, User
 
 DEFAULT_CUSTOMER_KEY = "default"
 
@@ -88,3 +96,52 @@ def seed_defaults(session):
             copy_overrides=RAILWAY_COPY,
         ))
     return customer
+
+
+# The first login, for an unattended boot (an ECS task definition with
+# both values from Secrets Manager). Everything else is
+# `python scripts/create_user.py`.
+ADMIN_EMAIL_ENV = "ADMIN_EMAIL"
+ADMIN_PASSWORD_ENV = "ADMIN_PASSWORD"
+
+
+def seed_admin_user(session, logger=None):
+    """Create the FIRST login from the environment, once.
+
+    Three guards, all deliberate: both env vars must be set, the users
+    table must be empty, and a password that bcrypt cannot hash as given
+    is refused rather than truncated. Once any user exists this is a
+    no-op forever — rotating the env var does NOT re-password an account
+    (use scripts/create_user.py), because a seed that silently reset a
+    password on every restart would be a way back in for anyone who once
+    read the task definition.
+    """
+    email = os.environ.get(ADMIN_EMAIL_ENV, "").strip()
+    password = os.environ.get(ADMIN_PASSWORD_ENV, "")
+    if not email or not password:
+        return None
+    if session.execute(select(func.count()).select_from(User)).scalar_one():
+        return None
+
+    # imported here, not at module import: db/ must stay importable with
+    # no bcrypt present (the CLI and the engine tests never hash anything)
+    from passwords import PasswordError, hash_password, normalize_email
+
+    try:
+        hashed = hash_password(password)
+    except PasswordError as exc:
+        if logger is not None:
+            logger.warning("auth.admin_seed_rejected", extra={
+                "event_type": "auth.admin_seed_rejected",
+                "details": {"reason": str(exc)}})
+        return None
+
+    user = User(email=normalize_email(email), name=email, password_hash=hashed)
+    session.add(user)
+    session.flush()
+    if logger is not None:
+        # id only — never the address (see the taxonomy in CLAUDE.md)
+        logger.log(logging.INFO, "auth.admin_seeded", extra={
+            "event_type": "auth.admin_seeded",
+            "details": {"user_id": user.id}})
+    return user

@@ -12,12 +12,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 import recon
 from db import init_db
 from db.base import run_migrations_on_startup
 from logging_setup import configure_logging, customer_id_var, get_logger, request_id_var
 
+from .auth import (SESSION_COOKIE, cookie_secure, session_max_age,
+                   session_secret)
+from .auth import router as auth_router
 from .frontend import frontend_dist, mount_frontend
 from .routes import router
 
@@ -44,11 +48,33 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Recon Engine API", version=recon.__version__,
               lifespan=lifespan)
 
+# The session cookie every /api route is gated on (app/auth.py). Signed,
+# not encrypted, and it carries only a user id — never a name, an email
+# or a role.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=session_secret(),
+    session_cookie=SESSION_COOKIE,
+    max_age=session_max_age(),
+    # 'lax' still sends the cookie on a top-level navigation back to the
+    # app, but not on a cross-site POST — the CSRF shape that matters for
+    # an API whose every mutation is a POST from our own origin.
+    same_site="lax",
+    https_only=cookie_secure(),
+    # (httponly is not a parameter: Starlette's SessionMiddleware always
+    # sets it, which is what we want — the SPA never reads the cookie)
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
+    # a cookie credential cannot ride a cross-origin request without this.
+    # Normal dev goes through the Vite proxy (same origin, so CORS is not
+    # consulted at all); this keeps the belt-and-braces direct-to-:8000
+    # path working now that there is something to authenticate with.
+    allow_credentials=True,
 )
 
 
@@ -99,9 +125,14 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
                                  "detail": f"{type(exc).__name__}: {exc}"})
 
 
+# auth FIRST: its own router carries no gate, so /api/auth/login is
+# reachable by someone who has no session yet
+app.include_router(auth_router)
 app.include_router(router)
 
 
+# deliberately on `app`, not the gated /api router: the ALB health
+# check has no cookie and must not need one
 @app.get("/api/health")
 def health():
     return {"status": "ok", "version": recon.__version__}

@@ -123,6 +123,15 @@ export class ApiError extends Error {
   }
 }
 
+/** The signed-in person (GET /api/auth/me). The session itself lives in
+ *  an httponly cookie the browser handles — nothing here is a credential
+ *  and none of it is stored by the app. */
+export interface AuthUser {
+  id: number
+  email: string
+  name: string
+}
+
 export type RunMode = 'snapshot' | 'incremental'
 
 export type RunStatus = 'succeeded' | 'failed' | 'running'

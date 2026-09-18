@@ -2,6 +2,7 @@ import {
   ApiError,
   type AdapterRegistry,
   type ArView,
+  type AuthUser,
   type AuditEventRow,
   type CustomerConfig,
   type CustomerInfo,
@@ -60,6 +61,27 @@ async function parseApiError(res: Response): Promise<ApiError> {
   return new ApiError(code, detail)
 }
 
+/** Every route but /api/auth/* and /api/health sits behind the session
+ *  cookie, so a 401 from ANY of the ~30 calls in this file means one
+ *  thing: the session is over (expired, signed out in another tab, or the
+ *  account was deactivated). Rather than teach every caller to handle
+ *  that, parseApiError announces it once and the gate in auth.tsx listens.
+ *
+ *  A failed sign-in is excluded — that 401 is an answer to a question the
+ *  login form asked, not a session ending under someone's feet. */
+const SESSION_ENDED = 'recon:session-ended'
+
+export function onSessionEnded(handler: () => void): () => void {
+  window.addEventListener(SESSION_ENDED, handler)
+  return () => window.removeEventListener(SESSION_ENDED, handler)
+}
+
+function noteUnauthorized(res: Response) {
+  if (res.status === 401 && !res.url.includes('/api/auth/login')) {
+    window.dispatchEvent(new Event(SESSION_ENDED))
+  }
+}
+
 async function getJson<T>(url: string): Promise<T> {
   let res: Response
   try {
@@ -67,7 +89,7 @@ async function getJson<T>(url: string): Promise<T> {
   } catch {
     throw new ApiError('NETWORK', 'Could not reach the backend. Is uvicorn running on port 8000?')
   }
-  if (!res.ok) throw await parseApiError(res)
+  if (!res.ok) { noteUnauthorized(res); throw await parseApiError(res) }
   return res.json()
 }
 
@@ -96,7 +118,7 @@ export async function ingestFiles(
   } catch {
     throw new ApiError('NETWORK', 'Could not reach the backend. Is uvicorn running on port 8000?')
   }
-  if (!res.ok) throw await parseApiError(res)
+  if (!res.ok) { noteUnauthorized(res); throw await parseApiError(res) }
   return res.json()
 }
 
@@ -180,7 +202,7 @@ async function sendJson<T>(method: string, url: string, body?: unknown): Promise
   } catch {
     throw new ApiError('NETWORK', 'Could not reach the backend. Is uvicorn running on port 8000?')
   }
-  if (!res.ok) throw await parseApiError(res)
+  if (!res.ok) { noteUnauthorized(res); throw await parseApiError(res) }
   return res.json()
 }
 
@@ -280,4 +302,22 @@ export async function reopenMatch(
   id: string,
 ): Promise<{ id: string; status: string; locked_by: string | null }> {
   return postJson(`/api/matches/${id}/reopen`)
+}
+
+// --- authentication ---------------------------------------------------
+// The cookie does all the work: these calls set it, clear it and ask who
+// it belongs to. Nothing here handles a token, because a same-origin
+// fetch() attaches the cookie by itself.
+
+/** Who is signed in. 401 is the normal answer for a stranger. */
+export async function fetchMe(): Promise<AuthUser> {
+  return getJson('/api/auth/me')
+}
+
+export async function signIn(email: string, password: string): Promise<AuthUser> {
+  return postJson('/api/auth/login', { email, password })
+}
+
+export async function signOut(): Promise<{ status: string }> {
+  return postJson('/api/auth/logout')
 }

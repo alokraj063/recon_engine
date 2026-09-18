@@ -39,6 +39,12 @@ cd backend && ../.venv/bin/python scripts/make_golden.py   # regenerate snapshot
 cd backend && ../.venv/bin/python -m alembic revision --autogenerate -m "..."   # after model changes; REVIEW the output
 cd backend && ../.venv/bin/python -m alembic upgrade head
 
+# Logins (every /api route except /api/health and /api/auth/* needs one)
+cd backend && ../.venv/bin/python scripts/create_user.py -e you@example.com -n "You"
+cd backend && ../.venv/bin/python scripts/create_user.py --list
+# a blank database has NO users — nobody can sign in until one is made
+# (or ADMIN_EMAIL/ADMIN_PASSWORD are set for an unattended first boot)
+
 cd frontend && npx tsc -b           # typecheck
 cd frontend && npm run build        # production build
 ```
@@ -195,7 +201,11 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
                asymmetry, not a bug.
   base.py      DATABASE_URL + session factory + register_sqlite_attach();
                init_db() = alembic upgrade head + seed
-  models.py    all tables, snake_case, customer_id everywhere: customers,
+  models.py    all tables, snake_case, customer_id everywhere: users (the login
+               gate — app schema, NOT tied to a customer: authentication only,
+               `customer_id` is still a request field; is_active is re-read on
+               EVERY request, which is the only way to withdraw a stateless
+               cookie), customers,
                source_configs (source_type doubles as the SLOT KEY, unique per
                customer; `role` = bank_statement | bill_status | lineage —
                lineage slots are 0..N per customer, named lineage_<key>, the
@@ -306,7 +316,12 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
                Exceptions for GET /api/ledger/workbook
   runs_store.py  persisted runs (payload/frames/workbook survive restarts)
   seeds.py     idempotent default customer wired to hsbc/ireps adapters;
-               DEFAULT_SOURCES rows are (source_type, role, adapter_key, params)
+               DEFAULT_SOURCES rows are (source_type, role, adapter_key, params).
+               seed_admin_user() creates the FIRST login from ADMIN_EMAIL/
+               ADMIN_PASSWORD and only while the users table is empty — it never
+               re-passwords an existing account, so rotating the env var is a
+               no-op (a seed that reset a password every restart would be a way
+               back in for anyone who once read the task definition)
 backend/alembic/ migrations; env.py reads DATABASE_URL, render_as_batch=True.
                ALWAYS review autogenerate output (it has produced bad imports, wrong
                column types, and — against SQLite specifically — spurious "add
@@ -316,6 +331,14 @@ backend/alembic/ migrations; env.py reads DATABASE_URL, render_as_batch=True.
                the default (True) permanently disables every logger not listed in
                alembic.ini, including every db.*/app.* logger (Logger objects are
                cached singletons; once disabled, disabled forever in that process).
+backend/passwords.py  bcrypt hashing, a top-level sibling of recon/db/app for
+               the same reason logging_setup.py is one: app/auth.py, db/seeds.py
+               and scripts/create_user.py all need it and db/ must never import
+               app/. Refuses a password over bcrypt's 72-BYTE limit instead of
+               silently hashing only the first 72 (validate_password /
+               hash_password / verify_password / normalize_email — email is
+               lowercased + stripped in ONE place, so the users.email unique
+               index is the real uniqueness rule).
 backend/logging_setup.py  top-level sibling of recon/db/app (not inside any of
                them) so all three can use it with no recon->db dependency.
                get_logger(name), configure_logging() (console text + rotating JSON
@@ -367,6 +390,31 @@ backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/inge
                (whole-frame with 20k cap, {count,total} exposes truncation;
                ?bronze_file_id= filters to what that ingestion REPORTED, so a
                re-export of existing bills still shows its own rows).
+  auth.py      THE login gate: signed session cookie + the users table.
+               require_user is attached ONCE, as a router-level dependency on
+               app/routes.py's /api router, so all 28 routes are gated together
+               and a route added later is protected by construction rather than
+               by remembering to decorate it. Public because they hang off
+               something else: /api/health (registered on `app` in main.py — the
+               ALB health check carries no cookie) and /api/auth/* (this module's
+               own ungated router: POST login / POST logout / GET me). Cookie not
+               bearer token BECAUSE the SPA and API share an origin (frontend.py
+               mounts the build at '/', Vite proxies /api in dev), so fetch()
+               attaches it by itself and not one of the ~30 call sites in
+               frontend/src/api.ts knows a credential exists. The cookie is
+               stateless (itsdangerous-signed, carries only a user id), so there
+               is no session table and a restart logs nobody out — and the ONLY
+               revocation path is require_user reloading the row every request
+               and refusing is_active=false. Login answers identically for an
+               unknown email, a wrong password and a deactivated account (and
+               spends the same bcrypt time on a miss), so it never tells a
+               stranger who has an account; failures throttle per email
+               (LOCKOUT_AFTER/LOCKOUT_SECONDS, in-process — exact under the
+               single-worker uvicorn already assumed elsewhere). SESSION_SECRET /
+               SESSION_MAX_AGE / COOKIE_SECURE, all documented in
+               docs/configuration.md. AUTHENTICATION ONLY: every signed-in user
+               still sees every customer, and customer_id is still a request
+               field — binding a user to a tenant is the follow-up.
   routes.py    legacy POST /api/runs (multipart one-shot) KEPT for compat/tests
                but retired from the UI; GET /api/runs/{id}[/frames/{name}|
                /workbook], GET /api/customers, GET /api/runs, GET /api/ledger,
@@ -447,7 +495,12 @@ backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/inge
                _build_adapters/_effective_rules/_persist_side_effects) are used
                by BOTH the legacy and two-step paths — behavior changes there
                affect both.
-  main.py      configure_logging() at import; @app.middleware("http") logs one
+  main.py      configure_logging() at import; SessionMiddleware (same_site=lax,
+               https_only=COOKIE_SECURE, httponly always — Starlette sets it and
+               takes no parameter for it) + the ungated auth router mounted
+               BEFORE the gated one; CORS carries allow_credentials so the
+               belt-and-braces direct-to-:8000 origin can still send the cookie;
+               @app.middleware("http") logs one
                http.request line per call (method/path/status/duration_ms) after
                call_next, catching every request incl. 404s; @app.exception_handler
                (Exception) logs full stack traces for anything that escapes every
@@ -467,17 +520,42 @@ counts + {kept id: [deleted ids]}), `run.started`/`run.start_conflict`/`run.succ
 `run.failed`/`run.selfcheck_failed`/`run.parse_failed`, `ledger.finalized`
 (summary, not per-match), `ledger.match_accepted`/`ledger.match_rejected`/
 `ledger.match_unlocked` (LOCKED -> OPEN undo; details carry was_locked_by),
-`http.request`, `http.unhandled_exception`, `pipeline.selfcheck`. High-volume
+`http.request`, `http.unhandled_exception`, `pipeline.selfcheck`,
+`auth.login_succeeded`/`auth.login_failed` (WARNING; `details.reason` is a code —
+`NO_SUCH_USER`/`INACTIVE`/`BAD_PASSWORD` — and an email address NEVER appears in a
+log line or an audit row, it is PII like any other)/`auth.logout`,
+`auth.admin_seeded`/`auth.admin_seed_rejected`/`auth.ephemeral_session_secret`
+(WARNING — no SESSION_SECRET set). High-volume
 operations log one aggregate summary (the same `stats` dict already returned
 to API callers), never one line per row/match. No PII/financial content in
 log lines or `details` — counts, ids, field *names* only (e.g. `gold.ingest_conflict`
 logs `changed_field_names`, never the before/after values, which stay in the
 existing `ingest_conflicts.changed_fields` column; `pipeline.selfcheck` omits
 HSBC's `stated_total`/`parsed_total`, logging only `passed`/counts).
+backend/tests/conftest.py  patches FastAPI.__init__ so EVERY app built during a
+               test run starts with require_user overridden by a fixed user — the
+               eight API test files predate authentication and needed no edits.
+               It patches the constructor rather than using a fixture because
+               those apps are built at module-import and module-fixture time,
+               before a function-scoped fixture could reach them, and it imports
+               app.auth lazily so an engine-only run still never touches the web
+               layer. tests/test_auth.py CLEARS that override on its own app and
+               is the only place the gate is exercised for real — without it an
+               accidentally ungated router would still look green.
 backend/scripts/make_golden.py + backend/tests/  golden-master gate (byte-exact CSV
                diff of summary/matched/queue/bills_enriched/bank/recoveries on the
                sample docs) + the incremental scenario test
-frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
+frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.tsx
+               rather than living inside it — App's mount effects all call the
+               API, so the tree must not exist before there is a session; it asks
+               GET /api/auth/me once on load (the cookie is httponly, so only the
+               server can answer "am I signed in", and NOTHING about the session
+               is cached in localStorage where it could disagree), renders
+               components/LoginView.tsx otherwise, and exposes useAuth() for the
+               sidebar's name + Sign out. api.ts announces any 401 ONCE as a
+               window event (onSessionEnded) instead of teaching ~30 call sites
+               about sessions — a failed sign-in is excluded, that 401 answers a
+               question the form asked. @tanstack/react-table v8 (keep the ^8 pin)
                + lucide-react (nav/button icons — professional stroke set,
                tree-shaken per import; the only other runtime dep);
                IA: "Operate" group — Command Center (default landing; real
@@ -655,4 +733,10 @@ frontend/        Vite + React + TS; @tanstack/react-table v8 (keep the ^8 pin)
 - **Zone extraction** tests longer railway zone codes first so `NER` isn't read as `ER` (`bank_hsbc.ZONE_CODES` order matters).
 - **Bank self-check is fail-loud**: the HSBC adapter's `selfcheck` ties parsed credits to the totals printed on the statement's last page and raises `SelfCheckError` on mismatch; everything downstream depends on that parse.
 - **Money is Float end-to-end** (golden parity). Moving to Numeric/Decimal is a deliberate future migration that requires re-baselining the golden master — do not change it casually.
-- **Known deferrals (by decision, not oversight)**: no auth/tenant isolation yet (customer_id is a form field), runs execute synchronously in a request threadpool (no job queue), single-worker uvicorn assumed, run-file retention keeps last 20 workbooks (DB rows kept forever).
+- **Authentication is a gate, not tenant isolation.** Signing in proves WHO you
+  are; it does not narrow WHAT you can see. Every signed-in user still reaches
+  every customer, because `customer_id` is still a request field — the `users`
+  table deliberately has no `customer_id`. Taking the tenant from the session
+  instead is the follow-up, and it touches all 28 routes.
+- **Known deferrals (by decision, not oversight)**: no tenant isolation yet
+  (authentication landed on feat/auth; customer_id is still a request field), runs execute synchronously in a request threadpool (no job queue), single-worker uvicorn assumed, run-file retention keeps last 20 workbooks (DB rows kept forever).

@@ -171,7 +171,11 @@ def _upgrade_and_seed():
     cfg.attributes["configure_logger"] = False
     command.upgrade(cfg, "head")
 
-    from .seeds import seed_defaults
+    from logging_setup import get_logger
+    from .seeds import seed_admin_user, seed_defaults
     with SessionLocal() as session:
         seed_defaults(session)
+        # no-op unless ADMIN_EMAIL/ADMIN_PASSWORD are set and the users
+        # table is empty; see db/seeds.py for why it never re-passwords
+        seed_admin_user(session, get_logger(__name__))
         session.commit()

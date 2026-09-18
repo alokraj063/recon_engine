@@ -119,6 +119,30 @@ nothing is deleted by the app. Add an S3 lifecycle rule on `{prefix}runs/`.
 | `RECON_DATA_DIR` | `backend/data` (image: `/tmp/recon-data`) | Local storage root and SQLite location. In a container it is scratch space only. |
 | `FRONTEND_DIST` | `frontend/dist` (image: `/app/frontend_dist`) | Built React app served at `/`. No `index.html` there = API only, which is what local development with Vite on :5173 wants. |
 
+### Sign-in
+
+Every `/api` route except `/api/health` and `/api/auth/*` requires a session
+cookie. See [`backend/app/auth.py`](../backend/app/auth.py).
+
+| Variable | Default | Notes |
+|---|---|---|
+| `SESSION_SECRET` | *(random per process)* | Signs the session cookie. **Set this in production**: without it every restart signs everyone out, and two containers issue cookies the other rejects. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
+| `SESSION_MAX_AGE` | `28800` (8h) | Cookie lifetime in seconds. |
+| `COOKIE_SECURE` | `false` | `true` marks the cookie HTTPS-only — set it behind the ALB, leave it off for plain-http localhost. |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | *(unset)* | Creates the **first** login on startup, and only while the `users` table is empty. Never re-passwords an existing account, so rotating them does nothing — that is deliberate. |
+
+Accounts after the first are made with the CLI, which never takes a password
+as an argument (argv is visible in `ps`):
+
+```bash
+cd backend && ../.venv/bin/python scripts/create_user.py -e person@example.com -n "Their Name"
+../.venv/bin/python scripts/create_user.py --list
+../.venv/bin/python scripts/create_user.py -e person@example.com --deactivate
+```
+
+Deactivating takes effect on that user's **next request** — the gate reloads
+the row every time, which is the only way to withdraw a stateless cookie.
+
 ## Container defaults
 
 Set in the [`Dockerfile`](../Dockerfile). Any of them can be overridden with `-e` or by the task definition.
@@ -152,9 +176,14 @@ Plain `environment` values:
 ```json
 "secrets": [
   { "name": "DB_USER",     "valueFrom": "arn:aws:secretsmanager:ap-south-1:<account>:secret:wabtec/db-credentials-<suffix>:username::" },
-  { "name": "DB_PASSWORD", "valueFrom": "arn:aws:secretsmanager:ap-south-1:<account>:secret:wabtec/db-credentials-<suffix>:password::" }
+  { "name": "DB_PASSWORD", "valueFrom": "arn:aws:secretsmanager:ap-south-1:<account>:secret:wabtec/db-credentials-<suffix>:password::" },
+  { "name": "SESSION_SECRET", "valueFrom": "arn:aws:secretsmanager:ap-south-1:<account>:secret:wabtec/session-secret-<suffix>" }
 ]
 ```
+
+`SESSION_SECRET` belongs in Secrets Manager, not in `environment`: anyone who
+can read the task definition could otherwise mint a valid session cookie.
+Set `COOKIE_SECURE=true` as a plain environment value at the same time.
 
 Other task definition settings:
 
