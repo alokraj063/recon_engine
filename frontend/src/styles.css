@@ -3694,3 +3694,8 @@ td.ui-table-empty {
 .audit-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .ui-feed-list .tone-info .ui-feed-icon { background: hsl(215 75% 45% / 0.1); color: var(--blue); }
 .ui-feed-list .tone-neutral .ui-feed-icon { background: var(--paper-deep); color: var(--ink-faint); }
+
+/* --- Architecture ----------------------------------------------------- */
+.arch-card { padding: 14px 16px; }
+.ui-card.arch-detail { margin: 0; padding: 18px 20px 20px; }
+.arch-card .arch-pipe { margin-top: 0; }
