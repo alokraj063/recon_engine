@@ -84,3 +84,28 @@ export function fmtCell(col: string, v: Cell): string {
   if (typeof v === 'number') return AMOUNT_COLS.has(col) ? inr(v) : String(v)
   return stripFloatArtifact(String(v))
 }
+
+/** A whole count with Indian grouping (1,23,456). */
+export const n = (v: number) => v.toLocaleString('en-IN')
+
+/** A 0..1 ratio as "96.9%" — '—' when there is nothing to divide. */
+export const pct = (v: number | null | undefined) =>
+  v === null || v === undefined || Number.isNaN(v) ? '—' : `${(v * 100).toFixed(1)}%`
+
+export const plural = (v: number, one: string, many: string) => (v === 1 ? one : many)
+
+const DAY = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+/** yyyy-mm-dd (or an ISO timestamp's date part) -> "21 Aug 2026",
+ *  parsed as a calendar day, no timezone shift. */
+export function fmtDay(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
+  return y && m && d ? DAY.format(new Date(y, m - 1, d)) : iso
+}
+
+/** Whole days from a yyyy-mm-dd date to another (the data's own "today"). */
+export function ageDays(date: string, asOf: string): number | null {
+  const a = Date.parse(date.slice(0, 10)), b = Date.parse(asOf.slice(0, 10))
+  if (Number.isNaN(a) || Number.isNaN(b)) return null
+  return Math.max(0, Math.round((b - a) / 86_400_000))
+}

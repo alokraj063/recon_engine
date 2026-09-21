@@ -124,33 +124,33 @@ export function RecentActivity({ customerId, refreshKey, onOpenAudit }: {
   }, [customerId, refreshKey])
 
   return (
-    <section className="cc-card cc-activity">
-      <header className="cc-card-head">
+    <section className="ui-card cc-activity">
+      <header className="ui-card-head">
         <h3>Recent activity</h3>
-        <button type="button" className="cc-link" onClick={onOpenAudit}>
+        <button type="button" className="ui-link" onClick={onOpenAudit}>
           Audit trail <ArrowRight size={12} strokeWidth={2} />
         </button>
       </header>
-      <div className="cc-fill">
-        <div className="cc-fill-inner">
+      <div className="ui-fill">
+        <div className="ui-fill-inner">
           {items === null ? (
-            <p className="cc-activity-note">Loading…</p>
+            <p className="ui-feed-note">Loading…</p>
           ) : items.length === 0 ? (
-            <p className="cc-activity-note">
+            <p className="ui-feed-note">
               {failed ? 'Activity could not be loaded.' : 'No activity yet — ingest documents to get started.'}
             </p>
           ) : (
-            <ol className="cc-activity-list">
+            <ol className="ui-feed-list">
               {items.map((i) => {
                 const Icon = i.icon
                 return (
                   <li key={i.id} className={`tone-${i.tone}`}>
-                    <span className="cc-activity-icon"><Icon size={13} strokeWidth={2} /></span>
-                    <span className="cc-activity-body">
-                      <span className="cc-activity-title">{i.title}</span>
-                      {i.detail && <span className="cc-activity-detail">{i.detail}</span>}
+                    <span className="ui-feed-icon"><Icon size={13} strokeWidth={2} /></span>
+                    <span className="ui-feed-body">
+                      <span className="ui-feed-title">{i.title}</span>
+                      {i.detail && <span className="ui-feed-detail">{i.detail}</span>}
                     </span>
-                    <time className="cc-activity-when" dateTime={i.at} title={fmtWhen(i.at)}>
+                    <time className="ui-feed-when" dateTime={i.at} title={fmtWhen(i.at)}>
                       {ago(i.at)}
                     </time>
                   </li>

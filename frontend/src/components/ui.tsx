@@ -1,0 +1,227 @@
+import type { ReactNode } from 'react'
+import { AlertTriangle, CheckCircle2, Info, RotateCw } from 'lucide-react'
+import type { CustomerInfo } from '../types'
+import { n, pct, plural } from '../format'
+
+/* The shared page kit — the Command Center's visual language, used by
+   every page so the app reads as one product. Styles live in the
+   "UI kit" section of styles.css (ui-* classes). Keep these small and
+   dumb: layout and tone only, never data fetching or business rules. */
+
+/** One page: a header, then a vertical stack of cards and notices. */
+export function Page({ children, className }: { children: ReactNode; className?: string }) {
+  return <section className={`ui-page${className ? ` ${className}` : ''}`}>{children}</section>
+}
+
+/** The page head: title + a quiet context line on the left, tools on the
+ *  right (filters, then refresh, a separator, then actions — primary last). */
+export function PageHeader({ title, context, children }: {
+  title: ReactNode
+  context?: ReactNode
+  children?: ReactNode
+}) {
+  return (
+    <header className="ui-head">
+      <div className="ui-head-title">
+        <h2 className="page-title">{title}</h2>
+        {context && <p className="ui-context">{context}</p>}
+      </div>
+      {children && <div className="ui-head-tools">{children}</div>}
+    </header>
+  )
+}
+
+/** the thin rule between a head's filters and its actions */
+export const ToolSep = () => <span className="ui-head-sep" />
+
+/** the small dot between items of a context line */
+export const Dot = () => <span className="ui-dot" />
+
+export function RefreshButton({ onClick, loading, label = 'Refresh' }: {
+  onClick: () => void; loading?: boolean; label?: string
+}) {
+  return (
+    <button type="button" className="ui-icon-btn" onClick={onClick} title={label} aria-label={label}>
+      <RotateCw size={15} strokeWidth={1.75} className={loading ? 'spin' : undefined} />
+    </button>
+  )
+}
+
+/** Customer switcher — renders nothing when there is only one customer. */
+export function CustomerSelect({ customers, value, onChange }: {
+  customers: CustomerInfo[]; value: string; onChange: (key: string) => void
+}) {
+  if (customers.length <= 1) return null
+  return (
+    <label className="ui-customer">
+      <span>Customer</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        {customers.map((c) => (
+          <option key={c.key} value={c.key}>{c.name} ({c.key})</option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+/** A white card with an optional head (title, sub-line, right-side action). */
+export function Card({ title, sub, action, children, className, ruled, id }: {
+  title?: ReactNode
+  sub?: ReactNode
+  action?: ReactNode
+  children?: ReactNode
+  className?: string
+  /** draw a rule under the head (cards whose body is a table or list) */
+  ruled?: boolean
+  id?: string
+}) {
+  return (
+    <section id={id} className={`ui-card${ruled ? ' is-ruled' : ''}${className ? ` ${className}` : ''}`}>
+      {(title || action) && (
+        <header className="ui-card-head">
+          <div className="ui-card-title">
+            {title && <h3>{title}</h3>}
+            {sub && <span className="ui-card-sub">{sub}</span>}
+          </div>
+          {action && <div className="ui-card-action">{action}</div>}
+        </header>
+      )}
+      {children}
+    </section>
+  )
+}
+
+/** A small inline link — teal, so it always reads as one. */
+export function TextLink({ children, onClick, title, quiet }: {
+  children: ReactNode; onClick: () => void; title?: string
+  /** keeps the surrounding text colour until hovered (figures inside prose) */
+  quiet?: boolean
+}) {
+  return (
+    <button type="button" className={`ui-link${quiet ? ' is-quiet' : ''}`}
+            onClick={onClick} title={title}>
+      {children}
+    </button>
+  )
+}
+
+export function Notice({ tone = 'info', children, action }: {
+  tone?: 'info' | 'warn' | 'error' | 'ok'
+  children: ReactNode
+  action?: ReactNode
+}) {
+  const Icon = tone === 'info' ? Info : tone === 'ok' ? CheckCircle2 : AlertTriangle
+  return (
+    <div className={`ui-notice is-${tone}`} role={tone === 'error' ? 'alert' : undefined}>
+      <Icon size={15} strokeWidth={2} />
+      <div className="ui-notice-body">{children}</div>
+      {action}
+    </div>
+  )
+}
+
+export function EmptyState({ icon, title, children }: {
+  icon?: ReactNode; title: ReactNode; children?: ReactNode
+}) {
+  return (
+    <div className="ui-empty">
+      {icon}
+      <strong>{title}</strong>
+      {children}
+    </div>
+  )
+}
+
+/** Placeholder cards while the first load is in flight. */
+export function SkeletonCards({ heights }: { heights: number[] }) {
+  return (
+    <div className="ui-stack" aria-busy="true" aria-label="Loading">
+      {heights.map((h, i) => <div key={i} className="ui-card sk" style={{ minHeight: h }} />)}
+    </div>
+  )
+}
+
+/** A headline figure: eyebrow label, big number, a quiet sub-line.
+ *  Clickable when onOpen is given — the figure opens its own rows. */
+export function Stat({ label, value, sub, tone, onOpen, title }: {
+  label: ReactNode
+  value: ReactNode
+  sub?: ReactNode
+  tone?: 'ok' | 'warn' | 'bad' | 'info'
+  onOpen?: () => void
+  title?: string
+}) {
+  const body = (
+    <>
+      <span className="ui-eyebrow">{label}</span>
+      <span className="ui-stat-value">{value}</span>
+      {sub && <span className="ui-stat-sub">{sub}</span>}
+    </>
+  )
+  const cls = `ui-stat${tone ? ` tone-${tone}` : ''}`
+  return onOpen ? (
+    <button type="button" className={`${cls} is-link`} onClick={onOpen} title={title}>{body}</button>
+  ) : (
+    <div className={cls} title={title}>{body}</div>
+  )
+}
+
+/** A row of Stats sharing one card, separated by rules. */
+export function StatStrip({ children }: { children: ReactNode }) {
+  return <div className="ui-card ui-stats">{children}</div>
+}
+
+export interface Part {
+  key: string
+  label: string
+  count: number
+  /** colour class: settled | review | open | awaiting | info | neutral | a1..a4 */
+  tone: string
+  onOpen?: () => void
+  /** the hover text on the bar segment and legend item */
+  title?: string
+}
+
+/** One partition drawn as a bar + legend. The legend names each part and
+ *  its share (identity is always in the text, never in colour alone);
+ *  exact counts ride in the hover title. */
+export function PartitionBar({ parts, unit, showCount }: {
+  parts: Part[]
+  unit: [string, string]
+  /** show the count beside the share in the legend */
+  showCount?: boolean
+}) {
+  const total = parts.reduce((s, p) => s + p.count, 0)
+  const hover = (p: Part) => p.title ?? `${p.label} · ${n(p.count)} ${plural(p.count, unit[0], unit[1])}`
+  return (
+    <>
+      <div className="ui-bar" role="img"
+           aria-label={parts.map((p) => `${p.label} ${p.count}`).join(', ')}>
+        {parts.filter((p) => p.count > 0).map((p) => (
+          <span key={p.key} className={`seg seg-${p.tone}`} style={{ flexGrow: p.count }} title={hover(p)} />
+        ))}
+      </div>
+      <div className="ui-legend">
+        {parts.map((p) => {
+          const inner = (
+            <>
+              <span className={`ui-swatch sw-${p.tone}`} />
+              {p.label}
+              <span className="ui-legend-pct">
+                {showCount && <>{n(p.count)}{' · '}</>}
+                {total > 0 ? pct(p.count / total) : '—'}
+              </span>
+            </>
+          )
+          return p.onOpen ? (
+            <button key={p.key} type="button" className="ui-legend-item" onClick={p.onOpen} title={hover(p)}>
+              {inner}
+            </button>
+          ) : (
+            <span key={p.key} className="ui-legend-item is-static" title={hover(p)}>{inner}</span>
+          )
+        })}
+      </div>
+    </>
+  )
+}

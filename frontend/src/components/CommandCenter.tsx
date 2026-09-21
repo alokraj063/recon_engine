@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Clock3, GitMerge, ListChecks, RotateCw, Upload,
+  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Clock3, GitMerge, ListChecks, Upload,
 } from 'lucide-react'
 import type { CustomerInfo, Overview } from '../types'
 import { fetchOperatingUnits, fetchOverview } from '../api'
-import { inr, inrCompact } from '../format'
+import { ageDays, fmtDay, inr, inrCompact, n, pct, plural } from '../format'
 import type { View } from './Sidebar'
 import type { LedgerIntent } from './LedgerView'
 import type { GoldIntent } from './GoldTable'
@@ -13,6 +13,9 @@ import {
   type DateFilterValue,
 } from './DateFilter'
 import { RecentActivity } from './RecentActivity'
+import {
+  CustomerSelect, Dot, Notice, PageHeader, PartitionBar, RefreshButton, TextLink as Link, ToolSep,
+} from './ui'
 
 const FILTER_KEY = (customer: string) => `recon.cc.filter.${customer}`
 
@@ -92,39 +95,6 @@ const G_RECOGNISED: GoldIntent = { frame: 'bank', filters: { credit_scope: ['REC
 /** every bill in the window — the Gold pool figure */
 const G_BILLS: GoldIntent = { frame: 'bills', filters: {} }
 
-const pct = (v: number | null | undefined) =>
-  v === null || v === undefined ? '—' : `${(v * 100).toFixed(1)}%`
-const n = (v: number) => v.toLocaleString('en-IN')
-const plural = (v: number, one: string, many: string) => (v === 1 ? one : many)
-
-const DAY = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-/** yyyy-mm-dd -> "21 Aug 2026" (parsed as a calendar day, no timezone shift) */
-function fmtDay(iso: string): string {
-  const [y, m, d] = iso.split('-').map(Number)
-  return y && m && d ? DAY.format(new Date(y, m - 1, d)) : iso
-}
-
-/** whole days from a yyyy-mm-dd date to the data's own "today" */
-function ageDays(date: string, asOf: string): number | null {
-  const a = Date.parse(date), b = Date.parse(asOf)
-  if (Number.isNaN(a) || Number.isNaN(b)) return null
-  return Math.max(0, Math.round((b - a) / 86_400_000))
-}
-
-/** A small inline link — teal, so it always reads as one. */
-function Link({ children, onClick, title, quiet }: {
-  children: ReactNode; onClick: () => void; title?: string
-  /** keeps the surrounding text colour until hovered (figures inside prose) */
-  quiet?: boolean
-}) {
-  return (
-    <button type="button" className={`cc-link${quiet ? ' is-quiet' : ''}`}
-            onClick={onClick} title={title}>
-      {children}
-    </button>
-  )
-}
-
 /** The match-rate ring (inline SVG, no deps). */
 function RateRing({ rate }: { rate: number | null }) {
   const value = rate === null ? 0 : Math.max(0, Math.min(1, rate))
@@ -174,10 +144,10 @@ function AttentionRow({ tone, icon, title, meta, count, unit, onOpen }: {
 function Skeleton() {
   return (
     <div className="cc-board" aria-busy="true" aria-label="Loading overview">
-      <div className="cc-card sk" style={{ minHeight: 196 }} />
-      <div className="cc-card sk" style={{ minHeight: 196 }} />
-      <div className="cc-card sk" style={{ minHeight: 280 }} />
-      <div className="cc-card sk" style={{ minHeight: 280 }} />
+      <div className="ui-card sk" style={{ minHeight: 196 }} />
+      <div className="ui-card sk" style={{ minHeight: 196 }} />
+      <div className="ui-card sk" style={{ minHeight: 280 }} />
+      <div className="ui-card sk" style={{ minHeight: 280 }} />
     </div>
   )
 }
@@ -287,83 +257,60 @@ export function CommandCenter({
      partition (identity + share in its legend, counts on hover); the
      attention list owns review / open / awaiting. */
   const partition = [
-    { key: 'settled', label: 'Settled', count: settled, onOpen: () => openQueue(Q_SETTLED) },
-    { key: 'review', label: 'In review', count: inReview, onOpen: () => openQueue(Q_REVIEW) },
-    { key: 'open', label: 'Unmatched', count: unmatched, onOpen: () => openQueue(Q_UNMATCHED) },
-    { key: 'awaiting', label: 'Awaiting data', count: awaiting, onOpen: () => openQueue(Q_AWAITING) },
+    { key: 'settled', tone: 'settled', label: 'Settled', count: settled, onOpen: () => openQueue(Q_SETTLED) },
+    { key: 'review', tone: 'review', label: 'In review', count: inReview, onOpen: () => openQueue(Q_REVIEW) },
+    { key: 'open', tone: 'open', label: 'Unmatched', count: unmatched, onOpen: () => openQueue(Q_UNMATCHED) },
+    { key: 'awaiting', tone: 'awaiting', label: 'Awaiting data', count: awaiting, onOpen: () => openQueue(Q_AWAITING) },
   ]
 
   const asOf = data?.data_as_of ?? new Date().toISOString().slice(0, 10)
 
   return (
-    <section className="cc-page">
-      <header className="cc-head">
-        <div className="cc-head-title">
-          <h2 className="page-title">Command Center</h2>
-          <p className="cc-context">
-            {customerName}
-            {data?.data_as_of && <><span className="cc-dot" />data through {fmtDay(data.data_as_of)}</>}
-          </p>
-        </div>
-        <div className="cc-head-tools">
-          <DateFilter value={filter} onChange={setFilter} units={units} unitCounts={unitCounts} />
-          {customers.length > 1 && (
-            <label className="cc-customer">
-              <span>Customer</span>
-              <select value={customerId} onChange={(e) => onCustomerChange(e.target.value)}>
-                {customers.map((c) => (
-                  <option key={c.key} value={c.key}>{c.name} ({c.key})</option>
-                ))}
-              </select>
-            </label>
-          )}
-          <button type="button" className="cc-icon-btn" onClick={load}
-                  title="Refresh figures" aria-label="Refresh figures">
-            <RotateCw size={15} strokeWidth={1.75} className={loading ? 'spin' : undefined} />
-          </button>
-          <span className="cc-head-sep" />
-          <button type="button" className="cc-btn" onClick={() => onNavigate('ingest')}>
-            <Upload size={15} strokeWidth={1.75} /> Ingest
-          </button>
-          <button type="button" className="cc-btn cc-btn-primary" onClick={() => onNavigate('reconcile')}>
-            <GitMerge size={15} strokeWidth={1.75} /> Reconcile
-          </button>
-        </div>
-      </header>
+    <section className="ui-page">
+      <PageHeader title="Command Center"
+                  context={<>{customerName}{data?.data_as_of && <><Dot />data through {fmtDay(data.data_as_of)}</>}</>}>
+        <DateFilter value={filter} onChange={setFilter} units={units} unitCounts={unitCounts} />
+        <CustomerSelect customers={customers} value={customerId} onChange={onCustomerChange} />
+        <RefreshButton onClick={load} loading={loading} label="Refresh figures" />
+        <ToolSep />
+        <button type="button" className="ui-btn" onClick={() => onNavigate('ingest')}>
+          <Upload size={15} strokeWidth={1.75} /> Ingest
+        </button>
+        <button type="button" className="ui-btn ui-btn-primary" onClick={() => onNavigate('reconcile')}>
+          <GitMerge size={15} strokeWidth={1.75} /> Reconcile
+        </button>
+      </PageHeader>
 
       {error && (
-        <div className="cc-notice is-error" role="alert">
-          <AlertTriangle size={15} strokeWidth={2} />
+        <Notice tone="error" action={<Link onClick={load}>Try again</Link>}>
           Could not load the overview: {error}
-          <Link onClick={load}>Try again</Link>
-        </div>
+        </Notice>
       )}
       {!data && !error && <Skeleton />}
 
       {data && quiet && (
-        <div className="cc-notice">
+        <Notice>
           Nothing in {windowLabel(filter)}. Widen the date range, or pick “All” in the filter.
-        </div>
+        </Notice>
       )}
       {data && filtered && data.filters_applied && data.filters_applied.bank_only_unassigned > 0
         && !data.filters_applied.unassigned_included && (
-        <div className="cc-notice is-warn">
-          <AlertTriangle size={15} strokeWidth={2} />
+        <Notice tone="warn">
           {n(data.filters_applied.bank_only_unassigned)} bank-only{' '}
           {plural(data.filters_applied.bank_only_unassigned, 'credit has', 'credits have')} no
           operating unit and {plural(data.filters_applied.bank_only_unassigned, 'is', 'are')} hidden
           by the unit filter — tick “Unassigned” to include them.
-        </div>
+        </Notice>
       )}
 
       {data && (
         <div className={`cc-board${loading ? ' is-loading' : ''}`}>
           {/* ---- how healthy is it ---- */}
-          <section className="cc-card cc-health" aria-label="Reconciliation health">
+          <section className="ui-card cc-health" aria-label="Reconciliation health">
             <div className="cc-rate">
               <RateRing rate={data.match_rate} />
               <div className="cc-rate-text">
-                <span className="cc-eyebrow">Match rate</span>
+                <span className="ui-eyebrow">Match rate</span>
                 <span className="cc-rate-main">
                   <Link quiet onClick={() => openQueue(Q_SETTLED)}>{n(settled)} settled</Link>
                   {' of '}
@@ -373,8 +320,8 @@ export function CommandCenter({
                   </Link>
                 </span>
                 <span className="cc-rate-by">
-                  auto {n(data.locked_by.AUTO_HIGH)}<span className="cc-dot" />
-                  accepted {n(accepted)}<span className="cc-dot" />manual {n(manual)}
+                  auto {n(data.locked_by.AUTO_HIGH)}<Dot />
+                  accepted {n(accepted)}<Dot />manual {n(manual)}
                 </span>
                 <Link onClick={() => openQueue(Q_ALL_MATCHES)}>
                   All matches <ArrowRight size={13} strokeWidth={2} />
@@ -384,31 +331,15 @@ export function CommandCenter({
 
             <div className="cc-received">
               <div className="cc-received-top">
-                <span className="cc-eyebrow">IREPS credits received</span>
+                <span className="ui-eyebrow">IREPS credits received</span>
                 <button type="button" className="cc-received-figure" onClick={() => openGold(G_IN_SCOPE)}
                         title={inr(data.in_scope_value)}>
-                  <span className="cc-big">{inrCompact(data.in_scope_value)}</span>
-                  <span className="cc-big-unit">{n(inScope)} {plural(inScope, 'credit', 'credits')}</span>
+                  <span className="ui-big">{inrCompact(data.in_scope_value)}</span>
+                  <span className="ui-big-unit">{n(inScope)} {plural(inScope, 'credit', 'credits')}</span>
                 </button>
               </div>
 
-              <div className="cc-bar" role="img"
-                   aria-label={partition.map((p) => `${p.label} ${p.count}`).join(', ')}>
-                {partition.filter((p) => p.count > 0).map((p) => (
-                  <span key={p.key} className={`seg seg-${p.key}`} style={{ flexGrow: p.count }}
-                        title={`${p.label} · ${n(p.count)} ${plural(p.count, 'credit', 'credits')}`} />
-                ))}
-              </div>
-              <div className="cc-legend">
-                {partition.map((p) => (
-                  <button key={p.key} type="button" className="cc-legend-item" onClick={p.onOpen}
-                          title={`${n(p.count)} ${plural(p.count, 'credit', 'credits')}`}>
-                    <span className={`cc-swatch sw-${p.key}`} />
-                    {p.label}
-                    <span className="cc-legend-pct">{inScope > 0 ? pct(p.count / inScope) : '—'}</span>
-                  </button>
-                ))}
-              </div>
+              <PartitionBar parts={partition} unit={['credit', 'credits']} />
 
               <p className="cc-received-foot">
                 <Link quiet onClick={() => openQueue(qExcGap('UNRECOGNISED_RECEIPT'))}
@@ -417,9 +348,9 @@ export function CommandCenter({
                 </Link>
                 {data.out_of_scope_value !== undefined && <>&nbsp;({inrCompact(data.out_of_scope_value)})</>}
                 &nbsp;not matchable
-                <span className="cc-dot" />
+                <Dot />
                 <Link quiet onClick={() => openGold(G_CREDITS)}>{n(credits)} credits in window</Link>
-                <span className="cc-dot" />
+                <Dot />
                 <Link quiet onClick={() => openGold(G_BILLS)}>{n(data.gold.bills)} bills</Link>
                 &nbsp;·&nbsp;{n(data.gold.lineage_docs)} lineage docs
               </p>
@@ -427,8 +358,8 @@ export function CommandCenter({
           </section>
 
           {/* ---- what needs me ---- */}
-          <section className="cc-card cc-attention">
-            <header className="cc-card-head">
+          <section className="ui-card cc-attention">
+            <header className="ui-card-head">
               <h3>Needs attention</h3>
             </header>
             <ul className="cc-att-list">
@@ -476,15 +407,15 @@ export function CommandCenter({
           </section>
 
           {/* ---- the detail ---- */}
-          <section className="cc-card cc-worklist">
-            <header className="cc-card-head">
+          <section className="ui-card cc-worklist">
+            <header className="ui-card-head">
               <h3>Largest open exceptions</h3>
               <Link onClick={() => openQueue(Q_OPEN_EXC)}>
                 Open Analyst queue <ArrowRight size={13} strokeWidth={2} />
               </Link>
             </header>
             {data.top_exceptions.length === 0 ? (
-              <div className="cc-empty">
+              <div className="ui-empty">
                 <CheckCircle2 size={22} strokeWidth={1.75} />
                 <strong>Nothing open</strong>
                 <span>Every recognised credit and advised bill is accounted for.</span>
@@ -493,8 +424,8 @@ export function CommandCenter({
                 </Link>
               </div>
             ) : (
-              <div className="cc-table-wrap">
-                <table className="cc-table">
+              <div className="ui-table-wrap">
+                <table className="ui-table">
                   <thead>
                     <tr>
                       <th>Type</th><th>Reference</th><th>Zone</th><th>Date</th>
@@ -509,7 +440,7 @@ export function CommandCenter({
                         <tr key={e.id} onClick={open} tabIndex={0}
                             onKeyDown={(k) => { if (k.key === 'Enter') open() }}>
                           <td>
-                            <span className={`cc-type type-${e.exception_type}`}>
+                            <span className={`ui-type type-${e.exception_type}`}>
                               {e.exception_type === 'BANK_ONLY' ? 'Credit' : 'Bill'}
                             </span>
                           </td>
@@ -518,7 +449,7 @@ export function CommandCenter({
                           <td className="nowrap">{e.date ? fmtDay(e.date) : '—'}</td>
                           <td className="num">
                             {age === null ? '—'
-                              : <span className={`cc-age${age > 30 ? ' is-late' : ''}`}>{age}d</span>}
+                              : <span className={`ui-age${age > 30 ? ' is-late' : ''}`}>{age}d</span>}
                           </td>
                           <td className="num strong" title={inr(e.amount)}>{inrCompact(e.amount)}</td>
                         </tr>
