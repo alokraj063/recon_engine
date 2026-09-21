@@ -122,7 +122,7 @@ export function MatchingConfigPanel({ customerId }: Props) {
   }, [customerId])
 
   if (error && !rules) return <ErrorBanner error={error} />
-  if (!schema || !config || !rules) return <p className="footer-note">Loading configuration…</p>
+  if (!schema || !config || !rules) return <p className="up-go-note"><span className="quill" /> Loading configuration…</p>
 
   const bank = schema.bank_txns
   const bills = schema.bills
@@ -295,7 +295,7 @@ export function MatchingConfigPanel({ customerId }: Props) {
             </span>
           </div>
         ))}
-        <button className="btn-refresh"
+        <button type="button" className="ui-btn is-sm"
                 onClick={() => patchMap({
                   exact_signals: [...fm.exact_signals,
                     { bank_field: bank.fields[0] ?? '', bill_field: bills.fields[0] ?? '',
@@ -407,11 +407,12 @@ export function MatchingConfigPanel({ customerId }: Props) {
 
       {error && <ErrorBanner error={error} />}
 
-      <div className="run-row">
-        <button className="btn-run" disabled={!dirty || saving} onClick={onSave}>
-          {saving ? 'Saving…' : 'Save configuration'}
-        </button>
-        <button className="btn-refresh" disabled={saving}
+      <div className={`config-savebar${dirty && !saved ? ' is-dirty' : ''}`}>
+        <span className="config-savebar-state">
+          {saved ? 'Saved — future runs use these rules'
+            : dirty ? 'Unsaved changes' : 'No changes'}
+        </span>
+        <button type="button" className="ui-btn" disabled={saving}
                 onClick={() => {
                   // keep copy_effective so the terminology editors stay
                   // rendered; empty overrides restore default text on save
@@ -422,8 +423,9 @@ export function MatchingConfigPanel({ customerId }: Props) {
                 }}>
           Reset to defaults
         </button>
-        {saved && <span className="chip chip-settled">saved</span>}
-        {dirty && !saved && <span className="chip-note">unsaved changes</span>}
+        <button type="button" className="ui-btn ui-btn-primary" disabled={!dirty || saving} onClick={onSave}>
+          {saving ? 'Saving…' : 'Save configuration'}
+        </button>
       </div>
     </div>
   )

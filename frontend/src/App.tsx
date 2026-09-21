@@ -564,7 +564,7 @@ export default function App() {
               onGoToIngest={() => setView('ingest')}
               refreshKey={ingestEpoch}
             />
-            {error && <ErrorBanner error={error} />}
+            {error && <div className="ui-page-after"><ErrorBanner error={error} /></div>}
           </>
         )}
 
