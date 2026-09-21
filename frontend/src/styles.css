@@ -3218,3 +3218,7 @@ td.ui-table-empty {
 .ui-card .party-ref { font-size: var(--fs-micro); }
 .ui-card .ledger-matches td { padding-left: 10px; padding-right: 10px; }
 .audit-tools .dt-search { min-width: 270px; }
+
+/* the progressive-rows sentinel at the foot of a big table */
+tr.ui-more-row td { padding: 14px 18px !important; text-align: center; background: hsl(220 16% 98.5%); }
+tr.ui-more-row:hover td { background: hsl(220 16% 98.5%) !important; }

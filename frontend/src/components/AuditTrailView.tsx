@@ -5,7 +5,8 @@ import type { AuditEventRow, CustomerInfo } from '../types'
 import { fetchAudit } from '../api'
 import { fmtWhen, n } from '../format'
 import {
-  CustomerSelect, EmptyState, Notice, PageHeader, RefreshButton, Stat, StatStrip, TextLink,
+  CustomerSelect, EmptyState, MoreRows, Notice, PageHeader, RefreshButton, Stat, StatStrip, TextLink,
+  useProgressiveRows,
 } from './ui'
 
 interface Props {
@@ -195,6 +196,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
   }, [filtered])
 
   const customerName = customers.find((c) => c.key === customerId)?.name ?? customerId
+  const drawn = useProgressiveRows(filtered)
   const chips = [
     { key: 'q', label: 'Search', values: query ? [query] : [], onRemove: () => setQuery('') },
     { key: 'actor', label: 'Actor', values: actor === 'all' ? [] : [actor],
@@ -303,7 +305,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((e) => (
+                    {drawn.shown.map((e) => (
                       <Fragment key={e.id}>
                       <tr className={`xq-row${expanded[e.id] ? ' open' : ''}`}
                           onClick={() => setExpanded((x) => ({ ...x, [e.id]: !x[e.id] }))}>
@@ -374,6 +376,8 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                       )}
                       </Fragment>
                     ))}
+                    <MoreRows remaining={drawn.remaining} onMore={drawn.more}
+                              colSpan={6} noun="events" />
                   </tbody>
                 </table>
               </div>

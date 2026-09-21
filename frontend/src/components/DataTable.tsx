@@ -15,7 +15,7 @@ import { DATE_HINT } from '../format'
 import { ColumnFilter } from './filters/ColumnFilter'
 import { FilterChips, type FilterChip } from './filters/FilterChips'
 import { buildOptions, facetKey } from './filters/facets'
-import { EmptyState, TextLink } from './ui'
+import { EmptyState, MoreRows, TextLink, useProgressiveRows } from './ui'
 
 interface Props {
   rows: Row[]
@@ -113,6 +113,8 @@ export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, e
   })
 
   const visible = table.getRowModel().rows
+  // draw in batches: every row is sorted/filtered, only the DOM is deferred
+  const drawn = useProgressiveRows(visible)
   const filtersHide = rows.length > 0 && filteredRows.length === 0
 
   const anyChip = chips.some((c) => c.values.length > 0)
@@ -200,7 +202,7 @@ export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, e
             ))}
           </thead>
           <tbody>
-            {visible.map((row) => {
+            {drawn.shown.map((row) => {
               const open = openRow === row.id
               return (
                 <FragmentRow
@@ -226,6 +228,8 @@ export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, e
                 </FragmentRow>
               )
             })}
+            <MoreRows remaining={drawn.remaining} onMore={drawn.more}
+                      colSpan={table.getVisibleLeafColumns().length + (renderDetail ? 1 : 0)} />
           </tbody>
         </table>
       </div>

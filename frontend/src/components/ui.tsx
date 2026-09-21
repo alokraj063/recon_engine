@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, CheckCircle2, Info, RotateCw } from 'lucide-react'
 import type { CustomerInfo } from '../types'
 import { n, pct, plural } from '../format'
@@ -223,5 +223,64 @@ export function PartitionBar({ parts, unit, showCount }: {
         })}
       </div>
     </>
+  )
+}
+
+/* ---- progressive rows ------------------------------------------------
+   Big tables (2,000+ rows) froze the tab while React drew every row at
+   once. These render the first BATCH rows, then the next batch whenever
+   the bottom of the table scrolls into view — sorting, filtering and
+   expanding still act on the whole set; only the drawing is deferred. */
+
+const BATCH = 150
+
+/** The first `limit` rows of `rows`, growing on demand. The limit resets
+ *  when the set itself changes (a filter, a sort, a new load) — keyed on
+ *  its length and first row so an unrelated re-render never resets it. */
+export function useProgressiveRows<T>(rows: T[]) {
+  const [limit, setLimit] = useState(BATCH)
+  const first = rows[0]
+  useEffect(() => { setLimit(BATCH) }, [rows.length, first])
+  // stable identities: MoreRows and deep-link effects depend on them
+  const more = useCallback(() => setLimit((l) => l + BATCH), [])
+  const reveal = useCallback((count: number) => setLimit((l) => Math.max(l, count)), [])
+  return {
+    shown: rows.length > limit ? rows.slice(0, limit) : rows,
+    remaining: Math.max(0, rows.length - limit),
+    more,
+    /** make sure the first `count` rows are drawn (a deep link to row N) */
+    reveal,
+  }
+}
+
+/** The last row of a progressively drawn table: loads the next batch as
+ *  it scrolls into view (IntersectionObserver clips by every scrolling
+ *  ancestor, so it works inside the tables' own scroll boxes too), with
+ *  a button as the fallback. Renders nothing once every row is drawn. */
+export function MoreRows({ remaining, colSpan, onMore, noun = 'rows' }: {
+  remaining: number
+  colSpan: number
+  onMore: () => void
+  noun?: string
+}) {
+  const ref = useRef<HTMLTableCellElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || remaining <= 0) return
+    const io = new IntersectionObserver((es) => {
+      if (es.some((e) => e.isIntersecting)) onMore()
+    }, { rootMargin: '300px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [remaining, onMore])
+  if (remaining <= 0) return null
+  return (
+    <tr className="ui-more-row">
+      <td ref={ref} colSpan={colSpan}>
+        <button type="button" className="ui-link" onClick={onMore}>
+          Show more — {n(remaining)} {noun} not drawn yet
+        </button>
+      </td>
+    </tr>
   )
 }

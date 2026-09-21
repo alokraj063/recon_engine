@@ -25,7 +25,8 @@ import { FilterChips, type FilterChip } from './filters/FilterChips'
 import { FilterPopover } from './filters/FilterPopover'
 import { buildOptions, deSnake, facetKey } from './filters/facets'
 import {
-  EmptyState, Notice, PageHeader, RefreshButton, Stat, StatStrip, TextLink, ToolSep,
+  EmptyState, MoreRows, Notice, PageHeader, RefreshButton, Stat, StatStrip, TextLink, ToolSep,
+  useProgressiveRows,
 } from './ui'
 
 type Evidence = Row | 'loading' | 'missing' | 'manual'
@@ -417,6 +418,13 @@ export function LedgerView({
       onRemove: () => setExcOpenWork(false) },
     { key: 'exc-date', label: 'Date', values: windowValues, onRemove: clearWindow },
   ]
+  const drawnMatches = useProgressiveRows(visibleMatches)
+  const drawnExc = useProgressiveRows(exceptions)
+  // a focused match (arriving from the Exception queue / AR / Audit) may
+  // sit past the first batch: draw down to it so its row exists to scroll to
+  const focusIdx = focusId ? visibleMatches.findIndex((m) => m.id === focusId) : -1
+  const revealMatches = drawnMatches.reveal
+  useEffect(() => { if (focusIdx >= 0) revealMatches(focusIdx + 1) }, [focusIdx, revealMatches])
   const runNote = data && runSet
     ? `${visibleMatches.length} of ${data.matches.length} matches`
     : undefined
@@ -579,7 +587,7 @@ export function LedgerView({
                     </td>
                   </tr>
                 )}
-                {visibleMatches.map((m) => {
+                {drawnMatches.shown.map((m) => {
                   const picked = m.bills.filter((b) => b.role === 'picked')
                   const candidates = m.bills.length - picked.length
                   const ev = evidence[m.id]
@@ -697,6 +705,8 @@ export function LedgerView({
                     </Fragment>
                   )
                 })}
+                <MoreRows remaining={drawnMatches.remaining} onMore={drawnMatches.more}
+                          colSpan={8} noun="matches" />
               </tbody>
             </table>
             </div>
@@ -749,7 +759,7 @@ export function LedgerView({
                   </tr>
                 </thead>
                 <tbody>
-                  {exceptions.map((e) => {
+                  {drawnExc.shown.map((e) => {
                     const c = excCells(e)
                     const open = !!excOpen[e.id]
                     return (
@@ -842,6 +852,8 @@ export function LedgerView({
                     </Fragment>
                     )
                   })}
+                  <MoreRows remaining={drawnExc.remaining} onMore={drawnExc.more}
+                            colSpan={10} noun="exceptions" />
                 </tbody>
               </table>
               </div>

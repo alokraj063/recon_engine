@@ -576,7 +576,12 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                fmtDay, ageDays, inrCompact) live in format.ts. The
                pre-kit shells (intake, result-head, view-card, cc-panel,
                tiles, slot rows) were deleted from styles.css — build new
-               UI from the kit, never from those names;
+               UI from the kit, never from those names. Big tables draw
+               progressively (ui.tsx useProgressiveRows + MoreRows: 150
+               rows, then the next batch as the table's foot scrolls into
+               view; sort/filter/counts still see every row) — DataTable,
+               AR, both Analyst queue tabs and the Audit feed use it; a
+               deep link to row N calls reveal(N) first (Analyst focusId);
                IA: "Operate" group — Command Center (default landing;
                redesigned 2026-09-17 as a 7/5 board where EVERY FIGURE
                APPEARS ONCE — header (customer · data-through date; date

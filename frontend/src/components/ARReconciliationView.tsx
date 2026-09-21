@@ -15,7 +15,8 @@ import {
   type DateFilterValue,
 } from './DateFilter'
 import {
-  Card, Dot, EmptyState, Notice, PageHeader, PartitionBar, RefreshButton, TextLink,
+  Card, Dot, EmptyState, MoreRows, Notice, PageHeader, PartitionBar, RefreshButton, TextLink,
+  useProgressiveRows,
 } from './ui'
 
 /** AR opens on the whole working set; the quick picks are one click away. */
@@ -124,6 +125,7 @@ export function ARReconciliationView({
   const rows = inScope.filter((r) =>
     (statusFilter.length === 0 || statusFilter.includes(r.status))
     && (ageFilter.length === 0 || (isOpen(r) && ageFilter.includes(bucketOf(r)))))
+  const drawn = useProgressiveRows(rows)
   const statusCounts = inScope.reduce<Record<string, number>>(
     (acc, r) => ({ ...acc, [r.status]: (acc[r.status] ?? 0) + 1 }), {})
   const scoped = !!runSet || win.from !== '' || win.to !== '' || dateFilter.units !== null
@@ -358,7 +360,7 @@ export function ARReconciliationView({
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r, i) => (
+                    {drawn.shown.map((r, i) => (
                       <tr key={r.match_ledger_id ?? r.exception_id ?? i}
                           className={r.match_ledger_id ? 'ar-row-link' : ''}
                           title={r.match_ledger_id ? 'Open this match in the Analyst queue' : undefined}
@@ -391,6 +393,8 @@ export function ARReconciliationView({
                         <td className="run-cell" title={r.run_id ?? undefined}>{runLabelFor(runs, r.run_id)}</td>
                       </tr>
                     ))}
+                    <MoreRows remaining={drawn.remaining} onMore={drawn.more}
+                              colSpan={11} noun="bills" />
                   </tbody>
                 </table>
               </div>
