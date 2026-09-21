@@ -22,13 +22,13 @@ const MODES: Array<{ value: RunMode; label: string; tag?: string; blurb: string 
   {
     value: 'incremental',
     label: 'Incremental',
-    tag: 'Recommended',
-    blurb: "Feeds this customer's running ledger — matches lock, open exceptions carry forward, and AR Reconciliation / Analyst queue fill up.",
+    tag: 'Default',
+    blurb: 'Updates the match ledger. Matches are retained and open exceptions carry forward to later runs.',
   },
   {
     value: 'snapshot',
     label: 'Snapshot',
-    blurb: "A one-off look: reconciles the chosen statements against all current gold bills and stores only this run's result. Nothing reaches the ledger or AR.",
+    blurb: 'One-off reconciliation against current bills. Results are stored with the run; the ledger is not updated.',
   },
 ]
 
@@ -87,7 +87,7 @@ export function ReconcileForm({
   return (
     <section className="ui-page">
       <PageHeader title="Initiate Reconciliation"
-                  context={<>Match bank credits against the gold bills of {customerName}</>}>
+                  context={customerName}>
         <CustomerSelect customers={customers} value={customerId} onChange={onCustomerChange} />
         {customers.length > 1 && <ToolSep />}
         <button type="button" className={`ui-btn${showConfig ? ' is-on' : ''}`}
@@ -98,7 +98,7 @@ export function ReconcileForm({
 
       {showConfig && (
         <Card title="Matching config"
-              sub="Every run for this customer uses these saved rules — edit and save before running"
+              sub="Applies to all runs for this customer"
               ruled>
           <div className="ui-card-body config-body">
             <MatchingConfigPanel customerId={customerId} />
@@ -109,16 +109,15 @@ export function ReconcileForm({
       <div className="ui-grid-75 ingest-grid">
         <div className="ui-stack">
           <Card title={<><span className="step">1</span> Statements</>}
-                sub="Tick one or several — one run covers all their credits"
+                sub="Select one or more"
                 ruled>
             {statements === null ? (
               <div className="dt-loading"><span className="quill" /> Loading statements…</div>
             ) : statements.length === 0 ? (
               <EmptyState icon={<Inbox className="is-muted" size={22} strokeWidth={1.75} />}
-                          title="No statements ingested yet">
-                <span>Reconciliation runs on statements already in the gold layer.</span>
+                          title="No statements available">
                 <TextLink onClick={onGoToIngest}>
-                  Ingest documents first <ArrowRight size={13} strokeWidth={2} />
+                  Ingest documents <ArrowRight size={13} strokeWidth={2} />
                 </TextLink>
               </EmptyState>
             ) : (
@@ -192,7 +191,7 @@ export function ReconcileForm({
               <div><dt>Mode</dt><dd>{chosenMode.label}</dd></div>
               <div>
                 <dt>Matching rules</dt>
-                <dd><TextLink onClick={() => setShowConfig(true)}>Saved config</TextLink></dd>
+                <dd><TextLink onClick={() => setShowConfig(true)}>View</TextLink></dd>
               </div>
             </dl>
             <div className="ui-card-body up-go">
@@ -204,16 +203,12 @@ export function ReconcileForm({
               </button>
               {running && (
                 <p className="up-go-note">
-                  <span className="quill" /> Scoring and assigning… {elapsed}s
-                  <span className="running-hint"> (typically 5–20s)</span>
+                  <span className="quill" /> Reconciling… {elapsed}s
                 </p>
               )}
               {!running && statementIds.length === 0 && stmts.length > 0 && (
-                <p className="up-go-note">Tick at least one statement.</p>
+                <p className="up-go-note">Select at least one statement.</p>
               )}
-            </div>
-            <div className="ui-card-foot">
-              The result opens on its Summary when the run finishes.
             </div>
           </Card>
         </aside>

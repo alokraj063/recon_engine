@@ -141,7 +141,7 @@ export function DateFilter({ value, onChange, units, unitCounts }: {
                   <button key={u} type="button"
                           className={`chip unit-chip${on.has(u) ? ' on' : ''}`}
                           title={u === UNASSIGNED_UNIT
-                            ? 'rows with no operating unit — every unmatched bank credit, and bills whose PartyCode named no unit'
+                            ? 'Rows without an operating unit: unmatched bank credits and bills with no unit code'
                             : unitCounts?.[u] != null ? `${unitCounts[u]} bills` : undefined}
                           onClick={() => toggleUnit(u)}>
                     {u === UNASSIGNED_UNIT ? 'Unassigned' : u}

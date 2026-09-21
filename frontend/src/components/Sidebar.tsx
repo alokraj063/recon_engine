@@ -173,8 +173,7 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
           </a>
         ) : (
           <p className="sidebar-note">
-            Ingest documents, then initiate a reconciliation — or open a result view to
-            pick a past run.
+            No run selected.
           </p>
         )}
       </div>

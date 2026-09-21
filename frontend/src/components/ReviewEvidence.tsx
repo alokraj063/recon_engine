@@ -165,7 +165,7 @@ function MatchPairs({ bank, bill }: {
       {pill('bank', bank.amount, 'amount')}
       {verdict(true)}
       {pill('bill', bill.net_payable_amount, 'net_payable_amount')}
-      <span className="pair-note">the match key — pairs only form on equal amounts</span>
+      <span className="pair-note">match key: amounts must agree</span>
 
       <span className="pair-label">Signal</span>
       {pill('bank', bank.zone, 'zone')}
@@ -214,7 +214,7 @@ export function ReviewEvidence({ row, runId, onAcceptBill, busy }: {
                        valueClass={k === 'amount' ? 'match-key' : undefined} />
         ))}
       </div>
-      <div className="detail-section">Why it was flagged</div>
+      <div className="detail-section">Review reason</div>
       <MatchPairs
         bank={{ amount: row.amount as Cell, zone: row.zone as Cell,
                 value_date: row.value_date as Cell,
@@ -233,7 +233,7 @@ export function ReviewEvidence({ row, runId, onAcceptBill, busy }: {
       ))}
       <div className="detail-section">
         Candidate bills ({cands.length})
-        {onAcceptBill && ' — accepting locks the credit to YOUR choice'}
+        {onAcceptBill && ' — select one to accept'}
       </div>
       <div className="candidate-list">
         {cands.map((c, i) => (
@@ -283,7 +283,7 @@ export function MatchedEvidence({ row, runId }: { row: Row; runId?: string | nul
           <div className="dt-value match-key">
             {fmtCell('net_payable_amount', (net ?? null) as Cell)}
             {netFallback && net !== null && net !== undefined && (
-              <span className="chip-note"> = credit (the match key)</span>
+              <span className="chip-note"> = credit (match key)</span>
             )}
           </div>
         </div>

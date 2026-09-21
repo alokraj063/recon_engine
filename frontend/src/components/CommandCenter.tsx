@@ -290,7 +290,7 @@ export function CommandCenter({
 
       {data && quiet && (
         <Notice>
-          Nothing in {windowLabel(filter)}. Widen the date range, or pick “All” in the filter.
+          No data for {windowLabel(filter)}. Adjust the date filter.
         </Notice>
       )}
       {data && filtered && data.filters_applied && data.filters_applied.bank_only_unassigned > 0
@@ -298,8 +298,8 @@ export function CommandCenter({
         <Notice tone="warn">
           {n(data.filters_applied.bank_only_unassigned)} bank-only{' '}
           {plural(data.filters_applied.bank_only_unassigned, 'credit has', 'credits have')} no
-          operating unit and {plural(data.filters_applied.bank_only_unassigned, 'is', 'are')} hidden
-          by the unit filter — tick “Unassigned” to include them.
+          operating unit and {plural(data.filters_applied.bank_only_unassigned, 'is', 'are')} excluded
+          by the unit filter. Select “Unassigned” to include them.
         </Notice>
       )}
 
@@ -343,11 +343,11 @@ export function CommandCenter({
 
               <p className="cc-received-foot">
                 <Link quiet onClick={() => openQueue(qExcGap('UNRECOGNISED_RECEIPT'))}
-                      title="no match signal — interest, sweeps, payers outside IREPS; never in the rate">
+                      title="Receipts with no match signal (interest, sweeps, non-IREPS payers). Excluded from the match rate.">
                   +{n(outOfScope)} other receipts
                 </Link>
                 {data.out_of_scope_value !== undefined && <>&nbsp;({inrCompact(data.out_of_scope_value)})</>}
-                &nbsp;not matchable
+                &nbsp;excluded
                 <Dot />
                 <Link quiet onClick={() => openGold(G_CREDITS)}>{n(credits)} credits in window</Link>
                 <Dot />
@@ -368,8 +368,8 @@ export function CommandCenter({
                 unit={plural(data.matches.OPEN, 'match', 'matches')}
                 onOpen={() => openQueue(Q_REVIEW)}
                 meta={data.matches.OPEN > 0
-                  ? <>{n(inReview)} {plural(inReview, 'credit', 'credits')} waiting for accept or reject</>
-                  : 'No weak matches waiting for a decision'} />
+                  ? <>{n(inReview)} {plural(inReview, 'credit', 'credits')} pending decision</>
+                  : 'None pending'} />
               <AttentionRow tone="open" icon={<AlertTriangle size={16} strokeWidth={2} />}
                 title="Open exceptions" count={data.open_in_scope.count} unit="open"
                 onOpen={() => openQueue(Q_OPEN_EXC)}
@@ -389,7 +389,7 @@ export function CommandCenter({
                 onOpen={() => openQueue(Q_AWAITING)}
                 meta={<>
                   <Link onClick={() => openQueue(qExcGap('AWAITING_STATUS'))}
-                        title="the same-amount bill is still passed/registered, not advised">
+                        title="Matching bill not yet advised (status passed or registered)">
                     {n(awaitingStatus)} source status
                   </Link>
                   <Link onClick={() => openQueue(qExcGap('AWAITING_BILL_DATA'))}
@@ -417,10 +417,9 @@ export function CommandCenter({
             {data.top_exceptions.length === 0 ? (
               <div className="ui-empty">
                 <CheckCircle2 size={22} strokeWidth={1.75} />
-                <strong>Nothing open</strong>
-                <span>Every recognised credit and advised bill is accounted for.</span>
+                <strong>No open exceptions</strong>
                 <Link onClick={() => onNavigate('reconcile')}>
-                  Run an incremental reconciliation <ArrowRight size={13} strokeWidth={2} />
+                  Run reconciliation <ArrowRight size={13} strokeWidth={2} />
                 </Link>
               </div>
             ) : (

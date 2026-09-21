@@ -12,7 +12,7 @@ import { inr } from '../format'
 import { ErrorBanner } from './ErrorBanner'
 import { IngestionsView } from './IngestionsView'
 import { IngestStatsSummary, fileOutcomeLabel } from './IngestStatsSummary'
-import { Card, CustomerSelect, Notice, PageHeader, TextLink, ToolSep } from './ui'
+import { Card, CustomerSelect, Notice, PageHeader, ToolSep } from './ui'
 
 interface Props {
   customers: CustomerInfo[]
@@ -71,7 +71,7 @@ function SlotFileArea({ on, running, files, accept, onAdd, onRemove }: {
       }}
     >
       {!on ? (
-        <span className="up-drop-note">Skipped — tick the box to include this document</span>
+        <span className="up-drop-note">Excluded</span>
       ) : files.length === 0 ? (
         <span className="up-drop-note">
           <Upload size={15} strokeWidth={1.75} />
@@ -367,7 +367,7 @@ export function IngestForm({
   return (
     <section className="ui-page ingest-page">
       <PageHeader title="Ingest documents"
-                  context={<>Load source files into the gold layer for {customerName}</>}>
+                  context={customerName}>
         <CustomerSelect customers={customers} value={customerId} onChange={onCustomerChange} />
         {customers.length > 1 && <ToolSep />}
         <button type="button" className={`ui-btn${showHistory ? ' is-on' : ''}`}
@@ -381,7 +381,7 @@ export function IngestForm({
       </PageHeader>
 
       {creating && (
-        <Card title="New customer" sub="Starts with the default sources and matching rules — adjust them afterwards">
+        <Card title="New customer" sub="Created with the default sources and matching rules">
           <div className="ui-card-body new-customer">
             <label className="ui-field">
               <span>Key</span>
@@ -432,16 +432,14 @@ export function IngestForm({
             <IngestStatsSummary stats={result.stats} />
             {result.stats.rows_inserted === 0 && (result.stats.rows_reported ?? 0) > 0 && (
               <Notice>
-                Nothing new was added — everything in this upload was already in gold
-                ({result.stats.bills_updated} updated in place, {result.stats.rows_reused} duplicates
-                left as they were). The rows are still browsable as this ingestion: pick it in the
-                Data pages' “Ingestion” filter.
+                No new records. All rows in this upload already exist ({result.stats.bills_updated}{' '}
+                updated, {result.stats.rows_reused} unchanged).
               </Notice>
             )}
             {checks.map((c, i) => (
               <Notice key={i} tone={c.passed === false ? 'warn' : 'ok'}>
-                {c.passed === false ? 'Parse did not verify' : 'Parse verified'}
-                {c.original_name ? ` — ${c.original_name}` : ''}: states {c.stated_count} credits
+                {c.passed === false ? 'Statement totals do not reconcile' : 'Statement totals reconciled'}
+                {c.original_name ? ` — ${c.original_name}` : ''}: statement {c.stated_count} credits
                 / {inr(c.stated_total)}, parsed {c.parsed_count} / {inr(c.parsed_total)}
               </Notice>
             ))}
@@ -471,7 +469,6 @@ export function IngestForm({
           </Card>
 
           <Card title={<><span className="step">2</span> ERP documents</>}
-                sub="The documents below follow the chosen ERP"
                 action={
                   <label className="ui-field is-inline">
                     <span>ERP</span>
@@ -499,7 +496,7 @@ export function IngestForm({
 
           {(extraSlots.length > 0 || addingSlot || lineageAdapters.length > 0) && (
             <Card title={<><span className="step">3</span> Additional lineage documents</>}
-                  sub="Optional — extra upstream document kinds that join the same document trail"
+                  sub="Optional"
                   action={!addingSlot && (
                     <button type="button" className="ui-btn is-sm"
                             disabled={running || !lineageAdapters.length}
@@ -589,20 +586,11 @@ export function IngestForm({
               </button>
               {running && (
                 <p className="up-go-note">
-                  <span className="quill" /> Hashing, parsing and transforming… {elapsed}s
-                  <span className="running-hint"> (typically 5–20s)</span>
+                  <span className="quill" /> Processing… {elapsed}s
                 </p>
               )}
               {!running && !anyInput && (
-                <p className="up-go-note">Attach at least one file to start.</p>
-              )}
-            </div>
-            <div className="ui-card-foot">
-              An ingestion is exactly the files you attach: an empty or unticked slot is skipped,
-              never filled in for you. Identical files are recognised and not loaded twice, and
-              format choices are saved to the customer.
-              {onGoToReconcile && (
-                <> <TextLink onClick={onGoToReconcile}>Go to reconcile</TextLink></>
+                <p className="up-go-note">Select at least one file.</p>
               )}
             </div>
           </Card>

@@ -407,21 +407,21 @@ export default function App() {
     <PageHeader
       title={page.label}
       context={activeScope === 'current'
-        ? <>Everything ingested so far<Dot />{customerName}</>
+        ? <>{customerName}<Dot />Complete data</>
         : <>As of {multi && selectedRuns ? `${selectedRuns.length} runs` : (selectedRuns?.[0]?.label ?? 'a run')}
             {primary?.meta.mode && !multi && <><Dot />{primary.meta.mode}</>}
             {restoring && <><Dot />loading runs…</>}</>}>
       {page.run ? (
         <span className="ui-seg" role="group" aria-label="Data scope">
           <button type="button" className={activeScope === 'current' ? 'on' : ''}
-                  title="The live gold layer — every ingestion, deduplicated"
+                  title="All ingested data"
                   onClick={() => setScope(page, 'current')}>Complete Data</button>
           <button type="button" className={activeScope === 'run' ? 'on' : ''}
-                  title="The frozen frame a reconciliation run used"
+                  title="Data as used by the selected run"
                   onClick={() => setScope(page, 'run')}>Reconcile Data</button>
         </span>
       ) : (
-        <span className="ui-tool-note">Complete data only — runs keep no lineage snapshot</span>
+        <span className="ui-tool-note" title="Runs do not store lineage documents">Complete data only</span>
       )}
       {activeScope === 'run' && page.runTrail && page.run && (
         <span className="ui-seg" role="group" aria-label="Bills view">
@@ -483,29 +483,26 @@ export default function App() {
     ? counts.bank_only + counts.bill_only + (counts.match_review ?? 0) : 0
   const matchedEmptyNote = (
     <EmptyState icon={<Inbox className="is-muted" size={22} strokeWidth={1.75} />}
-                title={`No matched reconciliations ${runScope}`}>
+                title={`No matches ${runScope}`}>
       {primary?.meta.mode === 'incremental' && (
         <span>
-          Credits and bills locked by an earlier run never re-enter the matching pool, so a
-          statement that was already reconciled matches nothing new — that is expected, not a
-          failure.
+          Credits and bills matched in earlier runs are excluded from incremental runs.
         </span>
       )}
       {counts && openExceptions > 0 && (
         <button type="button" className="ui-link" onClick={() => setView('exceptions')}>
           {counts.bank_only} bank-only and {counts.bill_only} bill-only{' '}
           {counts.bank_only + counts.bill_only === 1 ? 'exception' : 'exceptions'} in the
-          Exception queue <ArrowRight size={13} strokeWidth={2} />
+          <ArrowRight size={13} strokeWidth={2} />
         </button>
       )}
     </EmptyState>
   )
   const exceptionsEmptyNote = (
     <EmptyState title={`No exceptions ${runScope}`}>
-      <span>Every credit on the statement found its bill and every advised bill found its credit.</span>
       {counts && counts.matched > 0 && (
         <button type="button" className="ui-link" onClick={() => setView('matched')}>
-          See the {counts.matched} matched {counts.matched === 1 ? 'row' : 'rows'}{' '}
+          View {counts.matched} matched {counts.matched === 1 ? 'row' : 'rows'}{' '}
           <ArrowRight size={13} strokeWidth={2} />
         </button>
       )}
@@ -636,11 +633,11 @@ export default function App() {
               ) : (
                 <section className="ui-card">
                   <EmptyState icon={<Inbox className="is-muted" size={22} strokeWidth={1.75} />}
-                              title={runList.length ? 'No run loaded' : 'No runs yet'}>
+                              title={runList.length ? 'No run selected' : 'No reconciliation runs'}>
                     <span>
                       {runList.length
-                        ? 'This page shows a reconciliation result. Pick a past run, or run a new one.'
-                        : 'This page shows a reconciliation result. Ingest documents, then initiate a reconciliation for this customer.'}
+                        ? 'Select a run, or start a new reconciliation.'
+                        : 'Ingest documents and run a reconciliation to view results.'}
                     </span>
                     <div className="ui-empty-actions">
                       <button type="button" className="ui-btn ui-btn-primary" onClick={() => setView('reconcile')}>
@@ -726,12 +723,6 @@ export default function App() {
                     setView('ledger')
                   }}
                 />
-                <div className="ui-card-foot">
-                  Both sides are sources of truth: bank-only rows carry no bill fields and
-                  bill-only rows no bank fields, by design. A credit whose best pairing was
-                  claimed by another credit falls here instead of settling for a worse one — a
-                  missing match you can investigate beats a wrong match you cannot see.
-                </div>
               </section>
             )}
             {FRAME_VIEWS.includes(view as FrameName) && (

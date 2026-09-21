@@ -4,11 +4,10 @@ export function ErrorBanner({ error }: { error: ApiError }) {
   if (error.code === 'BANK_SELFCHECK_FAILED') {
     return (
       <div className="error-banner">
-        <h3>Statement parse did not tie out — results were not produced</h3>
+        <h3>Statement totals do not reconcile — run stopped</h3>
         <p>
-          The credits parsed from the PDF do not match the totals HSBC prints on the last page.
-          Everything downstream depends on that parse, so the engine stopped rather than produce a
-          plausible-looking wrong answer.
+          Credits parsed from the statement do not match its printed totals. No results were
+          produced.
         </p>
         <p className="figures">{error.message}</p>
       </div>
@@ -17,10 +16,9 @@ export function ErrorBanner({ error }: { error: ApiError }) {
   if (error.code === 'RUN_IN_PROGRESS') {
     return (
       <div className="error-banner">
-        <h3>An incremental run is already in flight for this customer</h3>
+        <h3>A reconciliation is already running for this customer</h3>
         <p>
-          Incremental runs update a shared ledger, so only one can run at a time. Runs typically
-          take 10–30 seconds — wait for it to finish, then run again.
+          Only one incremental run can run at a time. Try again when it completes.
         </p>
         <p className="figures">{error.message}</p>
       </div>
@@ -32,7 +30,7 @@ export function ErrorBanner({ error }: { error: ApiError }) {
     NETWORK: 'Backend unreachable',
     RUN_NOT_FOUND: 'Run not found',
     STATEMENT_NOT_FOUND:
-      'Statement not found in gold — it may belong to another customer or was never ingested',
+      'Statement not found for this customer',
     RECONCILE_FAILED: 'Reconciliation failed',
   }
   return (

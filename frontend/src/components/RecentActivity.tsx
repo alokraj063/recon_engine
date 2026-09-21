@@ -81,7 +81,7 @@ function describe(e: AuditEventRow, finalized: Map<string, Record<string, unknow
     case 'ledger.match_reopened':
       return { ...base, icon: RotateCcw, tone: 'info', title: `${label} reopened`, detail: bill }
     case 'ledger.match_created_manual':
-      return { ...base, icon: Link2, tone: 'ok', title: `${label} matched by hand`, detail: bill }
+      return { ...base, icon: Link2, tone: 'ok', title: `${label} matched manually`, detail: bill }
     case 'config.rules_updated':
       return { ...base, icon: Settings, tone: 'info', title: 'Matching config updated' }
     case 'config.sources_updated':
@@ -137,7 +137,7 @@ export function RecentActivity({ customerId, refreshKey, onOpenAudit }: {
             <p className="ui-feed-note">Loading…</p>
           ) : items.length === 0 ? (
             <p className="ui-feed-note">
-              {failed ? 'Activity could not be loaded.' : 'No activity yet — ingest documents to get started.'}
+              {failed ? 'Activity could not be loaded.' : 'No recent activity.'}
             </p>
           ) : (
             <ol className="ui-feed-list">

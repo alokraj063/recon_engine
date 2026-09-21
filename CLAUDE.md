@@ -576,7 +576,14 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                fmtDay, ageDays, inrCompact) live in format.ts. The
                pre-kit shells (intake, result-head, view-card, cc-panel,
                tiles, slot rows) were deleted from styles.css — build new
-               UI from the kit, never from those names. Big tables draw
+               UI from the kit, never from those names. UI COPY IS
+               ENTERPRISE-TERSE (2026-09-21): no explanatory paragraphs or
+               narrative card footers; page context lines are the customer
+               and scope only; card sub-lines and empty states are a few
+               words plus an action; guidance that still matters goes in a
+               tooltip or a one-line field hint; no internal jargon (gold /
+               bronze / silver, payload, durable) and no "you/YOUR" or
+               rhetorical asides in user-visible text. Big tables draw
                progressively (ui.tsx useProgressiveRows + MoreRows: 150
                rows, then the next batch as the table's foot scrolls into
                view; sort/filter/counts still see every row) — DataTable,

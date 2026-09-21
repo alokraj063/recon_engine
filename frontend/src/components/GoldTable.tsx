@@ -191,8 +191,8 @@ export function GoldTable({ customerId, frame, intent, onIntentHandled }: Props)
       />
       {rows.length < total && (
         <div className="ui-card-foot">
-          Showing the first {rows.length.toLocaleString('en-IN')} of{' '}
-          {total.toLocaleString('en-IN')} rows — pick an ingestion or a date window to narrow it.
+          Showing {rows.length.toLocaleString('en-IN')} of{' '}
+          {total.toLocaleString('en-IN')} rows. Filter by ingestion or date to narrow the result.
         </div>
       )}
     </>

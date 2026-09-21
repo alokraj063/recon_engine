@@ -20,33 +20,24 @@ export function SnapshotNotice({ runs, what, onGoToReconcile }: {
   const icon = <Inbox className="is-muted" size={22} strokeWidth={1.75} />
   if (!latest) {
     return (
-      <EmptyState icon={icon} title="No reconciliation has run yet">
-        <span>{what} fills up once an incremental run settles matches and raises exceptions.</span>
+      <EmptyState icon={icon} title="No reconciliation runs">
         <TextLink onClick={onGoToReconcile}>
-          Initiate a reconciliation <ArrowRight size={13} strokeWidth={2} />
+          Run reconciliation <ArrowRight size={13} strokeWidth={2} />
         </TextLink>
       </EmptyState>
     )
   }
   if (latest.mode === 'snapshot') {
     return (
-      <EmptyState icon={icon} title="Your latest run was a snapshot">
-        <span>
-          {runLabelFor(runs, latest.run_id)} stores only its own result. {what} fills from
-          incremental runs.
-        </span>
+      <EmptyState icon={icon} title="Latest run is a snapshot">
+        <span>{what} is populated by incremental runs only ({runLabelFor(runs, latest.run_id)} was a snapshot).</span>
         <TextLink onClick={onGoToReconcile}>
-          Run it again in incremental mode <ArrowRight size={13} strokeWidth={2} />
+          Run incremental reconciliation <ArrowRight size={13} strokeWidth={2} />
         </TextLink>
       </EmptyState>
     )
   }
   return (
-    <EmptyState icon={icon} title="Nothing here yet">
-      <span>
-        {what} fills up as incremental runs settle matches and raise exceptions — the latest
-        run left nothing here.
-      </span>
-    </EmptyState>
+    <EmptyState icon={icon} title="No data" />
   )
 }

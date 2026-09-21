@@ -26,14 +26,12 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
   useEffect(load, [load, refreshKey])
 
   return (
-    <Card title="All ingestions" sub="Every upload for this customer, newest first" ruled
+    <Card title="All ingestions" ruled
           action={<RefreshButton onClick={load} label="Refresh ingestions" />}>
         {error && <div className="dt-state"><Notice tone="error">Could not load ingestions: {error}</Notice></div>}
         {!items && !error && <div className="dt-loading"><span className="quill" /> Loading…</div>}
         {items && items.length === 0 && (
-          <EmptyState title="No ingestions yet">
-            <span>Attach files below and ingest them to load this customer’s gold layer.</span>
-          </EmptyState>
+          <EmptyState title="No ingestions" />
         )}
         {items && items.length > 0 && (
           <div className="ledger-wrap ingestions-wrap">
@@ -48,8 +46,8 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
               <tr>
                 <th>When</th>
                 <th>Files</th>
-                <th>What landed in gold</th>
-                <th>Self-check</th>
+                <th>Records</th>
+                <th>Statement check</th>
               </tr>
             </thead>
             <tbody>
@@ -93,11 +91,6 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
           </table>
           </div>
         )}
-      <div className="ui-card-foot">
-        Every ingestion is idempotent: an identical file is recognised and not loaded twice, and
-        a newer bills export updates existing bills in place instead of duplicating them. Bills
-        held by a locked match are never silently changed — attempted changes land in conflicts.
-      </div>
     </Card>
   )
 }

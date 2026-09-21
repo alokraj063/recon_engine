@@ -75,7 +75,7 @@ export function ManualMatchPicker({ customerId, anchor, candidates, onDone, onCa
       const billIds = fromCredit
         ? chosen.map((e) => e.gold_bill_id).filter((x): x is string => !!x)
         : [anchor.gold_bill_id].filter((x): x is string => !!x)
-      if (!txnId || billIds.length === 0) throw new Error('the chosen rows carry no gold ids')
+      if (!txnId || billIds.length === 0) throw new Error('The selected rows cannot be matched')
       const res = await createManualMatch(customerId, txnId, billIds, note.trim() || undefined)
       onDone(res)
     } catch (e) {
@@ -122,7 +122,7 @@ export function ManualMatchPicker({ customerId, anchor, candidates, onDone, onCa
       <div className="mm-foot">
         <span className={`mm-variance${overTolerance ? ' warn' : ''}`}>
           {chosen.length === 0
-            ? 'nothing picked yet'
+            ? 'No rows selected'
             : <>
                 {chosen.length} picked · variance <strong>{inr(variance)}</strong>
                 {overTolerance && ` — exceeds the ${inr(tolerance ?? 0)} tolerance; the match is still allowed`}

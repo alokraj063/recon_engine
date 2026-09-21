@@ -76,7 +76,7 @@ export function BillLineage({ runId, billNumber, fallbackRow }: Props) {
       <div className="detail-section">
         Bill lineage
         {!row && fallbackRow && (
-          <span className="chip-note"> partial — from the match evidence</span>
+          <span className="chip-note"> partial (from match evidence)</span>
         )}
         <button className="btn-open lineage-close" onClick={() => setState('closed')}>
           hide ▴
@@ -87,7 +87,7 @@ export function BillLineage({ runId, billNumber, fallbackRow }: Props) {
           <LineageTimeline row={source} />
         </div>
       ) : (
-        <p className="frame-note">no lineage recorded for this bill</p>
+        <p className="frame-note">No lineage recorded</p>
       )}
     </div>
   )
