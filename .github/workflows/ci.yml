@@ -114,6 +114,7 @@ jobs:
           docker run --rm --network host \
             -e DB_HOST=localhost -e DB_PORT=5432 -e DB_NAME=recon \
             -e DB_USER=postgres -e DB_PASSWORD=postgres \
+            -e ADMIN_EMAIL=ci@example.com -e ADMIN_PASSWORD=ci-smoke-password \
             "$IMAGE" python -m db.migrate
 
       - name: app container serves UI and API
@@ -121,6 +122,7 @@ jobs:
           docker run -d --name recon --network host \
             -e DB_HOST=localhost -e DB_PORT=5432 -e DB_NAME=recon \
             -e DB_USER=postgres -e DB_PASSWORD=postgres \
+            -e SESSION_SECRET=ci-smoke-session-secret \
             "$IMAGE"
           for i in $(seq 1 60); do
             curl -fsS http://localhost:8080/api/health && break
@@ -136,7 +138,15 @@ jobs:
           [ -n "$asset" ] || { echo "::error::no JS asset referenced by index.html"; exit 1; }
           headers=$(curl -fsS -o /dev/null -D - "http://localhost:8080$asset")
           grep -qi 'cache-control: public, max-age=31536000, immutable' <<<"$headers"
-          customers=$(curl -fsS http://localhost:8080/api/customers)
+          # every /api route but health + auth sits behind the sign-in gate:
+          # anonymous is refused, a signed-in session gets through (the
+          # login was seeded by the migrate task from ADMIN_EMAIL/PASSWORD)
+          anon=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/customers)
+          [ "$anon" = "401" ] || { echo "::error::/api/customers without a session returned $anon, expected 401"; exit 1; }
+          curl -fsS -c /tmp/cookies -H 'Content-Type: application/json' \
+            -d '{"email":"ci@example.com","password":"ci-smoke-password"}' \
+            http://localhost:8080/api/auth/login > /dev/null
+          customers=$(curl -fsS -b /tmp/cookies http://localhost:8080/api/customers)
           grep -q '"key":"default"' <<<"$customers"
           # structured JSON logs on stdout (LOG_FORMAT=json baked into the image)
           logs=$(docker logs recon 2>&1)
