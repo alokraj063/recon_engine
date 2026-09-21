@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Columns3, Search, SearchX } from 'lucide-react'
 import {
   flexRender,
   getCoreRowModel,
@@ -15,6 +15,7 @@ import { DATE_HINT } from '../format'
 import { ColumnFilter } from './filters/ColumnFilter'
 import { FilterChips, type FilterChip } from './filters/FilterChips'
 import { buildOptions, facetKey } from './filters/facets'
+import { EmptyState, TextLink } from './ui'
 
 interface Props {
   rows: Row[]
@@ -114,52 +115,65 @@ export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, e
   const visible = table.getRowModel().rows
   const filtersHide = rows.length > 0 && filteredRows.length === 0
 
+  const anyChip = chips.some((c) => c.values.length > 0)
+  const shownCount = visible.length
+  const allCount = totalRows ?? rows.length
+
   return (
-    <div>
-      <div className="table-tools">
+    <div className="dt">
+      <div className="dt-tools">
         {toolbar}
-        <FilterChips chips={chips} />
-        <input
-          type="search"
-          placeholder="filter rows…"
-          value={globalFilter}
-          onChange={(e) => setGlobalFilter(e.target.value)}
-        />
-        <details className="advanced" style={{ margin: 0, borderTop: 'none', paddingTop: 0 }}>
-          <summary>columns</summary>
-          <div style={{ position: 'absolute', zIndex: 5, background: 'var(--paper-card)', border: '1px solid var(--rule-strong)', padding: '10px 14px', maxHeight: 300, overflowY: 'auto' }}>
+        <label className="dt-search">
+          <Search size={14} strokeWidth={2} aria-hidden />
+          <input
+            type="search"
+            placeholder="Search rows…"
+            aria-label="Search rows"
+            value={globalFilter}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+          />
+        </label>
+        <span className="dt-count">
+          {shownCount === allCount
+            ? <>{shownCount.toLocaleString('en-IN')} rows</>
+            : <>{shownCount.toLocaleString('en-IN')} of {allCount.toLocaleString('en-IN')} rows</>}
+        </span>
+        <details className="dt-columns">
+          <summary className="ui-btn is-sm"><Columns3 size={14} strokeWidth={1.75} /> Columns</summary>
+          <div className="dt-columns-pop">
             {table.getAllLeafColumns().map((col) => (
-              <label key={col.id} style={{ display: 'block', fontSize: 12, whiteSpace: 'nowrap' }}>
+              <label key={col.id}>
                 <input
                   type="checkbox"
                   checked={col.getIsVisible()}
                   onChange={col.getToggleVisibilityHandler()}
-                />{' '}
+                />
                 {col.id}
               </label>
             ))}
           </div>
         </details>
-        <span className="row-count">
-          {visible.length} of {totalRows ?? rows.length} rows
-        </span>
       </div>
+      {anyChip && (
+        <div className="ui-filterbar"><FilterChips chips={chips} /></div>
+      )}
 
       {visible.length === 0 ? (
-        // no bordered box around nothing: the note stands alone under
-        // the toolbar (kept, so a filter can still be cleared)
-        <div className="table-empty">
-          {filtersHide ? (
-            <p className="frame-note">
-              no rows match the active filters —{' '}
-              <button className="link-btn" onClick={() => setColFilters({})}>clear all</button>
-            </p>
-          ) : rows.length > 0 && globalFilter
-            ? <p className="frame-note">no rows match “{globalFilter}”</p>
-            : (emptyNote ?? <p className="frame-note">no rows</p>)}
-        </div>
+        filtersHide ? (
+          <EmptyState icon={<SearchX className="is-muted" size={22} strokeWidth={1.75} />}
+                      title="No rows match the active filters">
+            <TextLink onClick={() => { setColFilters({}); externalChips?.forEach((c) => c.onRemove()) }}>
+              Clear all filters
+            </TextLink>
+          </EmptyState>
+        ) : rows.length > 0 && globalFilter ? (
+          <EmptyState icon={<SearchX className="is-muted" size={22} strokeWidth={1.75} />}
+                      title={`No rows match “${globalFilter}”`}>
+            <TextLink onClick={() => setGlobalFilter('')}>Clear the search</TextLink>
+          </EmptyState>
+        ) : (emptyNote ?? <EmptyState title="No rows" />)
       ) : (
-      <div className="table-scroll">
+      <div className="table-scroll dt-scroll">
         <table className="data">
           <thead>
             {table.getHeaderGroups().map((hg) => (

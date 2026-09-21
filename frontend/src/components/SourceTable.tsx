@@ -7,6 +7,7 @@ import { combineFrameRows } from '../combineRuns'
 import { SHARED_PRESETS, type FramePreset } from '../framePresets'
 import { BillTrailDetail } from './BillTrailDetail'
 import { DataTable } from './DataTable'
+import { EmptyState, Notice } from './ui'
 
 /** Per-frame presets: bank/bills/recoveries are shared with GoldTable
  *  (framePresets.ts); bills_enriched is a run artifact with settlement
@@ -154,13 +155,8 @@ export function SourceTable({ runs, name }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selKey])
 
-  if (error) return <p className="frame-note">could not load: {error}</p>
-  if (rows === null)
-    return (
-      <p className="frame-note">
-        <span className="quill" /> loading {name.replace('_', ' ')}…
-      </p>
-    )
+  if (error) return <div className="dt-state"><Notice tone="error">Could not load this table: {error}</Notice></div>
+  if (rows === null) return <div className="dt-loading" aria-busy="true"><span className="quill" /> Loading…</div>
 
   // Display gate: only HIGH-confidence matches count as settled. Injecting
   // the token into the row makes the global filter find "SETTLED".
@@ -182,7 +178,7 @@ export function SourceTable({ runs, name }: Props) {
       columns={columns}
       numericIds={AMOUNT_COLS}
       initialHidden={hidden}
-      emptyNote={<p className="frame-note">{EMPTY_NOTES[name](scope)}</p>}
+      emptyNote={<EmptyState title="Nothing in this table"><span>{EMPTY_NOTES[name](scope)}</span></EmptyState>}
       renderDetail={
         name === 'bills_enriched'
           ? (row) => <BillTrailDetail row={row} title={`Bill ${row.bill_number ?? ''} — lineage`} />
