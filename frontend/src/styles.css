@@ -3653,3 +3653,44 @@ td.ui-table-empty {
 }
 .config-savebar-state { margin-right: auto; font-size: var(--fs-body); color: var(--ink-faint); }
 .config-savebar.is-dirty .config-savebar-state { color: var(--gold); font-weight: 600; }
+
+/* --- Audit trail ------------------------------------------------------ */
+.audit-tools { gap: 10px; }
+.audit-tools .ui-seg { height: 30px; }
+.audit-tools .ui-seg button { padding: 0 10px; }
+.audit-cats { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.audit-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--paper-card);
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.audit-cat:hover { border-color: var(--green); color: var(--green); }
+.audit-cat.on { border-color: var(--green); background: hsl(175 70% 28% / 0.08); color: var(--green); font-weight: 600; }
+.audit-cat-n { font-size: var(--fs-note); color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.audit-wrap { max-height: 70vh; overflow-y: auto; }
+.audit-table thead th { position: sticky; top: 0; z-index: 1; }
+.audit-event { font-weight: 500; color: var(--ink); }
+.audit-groups { display: flex; flex-direction: column; }
+.audit-group + .audit-group { border-top: 1px solid var(--rule-strong); }
+.audit-group-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 12px 18px 4px;
+}
+.audit-group-key { font-family: var(--font-mono); font-size: var(--fs-body); font-weight: 600; color: var(--ink); }
+.audit-group-meta { font-size: var(--fs-note); color: var(--ink-faint); }
+.audit-group .ui-feed-title { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.audit-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.ui-feed-list .tone-info .ui-feed-icon { background: hsl(215 75% 45% / 0.1); color: var(--blue); }
+.ui-feed-list .tone-neutral .ui-feed-icon { background: var(--paper-deep); color: var(--ink-faint); }

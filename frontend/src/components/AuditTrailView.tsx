@@ -1,9 +1,12 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronRight, RotateCw } from 'lucide-react'
+import { ArrowRight, ChevronRight, Search } from 'lucide-react'
 import { FilterChips } from './filters/FilterChips'
 import type { AuditEventRow, CustomerInfo } from '../types'
 import { fetchAudit } from '../api'
-import { fmtWhen } from '../format'
+import { fmtWhen, n } from '../format'
+import {
+  CustomerSelect, EmptyState, Notice, PageHeader, RefreshButton, Stat, StatStrip, TextLink,
+} from './ui'
 
 interface Props {
   customers: CustomerInfo[]
@@ -45,14 +48,55 @@ function category(e: AuditEventRow): Category {
 const actorOf = (c: Category): 'user' | 'system' =>
   c === 'decision' || c === 'config' ? 'user' : 'system'
 
-const CATEGORY_STAMP: Record<Category, string> = {
-  decision: 'stamp-LOCKED',      // success tint
-  conflict: 'stamp-BANK_ONLY',   // danger tint
-  run: 'stamp-MATCH_REVIEW',     // info tint
-  ledger: 'stamp-MATCH_REVIEW',
-  config: 'stamp-BILL_ONLY',     // warning tint
-  ingest: '',
-  other: '',
+/** pill + feed-icon tone per category (the kit's four tones) */
+const CATEGORY_TONE: Record<Category, 'ok' | 'bad' | 'info' | 'warn' | 'neutral'> = {
+  decision: 'ok',
+  conflict: 'bad',
+  run: 'info',
+  ledger: 'info',
+  config: 'warn',
+  ingest: 'neutral',
+  other: 'neutral',
+}
+
+/** Readable names for the audit vocabulary (CLAUDE.md taxonomy); any
+ *  other code falls back to its last segment in words. The raw code is
+ *  always shown beside it, so nothing is hidden. */
+const EVENT_NAME: Record<string, string> = {
+  'ingestion.completed': 'Documents ingested',
+  'bronze.file_registered': 'File registered',
+  'bronze.file_deduped': 'Duplicate file recognised',
+  'silver.rows_persisted': 'Parsed rows stored',
+  'gold.rows_persisted': 'Gold rows stored',
+  'gold.ingest_completed': 'Gold ingest completed',
+  'gold.ingest_conflict': 'Locked bill protected from change',
+  'gold.bills_merged': 'Duplicate bills merged',
+  'run.started': 'Run started',
+  'run.succeeded': 'Run succeeded',
+  'run.failed': 'Run failed',
+  'run.start_conflict': 'Run refused — one already running',
+  'run.selfcheck_failed': 'Statement check failed',
+  'run.parse_failed': 'Parse failed',
+  'pipeline.selfcheck': 'Statement self-check',
+  'ledger.finalized': 'Ledger updated',
+  'ledger.match_accepted': 'Match accepted',
+  'ledger.match_rejected': 'Match rejected',
+  'ledger.match_unlocked': 'Match unlocked',
+  'ledger.match_reopened': 'Match reopened',
+  'ledger.match_created_manual': 'Manual match created',
+  'run.reconcile_failed': 'Reconciliation failed',
+  'run.selfcheck_mismatch': 'Statement totals mismatch',
+  'run.selfcheck_error': 'Statement check errored',
+  'pipeline.signal_coverage': 'Match signal missing',
+  'config.rules_updated': 'Matching rules updated',
+  'config.sources_updated': 'Document sources updated',
+  'customer.created': 'Customer created',
+}
+function eventName(t: string): string {
+  if (EVENT_NAME[t]) return EVENT_NAME[t]
+  const last = t.split('.').pop() ?? t
+  const words = last.replace(/_/g, ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
 function within(w: Window, iso: string): boolean {
@@ -76,7 +120,8 @@ function detailsText(d: AuditEventRow['details']): string {
 }
 
 function CategoryChip({ c }: { c: Category }) {
-  return <span className={`stamp ${CATEGORY_STAMP[c]}`}>{CATEGORY_LABEL[c]}</span>
+  const tone = CATEGORY_TONE[c]
+  return <span className={`ui-pill${tone === 'neutral' ? '' : ` tone-${tone}`}`}>{CATEGORY_LABEL[c]}</span>
 }
 
 export function AuditTrailView({ customers, customerId, onCustomerChange,
@@ -149,129 +194,112 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
       b[1][b[1].length - 1].created_at.localeCompare(a[1][a[1].length - 1].created_at))
   }, [filtered])
 
-  return (
-    <section className="intake">
-      <div className="ingest-head">
-        <h2 className="page-title">Audit trail</h2>
-        <span className="cc-head-right">
-          <label className="ctx-field">
-            <span className="slot-label">Customer</span>
-            <select value={customerId} onChange={(e) => onCustomerChange(e.target.value)}>
-              {customers.map((c) => (
-                <option key={c.key} value={c.key}>{c.name} ({c.key})</option>
-              ))}
-            </select>
-          </label>
-          <button className="btn-refresh btn-ic" onClick={load}>
-            <RotateCw size={13} strokeWidth={1.75} /> refresh
-          </button>
-        </span>
-      </div>
+  const customerName = customers.find((c) => c.key === customerId)?.name ?? customerId
+  const chips = [
+    { key: 'q', label: 'Search', values: query ? [query] : [], onRemove: () => setQuery('') },
+    { key: 'actor', label: 'Actor', values: actor === 'all' ? [] : [actor],
+      format: (v: string) => (v === 'user' ? 'Human' : 'System'), onRemove: () => setActor('all') },
+    { key: 'win', label: 'Window', values: win === 'all' ? [] : [win], onRemove: () => setWin('all') },
+    { key: 'cat', label: 'Category', values: cat === 'all' ? [] : [cat],
+      format: (v: string) => CATEGORY_LABEL[v as Category], onRemove: () => setCat('all') },
+  ]
+  const anyChip = chips.some((c) => c.values.length > 0)
+  const clearAll = () => { setQuery(''); setActor('all'); setWin('all'); setCat('all') }
+  const only = (c: Category) => { clearAll(); setCat(c) }
 
-      {error && <p className="frame-note">could not load audit trail: {error}</p>}
-      {!events && !error && <p className="frame-note"><span className="quill" /> loading…</p>}
+  return (
+    <section className="ui-page">
+      <PageHeader title="Audit trail"
+                  context={<>Every recorded event for {customerName} — who did what, and when</>}>
+        <CustomerSelect customers={customers} value={customerId} onChange={onCustomerChange} />
+        <RefreshButton onClick={load} label="Refresh the audit trail" />
+      </PageHeader>
+
+      {error && (
+        <Notice tone="error" action={<TextLink onClick={load}>Try again</TextLink>}>
+          Could not load the audit trail: {error}
+        </Notice>
+      )}
+      {!events && !error && <div className="ui-card sk" style={{ minHeight: 320 }} />}
 
       {events && (
         <>
-          <div className="tiles cc-tiles audit-tiles">
-            <div className="tile tone-neutral">
-              <div className="tile-label">Events</div>
-              <div className="tile-count">{kpis.total}</div>
-              <div className="tile-amount">recorded for this customer</div>
-            </div>
-            <div className="tile">
-              <div className="tile-label">Decisions</div>
-              <div className="tile-count">{kpis.decisions}</div>
-              <div className="tile-amount">accept / reject / unlock</div>
-            </div>
-            <div className="tile tone-review">
-              <div className="tile-label">Runs</div>
-              <div className="tile-count">{kpis.runs}</div>
-              <div className="tile-amount">run executions</div>
-            </div>
-            <div className="tile tone-neutral">
-              <div className="tile-label">Ingest</div>
-              <div className="tile-count">{kpis.ingests}</div>
-              <div className="tile-amount">bronze → silver → gold</div>
-            </div>
-            <div className="tile tone-neutral">
-              <div className="tile-label">Last 24h</div>
-              <div className="tile-count">{kpis.last24}</div>
-              <div className="tile-amount">recent activity</div>
-            </div>
-          </div>
+          <StatStrip>
+            <Stat label="Events" value={n(kpis.total)} sub="recorded for this customer"
+                  onOpen={clearAll} title="Show every event" />
+            <Stat label="Decisions" value={n(kpis.decisions)} sub="accept / reject / unlock"
+                  onOpen={() => only('decision')} title="Show the analysts' match decisions" />
+            <Stat label="Runs" value={n(kpis.runs)} sub="reconciliations executed"
+                  onOpen={() => only('run')} title="Show run events" />
+            <Stat label="Ingest events" value={n(kpis.ingests)} sub="bronze → silver → gold"
+                  onOpen={() => only('ingest')} title="Show ingestion events" />
+            <Stat label="Last 24 hours" value={n(kpis.last24)} sub="recent activity"
+                  onOpen={() => { clearAll(); setWin('24h') }} title="Show the last 24 hours" />
+          </StatStrip>
 
-          <div className="cc-panel audit-filters">
-            <div className="audit-filter-row">
-              <input className="audit-search" placeholder="search event, entity, run, details…"
-                     value={query} onChange={(e) => setQuery(e.target.value)} />
-              <span className="audit-pills">
-                <span className="slot-label">Actor</span>
-                <span className="seg">
-                  {(['all', 'user', 'system'] as Actor[]).map((a) => (
-                    <button key={a} className={actor === a ? 'on' : ''}
-                            onClick={() => setActor(a)}>
-                      {a === 'all' ? 'All' : a === 'user' ? 'Human' : 'System'}
-                    </button>
-                  ))}
-                </span>
-              </span>
-              <span className="audit-pills">
-                <span className="slot-label">Window</span>
-                <span className="seg">
-                  {(['all', '24h', '7d'] as Window[]).map((w) => (
-                    <button key={w} className={win === w ? 'on' : ''}
-                            onClick={() => setWin(w)}>
-                      {w === 'all' ? 'All' : w}
-                    </button>
-                  ))}
-                </span>
-              </span>
-            </div>
-            <div className="audit-cats">
-              <span className="slot-label">Categories</span>
-              <button className={`audit-cat${cat === 'all' ? ' on' : ''}`}
-                      onClick={() => setCat('all')}>
-                All <span className="audit-cat-n">{enriched.length}</span>
-              </button>
-              {CATEGORIES.filter((c) => counts[c] > 0).map((c) => (
-                <button key={c}
-                        className={`audit-cat${cat === c ? ' on' : ''}`}
-                        onClick={() => setCat(cat === c ? 'all' : c)}>
-                  {CATEGORY_LABEL[c]} <span className="audit-cat-n">{counts[c]}</span>
+          <section className="ui-card">
+            <div className="ui-tabbar">
+              <div className="ui-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected={tab === 'feed'}
+                        className={`ui-tab${tab === 'feed' ? ' is-on' : ''}`} onClick={() => setTab('feed')}>
+                  Activity feed <span className="ui-tab-count">{n(filtered.length)}</span>
                 </button>
-              ))}
+                <button type="button" role="tab" aria-selected={tab === 'record'}
+                        className={`ui-tab${tab === 'record' ? ' is-on' : ''}`} onClick={() => setTab('record')}>
+                  By record <span className="ui-tab-count">{n(grouped.length)}</span>
+                </button>
+              </div>
+              {filtered.length !== enriched.length && (
+                <span className="ui-tabbar-note">
+                  {n(filtered.length)} of {n(enriched.length)} events
+                  <TextLink onClick={clearAll}>Show all</TextLink>
+                </span>
+              )}
             </div>
-          </div>
 
-          <FilterChips chips={[
-            { key: 'q', label: 'Search', values: query ? [query] : [], onRemove: () => setQuery('') },
-            { key: 'actor', label: 'Actor', values: actor === 'all' ? [] : [actor],
-              format: (v) => (v === 'user' ? 'Human' : 'System'), onRemove: () => setActor('all') },
-            { key: 'win', label: 'Window', values: win === 'all' ? [] : [win], onRemove: () => setWin('all') },
-            { key: 'cat', label: 'Category', values: cat === 'all' ? [] : [cat],
-              format: (v) => CATEGORY_LABEL[v as Category], onRemove: () => setCat('all') },
-          ]} />
+            <div className="dt-tools audit-tools">
+              <label className="dt-search">
+                <Search size={14} strokeWidth={2} aria-hidden />
+                <input type="search" placeholder="Search event, record, run, details…"
+                       aria-label="Search events" value={query} onChange={(e) => setQuery(e.target.value)} />
+              </label>
+              <span className="ui-seg" role="group" aria-label="Actor">
+                {(['all', 'user', 'system'] as Actor[]).map((a) => (
+                  <button key={a} type="button" className={actor === a ? 'on' : ''} onClick={() => setActor(a)}>
+                    {a === 'all' ? 'Everyone' : a === 'user' ? 'Human' : 'System'}
+                  </button>
+                ))}
+              </span>
+              <span className="ui-seg" role="group" aria-label="Window">
+                {(['all', '24h', '7d'] as Window[]).map((w) => (
+                  <button key={w} type="button" className={win === w ? 'on' : ''} onClick={() => setWin(w)}>
+                    {w === 'all' ? 'All time' : w === '24h' ? '24 hours' : '7 days'}
+                  </button>
+                ))}
+              </span>
+              <span className="audit-cats">
+                {CATEGORIES.filter((c) => counts[c] > 0).map((c) => (
+                  <button key={c} type="button"
+                          className={`audit-cat cat-${c}${cat === c ? ' on' : ''}`}
+                          onClick={() => setCat(cat === c ? 'all' : c)}>
+                    {CATEGORY_LABEL[c]} <span className="audit-cat-n">{n(counts[c])}</span>
+                  </button>
+                ))}
+              </span>
+            </div>
+            {anyChip && <div className="ui-filterbar"><FilterChips chips={chips} /></div>}
 
-          <div className="seg audit-tabs">
-            <button className={tab === 'feed' ? 'on' : ''} onClick={() => setTab('feed')}>
-              Activity feed ({filtered.length})
-            </button>
-            <button className={tab === 'record' ? 'on' : ''} onClick={() => setTab('record')}>
-              By record ({grouped.length})
-            </button>
-          </div>
-
-          {tab === 'feed' && (
-            <div className="cc-panel">
-              {filtered.length === 0 ? (
-                <p className="frame-note">no events match the current filters</p>
-              ) : (
-                <table className="ledger">
+            {tab === 'feed' && (filtered.length === 0 ? (
+              <EmptyState title="No events match these filters">
+                <TextLink onClick={clearAll}>Clear all filters</TextLink>
+              </EmptyState>
+            ) : (
+              <div className="ledger-wrap audit-wrap">
+                <table className="ledger audit-table">
                   <thead>
                     <tr>
-                      <th>Time</th><th>Category</th><th>Event</th>
-                      <th>Entity</th><th>Run</th><th>Severity</th>
+                      <th>When</th><th>Category</th><th>Event</th>
+                      <th>Record</th><th>Run</th><th>Severity</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -279,19 +307,29 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                       <Fragment key={e.id}>
                       <tr className={`xq-row${expanded[e.id] ? ' open' : ''}`}
                           onClick={() => setExpanded((x) => ({ ...x, [e.id]: !x[e.id] }))}>
-                        <td className="mono-cell"><ChevronRight className="chev chev-ic" size={14} strokeWidth={2} aria-hidden /> {fmtWhen(e.created_at)}</td>
+                        <td className="nowrap">
+                          <ChevronRight className="chev chev-ic" size={14} strokeWidth={2} aria-hidden />
+                          {fmtWhen(e.created_at)}
+                        </td>
                         <td><CategoryChip c={e.cat} /></td>
-                        <td className="mono-cell">{e.event_type}</td>
-                        <td className="mono-cell">
+                        <td>
+                          <div className="party-cell">
+                            <span className="audit-event">{eventName(e.event_type)}</span>
+                            <span className="party-ref">{e.event_type}</span>
+                          </div>
+                        </td>
+                        <td className="mono">
                           {e.entity_label
                             ? <span className="audit-entity">{e.entity_label}</span>
                             : e.entity_type
                               ? `${e.entity_type} ${(e.entity_id ?? '').slice(0, 12)}`
                               : '—'}
                         </td>
-                        <td className="mono-cell">{e.run_id ? e.run_id.slice(0, 8) : '—'}</td>
-                        <td>{e.severity === 'INFO' ? '—'
-                          : <span className="stamp stamp-BANK_ONLY">{e.severity}</span>}</td>
+                        <td className="mono">{e.run_id ? e.run_id.slice(0, 8) : '—'}</td>
+                        <td>{e.severity === 'INFO' ? <span className="muted">—</span>
+                          : <span className={`ui-pill ${e.severity === 'WARNING' ? 'tone-warn' : 'tone-bad'}`}>
+                              {e.severity.toLowerCase()}
+                            </span>}</td>
                       </tr>
                       {expanded[e.id] && (
                         <tr className="xq-detail">
@@ -313,20 +351,20 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                               )}
                               {e.details && Object.entries(e.details).map(([k, v]) => (
                                 <div key={k}>
-                                  <div className="dt-label">{k}</div>
+                                  <div className="dt-label">{k.replace(/_/g, ' ')}</div>
                                   <div className="dt-value">
                                     {typeof v === 'object' ? JSON.stringify(v) : String(v)}
                                   </div>
                                 </div>
                               ))}
                               {!e.details && !e.context && (
-                                <p className="frame-note">no detail payload</p>
+                                <p className="frame-note">No detail payload.</p>
                               )}
                               {onOpenMatch && e.entity_type === 'match_ledger' && e.entity_id && (
                                 <div>
-                                  <button className="btn-open"
+                                  <button type="button" className="ui-btn is-sm"
                                           onClick={(ev) => { ev.stopPropagation(); onOpenMatch(e.entity_id!) }}>
-                                    open in Analyst queue →
+                                    Open in Analyst queue <ArrowRight size={13} strokeWidth={2} />
                                   </button>
                                 </div>
                               )}
@@ -338,44 +376,44 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                     ))}
                   </tbody>
                 </table>
-              )}
-            </div>
-          )}
+              </div>
+            ))}
 
-          {tab === 'record' && (
-            <div className="audit-groups">
-              {grouped.length === 0 ? (
-                <p className="frame-note">no records match the current filters</p>
-              ) : grouped.map(([key, evts]) => (
-                <div key={key} className="cc-panel audit-group">
-                  <div className="cc-panel-head">
-                    <h3 className="ledger-h">
-                      <span className="mono-cell">{key}</span>{' '}
-                      <span className="chip-note">
-                        {evts.length} event{evts.length === 1 ? '' : 's'} ·{' '}
+            {tab === 'record' && (grouped.length === 0 ? (
+              <EmptyState title="No records match these filters">
+                <TextLink onClick={clearAll}>Clear all filters</TextLink>
+              </EmptyState>
+            ) : (
+              <div className="audit-groups">
+                {grouped.map(([key, evts]) => (
+                  <div key={key} className="audit-group">
+                    <div className="audit-group-head">
+                      <span className="audit-group-key">{key}</span>
+                      <span className="audit-group-meta">
+                        {n(evts.length)} {evts.length === 1 ? 'event' : 'events'} ·{' '}
                         {fmtWhen(evts[0].created_at)} → {fmtWhen(evts[evts.length - 1].created_at)}
                       </span>
-                    </h3>
-                  </div>
-                  <div className="timeline audit-timeline">
-                    {evts.map((e) => (
-                      <div key={e.id} className="tl-event">
-                        <span className="tl-date">{fmtWhen(e.created_at)}</span>
-                        <span className={`tl-dot${e.cat === 'decision' ? '' :
-                          e.cat === 'conflict' ? ' tl-returned' : ' tl-hollow'}`} />
-                        <span className="tl-body">
-                          <span className="tl-title">
-                            {e.event_type} <CategoryChip c={e.cat} />
+                    </div>
+                    <ol className="ui-feed-list">
+                      {evts.map((e) => (
+                        <li key={e.id} className={`tone-${CATEGORY_TONE[e.cat]}`}>
+                          <span className="ui-feed-icon"><span className="audit-dot" /></span>
+                          <span className="ui-feed-body">
+                            <span className="ui-feed-title">
+                              {eventName(e.event_type)} <CategoryChip c={e.cat} />
+                            </span>
+                            {e.details && <span className="ui-feed-detail" title={detailsText(e.details)}>
+                              {detailsText(e.details)}</span>}
                           </span>
-                          {e.details && <span className="tl-detail">{detailsText(e.details)}</span>}
-                        </span>
-                      </div>
-                    ))}
+                          <time className="ui-feed-when" dateTime={e.created_at}>{fmtWhen(e.created_at)}</time>
+                        </li>
+                      ))}
+                    </ol>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            ))}
+          </section>
         </>
       )}
     </section>
