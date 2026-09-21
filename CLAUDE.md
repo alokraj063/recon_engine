@@ -688,7 +688,8 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                quick views — To review / Open exceptions (needs action) /
                Awaiting data / Settled — each an ordinary LedgerIntent
                applied through the same applyIntent as a Command Center
-               arrival, so it lands as chips; then ONE card with Matches |
+               arrival, so it lands as chips; the figures count within an
+               arrival's date window, so they equal the Command Center's; then ONE card with Matches |
                Exceptions tabs (intent.section picks the tab; with none,
                the tab with work — matches to review first); hosts the same
                MatchDecision + ManualMatchPicker, shows MANUAL matches as

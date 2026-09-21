@@ -383,7 +383,7 @@ export function ARReconciliationView({
                         </td>
                         <td className="num">{r.pay?.amount != null ? inr(r.pay.amount) : '—'}</td>
                         <td className="num">
-                          {r.variance === null ? '—'
+                          {r.variance === null || !r.pay ? '—'
                             : r.variance === 0 ? <span className="empty-cell">₹0</span>
                             : <span className="ar-variance">{inr(r.variance)}</span>}
                         </td>

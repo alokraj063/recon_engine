@@ -369,7 +369,7 @@ export function IngestForm({
       <PageHeader title="Ingest documents"
                   context={<>Load source files into the gold layer for {customerName}</>}>
         <CustomerSelect customers={customers} value={customerId} onChange={onCustomerChange} />
-        <ToolSep />
+        {customers.length > 1 && <ToolSep />}
         <button type="button" className={`ui-btn${showHistory ? ' is-on' : ''}`}
                 aria-pressed={showHistory} onClick={() => setShowHistory((v) => !v)}>
           <History size={15} strokeWidth={1.75} /> All ingestions

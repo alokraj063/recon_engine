@@ -3200,3 +3200,21 @@ td.ui-table-empty {
 }
 .btn-run:hover:not(:disabled) { border-color: var(--green-bright); background: var(--green-bright); }
 .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* header cells never wrap their filter icon onto a second line; a
+   table's own scroll box uses the viewport, not a fixed share of it */
+.ui-card .ledger th, .ui-card table.data th { white-space: nowrap; }
+.ar-table-wrap, .audit-wrap, .ui-card .dt-scroll { max-height: calc(100vh - 150px); }
+.ui-card .ledger td.run-cell {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-body);
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+}
+.ui-card .party-amt { font-family: var(--font-body); font-variant-numeric: tabular-nums; color: var(--ink); }
+.ui-card .party-ref { font-size: var(--fs-micro); }
+.ui-card .ledger-matches td { padding-left: 10px; padding-right: 10px; }
+.audit-tools .dt-search { min-width: 270px; }

@@ -94,7 +94,7 @@ export interface LedgerIntent {
    *  AWAITING_BILL_DATA) — exactly the rows db/overview.open_in_scope
    *  leaves out; false clears it */
   excOpenWork?: boolean
-  /** which of the two tables to scroll to once it has rendered */
+  /** which tab (Matches | Exceptions) to open on */
   section?: 'matches' | 'exceptions'
   /** the Command Center's date window (yyyy-mm-dd, '' = unbounded),
    *  applied on the SAME dates db/overview counts with: a match by its
@@ -105,15 +105,16 @@ export interface LedgerIntent {
 }
 
 /* Quick views: one click resets the queue to a named slice of work.
-   Each is an ordinary LedgerIntent, so it lands as removable chips. */
-const QV_REVIEW: LedgerIntent = { section: 'matches', matchStatus: ['OPEN'], from: '', to: '' }
-const QV_SETTLED: LedgerIntent = { section: 'matches', matchStatus: ['LOCKED'], from: '', to: '' }
+   Each is an ordinary LedgerIntent, so it lands as removable chips; a
+   date window already on the page is kept (the figures count within it). */
+const QV_REVIEW: LedgerIntent = { section: 'matches', matchStatus: ['OPEN'] }
+const QV_SETTLED: LedgerIntent = { section: 'matches', matchStatus: ['LOCKED'] }
 const QV_OPEN: LedgerIntent = {
-  section: 'exceptions', excStatus: ['OPEN'], excType: [], excGap: [], excOpenWork: true, from: '', to: '',
+  section: 'exceptions', excStatus: ['OPEN'], excType: [], excGap: [], excOpenWork: true,
 }
 const QV_AWAITING: LedgerIntent = {
   section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
-  excGap: ['AWAITING_STATUS', 'AWAITING_BILL_DATA'], excOpenWork: false, from: '', to: '',
+  excGap: ['AWAITING_STATUS', 'AWAITING_BILL_DATA'], excOpenWork: false,
 }
 
 /** The date db/overview windows an exception on: BANK_ONLY by the
@@ -420,10 +421,15 @@ export function LedgerView({
     ? `${visibleMatches.length} of ${data.matches.length} matches`
     : undefined
 
-  // quick-view figures — over the whole ledger, never the filters
-  const toReview = allMatches.filter((m) => m.status === 'OPEN')
-  const settled = allMatches.filter((m) => m.status === 'LOCKED')
-  const openExc = allExceptions.filter((e) => e.status === 'OPEN')
+  // quick-view figures — over the whole ledger, narrowed ONLY by a date
+  // window a Command Center link brought (so "3 open" there reads 3 here
+  // too); the column filters never move them
+  const inWinM = (m: LedgerMatch) => !windowOn
+    || inDayRange((m.txn?.value_date ?? '').slice(0, 10), windowFrom, windowTo)
+  const inWinE = (e: LedgerException) => !windowOn || inDayRange(excDay(e), windowFrom, windowTo)
+  const toReview = allMatches.filter((m) => m.status === 'OPEN' && inWinM(m))
+  const settled = allMatches.filter((m) => m.status === 'LOCKED' && inWinM(m))
+  const openExc = allExceptions.filter((e) => e.status === 'OPEN' && inWinE(e))
   const needsAction = openExc.filter((e) => !NOT_OPEN_WORK.has(gapOf(e) ?? ''))
   const awaiting = openExc.filter((e) => (gapOf(e) ?? '').startsWith('AWAITING_'))
   const sumTxn = (ms: LedgerMatch[]) => ms.reduce((a, m) => a + (m.txn?.amount ?? 0), 0)
@@ -559,7 +565,6 @@ export function LedgerView({
                                   format={titleCase}
                                   options={buildOptions(allMatches, (m) => m.status)} />
                   </th>
-                  <th>Locked by</th>
                   <th>Credit</th>
                   <th>Bills</th>
                   <th>Decision</th>
@@ -568,7 +573,7 @@ export function LedgerView({
               <tbody>
                 {visibleMatches.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="ui-table-empty">
+                    <td colSpan={8} className="ui-table-empty">
                       No matches for these filters —{' '}
                       <TextLink onClick={clearMatches}>show all</TextLink>
                     </td>
@@ -600,11 +605,12 @@ export function LedgerView({
                         {m.run_id ? runLabelFor(runs, m.run_id) : <span className="chip-note">manual</span>}
                       </td>
                       <td><ConfidenceBadge label={m.confidence} /></td>
-                      <td><span className={`stamp stamp-${m.status}`}>{m.status}</span></td>
                       <td>
-                        {m.locked_by ? m.locked_by.replace('_', ' ') : '—'}
-                        {m.locked_at && (
-                          <div className="chip-note">{fmtWhen(m.locked_at)}</div>
+                        <span className={`stamp stamp-${m.status}`}>{m.status}</span>
+                        {m.locked_by && (
+                          <div className="chip-note" title={m.locked_at ? fmtWhen(m.locked_at) : undefined}>
+                            by {m.locked_by.replace('_', ' ').toLowerCase()}
+                          </div>
                         )}
                       </td>
                       <td>
@@ -636,7 +642,7 @@ export function LedgerView({
                     </tr>
                     {expanded[m.id] && (
                       <tr className="xq-detail">
-                        <td colSpan={9}>
+                        <td colSpan={8}>
                           {ev === 'loading' || ev === undefined ? (
                             <p className="frame-note"><span className="quill" /> loading evidence…</p>
                           ) : ev === 'missing' || ev === 'manual' ? (

@@ -89,7 +89,7 @@ export function ReconcileForm({
       <PageHeader title="Initiate Reconciliation"
                   context={<>Match bank credits against the gold bills of {customerName}</>}>
         <CustomerSelect customers={customers} value={customerId} onChange={onCustomerChange} />
-        <ToolSep />
+        {customers.length > 1 && <ToolSep />}
         <button type="button" className={`ui-btn${showConfig ? ' is-on' : ''}`}
                 aria-pressed={showConfig} onClick={() => setShowConfig((v) => !v)}>
           <Settings2 size={15} strokeWidth={1.75} /> Matching config

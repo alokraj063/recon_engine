@@ -665,7 +665,8 @@ export default function App() {
                 title={VIEW_TITLES[view as keyof typeof VIEW_TITLES]}
                 context={<>
                   {multi ? `${selectedRuns.length} runs selected` : selectedRuns[0].label}
-                  {primary.meta.mode && !multi && <><Dot />{primary.meta.mode} run</>}
+                  {primary.meta.mode && !multi && !selectedRuns[0].label.includes(primary.meta.mode)
+                    && <><Dot />{primary.meta.mode} run</>}
                   {!multi && (primary.meta.filenames?.statements?.length ?? 0) > 1 && (
                     <><Dot /><span title={primary.meta.filenames.statements!.join('\n')}>
                       {primary.meta.filenames.statements!.length} statements</span></>
