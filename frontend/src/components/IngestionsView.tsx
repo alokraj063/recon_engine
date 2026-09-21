@@ -5,6 +5,7 @@ import { fmtWhen } from '../format'
 import {
   IngestStatsSummary, fileOutcomeLabel, fileOutcomeShort, sourceRoleTag,
 } from './IngestStatsSummary'
+import { Card, EmptyState, Notice, RefreshButton } from './ui'
 
 interface Props {
   customerId: string
@@ -25,24 +26,17 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
   useEffect(load, [load, refreshKey])
 
   return (
-    <>
-      <div className="result-head">
-        <h2>Ingestions</h2>
-        <span className="file-note">
-          customer: {customerId}
-          <button className="btn-refresh" onClick={load}>↻ refresh</button>
-        </span>
-      </div>
-
-      <div className="view-card">
-        {error && <p className="frame-note">Could not load ingestions: {error}</p>}
+    <Card title="All ingestions" sub="Every upload for this customer, newest first" ruled
+          action={<RefreshButton onClick={load} label="Refresh ingestions" />}>
+        {error && <div className="dt-state"><Notice tone="error">Could not load ingestions: {error}</Notice></div>}
+        {!items && !error && <div className="dt-loading"><span className="quill" /> Loading…</div>}
         {items && items.length === 0 && (
-          <p className="frame-note">
-            No ingestions yet for this customer — use the Ingest documents view to load source
-            documents into the gold layer.
-          </p>
+          <EmptyState title="No ingestions yet">
+            <span>Attach files below and ingest them to load this customer’s gold layer.</span>
+          </EmptyState>
         )}
         {items && items.length > 0 && (
+          <div className="ledger-wrap ingestions-wrap">
           <table className="ledger ingestions">
             <colgroup>
               <col className="col-when" />
@@ -86,8 +80,8 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
                   </td>
                   <td className="gold-cell"><IngestStatsSummary compact stats={i.stats} /></td>
                   <td className="check-cell">
-                    {i.selfcheck_passed === true && <span className="stamp stamp-succeeded">passed</span>}
-                    {i.selfcheck_passed === false && <span className="stamp stamp-failed">failed</span>}
+                    {i.selfcheck_passed === true && <span className="ui-pill tone-ok">passed</span>}
+                    {i.selfcheck_passed === false && <span className="ui-pill tone-bad">failed</span>}
                     {i.selfcheck_passed == null && (
                       <span className="empty-cell" title="no bank statement in this ingestion">—</span>
                     )}
@@ -97,16 +91,13 @@ export function IngestionsView({ customerId, refreshKey }: Props) {
               })}
             </tbody>
           </table>
+          </div>
         )}
+      <div className="ui-card-foot">
+        Every ingestion is idempotent: an identical file is recognised and not loaded twice, and
+        a newer bills export updates existing bills in place instead of duplicating them. Bills
+        held by a locked match are never silently changed — attempted changes land in conflicts.
       </div>
-
-      <p className="footer-note">
-        Every ingestion is idempotent: an identical file is recognised and not ingested twice, and
-        a newer bills export updates existing bills in place instead of duplicating them — so an
-        export can carry thousands of bills and add none as new (they count as duplicates, not
-        added). Each file stays browsable as its own ingestion either way. Bills consumed by a
-        LOCKED ledger match are never silently changed — attempted changes land in conflicts.
-      </p>
-    </>
+    </Card>
   )
 }

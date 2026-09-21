@@ -531,6 +531,7 @@ export default function App() {
             onCustomerChange={setCustomerId}
             onCustomersChanged={loadCustomers}
             onIngested={onIngested}
+            onGoToReconcile={() => setView('reconcile')}
           />
           {restoring && <p className="footer-note">Restoring run…</p>}
         </div>
