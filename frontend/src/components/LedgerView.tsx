@@ -1,12 +1,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Download, ListFilter, RotateCw } from 'lucide-react'
+import {
+  AlertTriangle, CheckCircle2, ChevronRight, Clock3, Download, ListChecks, ListFilter, Lock,
+} from 'lucide-react'
 import { fetchLedger, fetchRun, fetchRuns, ledgerWorkbookUrl } from '../api'
 import {
   ApiError,
   type LedgerException, type LedgerMatch, type LedgerViewData, type Row,
   type RunListItem,
 } from '../types'
-import { fmtWhen, inDayRange, inr, localDay } from '../format'
+import { fmtDay, fmtWhen, inDayRange, inr, inrCompact, localDay, n, plural } from '../format'
 import { BillLineage } from './BillLineage'
 import { ConfidenceBadge } from './ConfidenceBadge'
 import { MatchedEvidence, ReviewEvidence } from './ReviewEvidence'
@@ -22,12 +24,20 @@ import { ColumnFilter } from './filters/ColumnFilter'
 import { FilterChips, type FilterChip } from './filters/FilterChips'
 import { FilterPopover } from './filters/FilterPopover'
 import { buildOptions, deSnake, facetKey } from './filters/facets'
+import {
+  EmptyState, MoreRows, Notice, PageHeader, RefreshButton, Stat, StatStrip, TextLink, ToolSep,
+  useProgressiveRows,
+} from './ui'
 
 type Evidence = Row | 'loading' | 'missing' | 'manual'
 
 const CONFIDENCE_ORDER = ['HIGH', 'MANUAL', 'AMBIGUOUS', 'LOW', 'AMOUNT_ONLY', 'BATCHED']
 
 const titleCase = (v: string) => v.charAt(0) + v.slice(1).toLowerCase()
+/** exception type in words — the cell says Credit / Bill like the
+ *  Command Center; filters and chips add which side is missing */
+const typeLabel = (v: string) =>
+  v === 'BANK_ONLY' ? 'Credit — no bill' : v === 'BILL_ONLY' ? 'Bill — no credit' : deSnake(v)
 
 /** The When column's filter: the shared header icon + popover, holding a
  *  date pair instead of a checklist (applies as you pick). */
@@ -85,7 +95,7 @@ export interface LedgerIntent {
    *  AWAITING_BILL_DATA) — exactly the rows db/overview.open_in_scope
    *  leaves out; false clears it */
   excOpenWork?: boolean
-  /** which of the two tables to scroll to once it has rendered */
+  /** which tab (Matches | Exceptions) to open on */
   section?: 'matches' | 'exceptions'
   /** the Command Center's date window (yyyy-mm-dd, '' = unbounded),
    *  applied on the SAME dates db/overview counts with: a match by its
@@ -93,6 +103,19 @@ export interface LedgerIntent {
    *  bill's due date. Always sent, so an "All time" arrival clears it. */
   from?: string
   to?: string
+}
+
+/* Quick views: one click resets the queue to a named slice of work.
+   Each is an ordinary LedgerIntent, so it lands as removable chips; a
+   date window already on the page is kept (the figures count within it). */
+const QV_REVIEW: LedgerIntent = { section: 'matches', matchStatus: ['OPEN'] }
+const QV_SETTLED: LedgerIntent = { section: 'matches', matchStatus: ['LOCKED'] }
+const QV_OPEN: LedgerIntent = {
+  section: 'exceptions', excStatus: ['OPEN'], excType: [], excGap: [], excOpenWork: true,
+}
+const QV_AWAITING: LedgerIntent = {
+  section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
+  excGap: ['AWAITING_STATUS', 'AWAITING_BILL_DATA'], excOpenWork: false,
 }
 
 /** The date db/overview windows an exception on: BANK_ONLY by the
@@ -117,6 +140,8 @@ interface Props {
   onIntentHandled?: () => void
   /** the empty-ledger notice links back to Reconcile */
   onGoToReconcile: () => void
+  /** display name for the head's context line */
+  customerName?: string
 }
 
 function txnLine(m: LedgerMatch): string {
@@ -177,7 +202,7 @@ function excCells(e: LedgerException) {
 }
 
 export function LedgerView({
-  customerId, focusId, onFocusHandled, intent, onIntentHandled, onGoToReconcile,
+  customerId, focusId, onFocusHandled, intent, onIntentHandled, onGoToReconcile, customerName,
 }: Props) {
   const [data, setData] = useState<LedgerViewData | null>(null)
   // the customer's runs: labels for run ids + the run filter's choices
@@ -203,10 +228,9 @@ export function LedgerView({
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const scrolled = useRef<string | null>(null)
-  // an arriving intent names a table; the scroll waits for it to render
-  const [pendingScroll, setPendingScroll] = useState<'matches' | 'exceptions' | null>(null)
-  const matchesRef = useRef<HTMLDivElement>(null)
-  const excRef = useRef<HTMLHeadingElement>(null)
+  // which table is showing. null = not chosen yet: the first load picks
+  // the one with work in it (matches to review first)
+  const [tab, setTab] = useState<'matches' | 'exceptions' | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [evidence, setEvidence] = useState<Record<string, Evidence>>({})
   // the OPEN exception an analyst is pairing by hand (one picker at a time)
@@ -244,6 +268,7 @@ export function LedgerView({
   // then release the focus once the flash has played
   useEffect(() => {
     if (!focusId || !data) return
+    setTab('matches')
     const m = data.matches.find((x) => x.id === focusId)
     if (m && !expanded[m.id]) {
       setExpanded((x) => ({ ...x, [m.id]: true }))
@@ -259,41 +284,35 @@ export function LedgerView({
   // rather than as an inexplicably short table. The run filter is
   // cleared because a Command Center tile counts the whole customer, not
   // one run — leaving a stale run filter on would silently double-narrow.
-  // NOTE the tile's own date window is deliberately NOT carried over: it
-  // is a server-side window over gold/ledger dates, while this view's
-  // When filter is client-side over the match's created_at. Forcing one
-  // into the other would make the counts agree by filtering on the wrong
-  // date, so the queue lands on an honest superset instead.
-  useEffect(() => {
-    if (!intent) return
-    if (intent.matchStatus) {
-      setMatchStatusFilter(intent.matchStatus)
+  // The tile's date window lands as its own chip (Credit date / Date),
+  // applied on the dates db/overview counted with — never folded into
+  // When, which is the match row's created_at. The quick views at the
+  // top of the page take the same path with an empty window.
+  const applyIntent = (it: LedgerIntent) => {
+    if (it.matchStatus) {
+      setMatchStatusFilter(it.matchStatus)
       setConfFilter([])
       setDateFrom('')
       setDateTo('')
     }
-    if (intent.excStatus) setExcFilter(intent.excStatus)
-    if (intent.excType) setExcTypeFilter(intent.excType)
-    if (intent.excGap) setExcGapFilter(intent.excGap)
-    if (intent.excOpenWork !== undefined) setExcOpenWork(intent.excOpenWork)
-    if (intent.from !== undefined || intent.to !== undefined) {
-      setWindowFrom(intent.from ?? '')
-      setWindowTo(intent.to ?? '')
+    if (it.excStatus) setExcFilter(it.excStatus)
+    if (it.excType) setExcTypeFilter(it.excType)
+    if (it.excGap) setExcGapFilter(it.excGap)
+    if (it.excOpenWork !== undefined) setExcOpenWork(it.excOpenWork)
+    if (it.from !== undefined || it.to !== undefined) {
+      setWindowFrom(it.from ?? '')
+      setWindowTo(it.to ?? '')
     }
     setRunFilter(EMPTY_RUN_FILTER)
-    if (intent.section) setPendingScroll(intent.section)
+    if (it.section) setTab(it.section)
+  }
+
+  useEffect(() => {
+    if (!intent) return
+    applyIntent(intent)
     onIntentHandled?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intent])
-
-  // ...and scroll once the table it named actually exists (the ledger
-  // arrives async; a section with no rows renders nothing at all)
-  useEffect(() => {
-    if (!pendingScroll || !data) return
-    const el = pendingScroll === 'exceptions' ? excRef.current : matchesRef.current
-    el?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    setPendingScroll(null)
-  }, [pendingScroll, data])
 
   const load = useCallback(() => {
     setError(null)
@@ -377,8 +396,6 @@ export function LedgerView({
   const windowOn = !!(windowFrom || windowTo)
   const windowValues = windowOn ? [`${windowFrom || '…'} → ${windowTo || '…'}`] : []
   const clearWindow = () => { setWindowFrom(''); setWindowTo('') }
-  const matchesFiltered = confFilter.length > 0 || matchStatusFilter.length > 0
-    || !!dateFrom || !!dateTo || windowOn || runSet !== null
   const allMatches = data?.matches ?? []
   const matchChips: FilterChip[] = [
     { key: 'when', label: 'When',
@@ -393,7 +410,7 @@ export function LedgerView({
   const excChips: FilterChip[] = [
     { key: 'exc-status', label: 'Status', values: excFilter, format: titleCase,
       onRemove: (v) => setExcFilter(v === undefined ? [] : excFilter.filter((x) => x !== v)) },
-    { key: 'exc-type', label: 'Type', values: excTypeFilter, format: deSnake,
+    { key: 'exc-type', label: 'Type', values: excTypeFilter, format: typeLabel,
       onRemove: (v) => setExcTypeFilter(v === undefined ? [] : excTypeFilter.filter((x) => x !== v)) },
     { key: 'exc-gap', label: 'Gap', values: excGapFilter, format: deSnake,
       onRemove: (v) => setExcGapFilter(v === undefined ? [] : excGapFilter.filter((x) => x !== v)) },
@@ -401,46 +418,138 @@ export function LedgerView({
       onRemove: () => setExcOpenWork(false) },
     { key: 'exc-date', label: 'Date', values: windowValues, onRemove: clearWindow },
   ]
+  const drawnMatches = useProgressiveRows(visibleMatches)
+  const drawnExc = useProgressiveRows(exceptions)
+  // a focused match (arriving from the Exception queue / AR / Audit) may
+  // sit past the first batch: draw down to it so its row exists to scroll to
+  const focusIdx = focusId ? visibleMatches.findIndex((m) => m.id === focusId) : -1
+  const revealMatches = drawnMatches.reveal
+  useEffect(() => { if (focusIdx >= 0) revealMatches(focusIdx + 1) }, [focusIdx, revealMatches])
   const runNote = data && runSet
     ? `${visibleMatches.length} of ${data.matches.length} matches`
     : undefined
 
+  // quick-view figures — over the whole ledger, narrowed ONLY by a date
+  // window a Command Center link brought (so "3 open" there reads 3 here
+  // too); the column filters never move them
+  const inWinM = (m: LedgerMatch) => !windowOn
+    || inDayRange((m.txn?.value_date ?? '').slice(0, 10), windowFrom, windowTo)
+  const inWinE = (e: LedgerException) => !windowOn || inDayRange(excDay(e), windowFrom, windowTo)
+  const toReview = allMatches.filter((m) => m.status === 'OPEN' && inWinM(m))
+  const settled = allMatches.filter((m) => m.status === 'LOCKED' && inWinM(m))
+  const openExc = allExceptions.filter((e) => e.status === 'OPEN' && inWinE(e))
+  const needsAction = openExc.filter((e) => !NOT_OPEN_WORK.has(gapOf(e) ?? ''))
+  const awaiting = openExc.filter((e) => (gapOf(e) ?? '').startsWith('AWAITING_'))
+  const sumTxn = (ms: LedgerMatch[]) => ms.reduce((a, m) => a + (m.txn?.amount ?? 0), 0)
+  const sumExc = (es: LedgerException[]) => es.reduce((a, e) => a + (excCells(e).amount ?? 0), 0)
+  const needCredits = needsAction.filter((e) => e.exception_type === 'BANK_ONLY').length
+  const needBills = needsAction.length - needCredits
+
+  const empty = !!data && data.matches.length === 0 && data.exceptions.length === 0
+  const activeTab: 'matches' | 'exceptions' = tab
+    ?? (toReview.length > 0 || allExceptions.length === 0 ? 'matches' : 'exceptions')
+  const chips = activeTab === 'matches' ? matchChips : excChips
+  const anyChip = chips.some((c) => c.values.length > 0)
+  const shown = activeTab === 'matches' ? visibleMatches.length : exceptions.length
+  const total = activeTab === 'matches' ? allMatches.length : allExceptions.length
+  const clearExc = () => {
+    setExcFilter([]); setExcTypeFilter([]); setExcGapFilter([]); setExcOpenWork(false); clearWindow()
+    setRunFilter(EMPTY_RUN_FILTER)
+  }
+  const clearMatches = () => {
+    setConfFilter([]); setMatchStatusFilter([]); setDateFrom(''); setDateTo(''); clearWindow()
+    setRunFilter(EMPTY_RUN_FILTER)
+  }
+
   return (
-    <>
-      <div className="result-head">
-        <h2 className="page-title">Analyst queue</h2>
-        <span className="file-note">
-          customer: {customerId}
-          <button className="btn-refresh btn-ic" onClick={load}>
-            <RotateCw size={13} strokeWidth={1.75} /> refresh
-          </button>
-          <a className="btn-download btn-ic" href={ledgerWorkbookUrl(customerId)} download
-             title="Ledger as Excel — Matches (incl. manual), Manual_Matches, Exceptions">
-            <Download size={13} strokeWidth={1.75} /> Export ledger
-          </a>
-          {runs.length > 0 && (
-            <RunFilter runs={runs} value={runFilter} onChange={setRunFilter}
-                       note={runNote} />
-          )}
-        </span>
-      </div>
-
-      <div className="view-card">
-        {error && <p className="frame-note">{error}</p>}
-        {data && data.matches.length === 0 && data.exceptions.length === 0 && (
-          <SnapshotNotice runs={runs} what="The Analyst queue" onGoToReconcile={onGoToReconcile} />
+    <section className="ui-page">
+      <PageHeader title="Analyst queue"
+                  context={<>Decide weak matches and work the exceptions
+                    {customerName ? <> · {customerName}</> : null}</>}>
+        {runs.length > 0 && (
+          <RunFilter runs={runs} value={runFilter} onChange={setRunFilter} note={runNote} />
         )}
+        <RefreshButton onClick={load} label="Refresh the queue" />
+        <ToolSep />
+        <a className="ui-btn" href={ledgerWorkbookUrl(customerId)} download
+           title="Ledger as Excel — Matches (incl. manual), Manual_Matches, Exceptions">
+          <Download size={15} strokeWidth={1.75} /> Export ledger
+        </a>
+      </PageHeader>
 
-        {data && data.matches.length > 0 && (
-          <>
-            <div className="ledger-filter-row" ref={matchesRef}>
-              <FilterChips chips={matchChips} />
-              {matchesFiltered && (
-                <span className="ledger-count-note">
-                  {visibleMatches.length} of {data.matches.length} matches
+      {error && <Notice tone="error">{error}</Notice>}
+
+      {!data && !error && <div className="ui-card sk" style={{ minHeight: 320 }} />}
+
+      {empty && (
+        <section className="ui-card">
+          <SnapshotNotice runs={runs} what="The Analyst queue" onGoToReconcile={onGoToReconcile} />
+        </section>
+      )}
+
+      {data && !empty && (
+        <>
+          <StatStrip>
+            <Stat label={<><ListChecks size={12} strokeWidth={2} /> To review</>}
+                  value={n(toReview.length)} tone={toReview.length ? 'warn' : 'ok'}
+                  sub={toReview.length
+                    ? `${plural(toReview.length, 'match', 'matches')} · ${inrCompact(sumTxn(toReview))}`
+                    : 'nothing waiting'}
+                  onOpen={() => applyIntent(QV_REVIEW)}
+                  title="Weak matches waiting for accept or reject" />
+            <Stat label={<><AlertTriangle size={12} strokeWidth={2} /> Open exceptions</>}
+                  value={n(needsAction.length)} tone={needsAction.length ? 'bad' : 'ok'}
+                  sub={needsAction.length
+                    ? `${n(needCredits)} ${plural(needCredits, 'credit', 'credits')} · ${n(needBills)} ${plural(needBills, 'bill', 'bills')} · ${inrCompact(sumExc(needsAction))}`
+                    : 'all clear'}
+                  onOpen={() => applyIntent(QV_OPEN)}
+                  title="Unmatched credits and bills that need an analyst (other receipts and credits awaiting data left out)" />
+            <Stat label={<><Clock3 size={12} strokeWidth={2} /> Awaiting data</>}
+                  value={n(awaiting.length)}
+                  sub={awaiting.length
+                    ? `${plural(awaiting.length, 'credit', 'credits')} · ${inrCompact(sumExc(awaiting))}`
+                    : 'none'}
+                  onOpen={() => applyIntent(QV_AWAITING)}
+                  title="Credits that could not have matched yet — the bill is still in flight, or its export is not ingested" />
+            <Stat label={<><Lock size={12} strokeWidth={2} /> Settled</>}
+                  value={n(settled.length)}
+                  sub={`${plural(settled.length, 'match', 'matches')} · ${inrCompact(sumTxn(settled))}`}
+                  onOpen={() => applyIntent(QV_SETTLED)}
+                  title="Locked matches — auto (HIGH), accepted or matched by hand" />
+          </StatStrip>
+
+          <section className="ui-card">
+            <div className="ui-tabbar">
+              <div className="ui-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected={activeTab === 'matches'}
+                        className={`ui-tab${activeTab === 'matches' ? ' is-on' : ''}`}
+                        onClick={() => setTab('matches')}>
+                  Matches <span className="ui-tab-count">{n(visibleMatches.length)}</span>
+                </button>
+                <button type="button" role="tab" aria-selected={activeTab === 'exceptions'}
+                        className={`ui-tab${activeTab === 'exceptions' ? ' is-on' : ''}`}
+                        onClick={() => setTab('exceptions')}>
+                  Exceptions <span className="ui-tab-count">{n(exceptions.length)}</span>
+                </button>
+              </div>
+              {shown !== total && (
+                <span className="ui-tabbar-note">
+                  {n(shown)} of {n(total)}{' '}
+                  {activeTab === 'matches'
+                    ? plural(total, 'match', 'matches') : plural(total, 'exception', 'exceptions')}
+                  <TextLink onClick={activeTab === 'matches' ? clearMatches : clearExc}>Show all</TextLink>
                 </span>
               )}
             </div>
+            {anyChip && (
+              <div className="ui-filterbar"><FilterChips chips={chips} /></div>
+            )}
+
+            {activeTab === 'matches' && (allMatches.length === 0 ? (
+              <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />} title="No matches yet">
+                <span>Matches appear here once an incremental run pairs credits with bills.</span>
+              </EmptyState>
+            ) : (
             <div className="ledger-wrap">
             <table className="ledger ledger-matches">
               <thead>
@@ -464,21 +573,21 @@ export function LedgerView({
                                   format={titleCase}
                                   options={buildOptions(allMatches, (m) => m.status)} />
                   </th>
-                  <th>Locked by</th>
                   <th>Credit</th>
                   <th>Bills</th>
-                  <th />
+                  <th>Decision</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleMatches.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="frame-note">
-                      No matches for these filters.
+                    <td colSpan={8} className="ui-table-empty">
+                      No matches for these filters —{' '}
+                      <TextLink onClick={clearMatches}>show all</TextLink>
                     </td>
                   </tr>
                 )}
-                {visibleMatches.map((m) => {
+                {drawnMatches.shown.map((m) => {
                   const picked = m.bills.filter((b) => b.role === 'picked')
                   const candidates = m.bills.length - picked.length
                   const ev = evidence[m.id]
@@ -497,18 +606,19 @@ export function LedgerView({
                                       strokeWidth={2} aria-hidden />
                         {fmtWhen(m.created_at)}
                       </td>
-                      <td title={`run-internal label: ${m.match_id}`}>
+                      <td className="mono" title={`run-internal label: ${m.match_id}`}>
                         {m.seq !== null ? `M-${m.seq}` : m.match_id}
                       </td>
                       <td className="run-cell" title={m.run_id ?? 'matched by user — no creating run'}>
                         {m.run_id ? runLabelFor(runs, m.run_id) : <span className="chip-note">manual</span>}
                       </td>
                       <td><ConfidenceBadge label={m.confidence} /></td>
-                      <td><span className={`stamp stamp-${m.status}`}>{m.status}</span></td>
                       <td>
-                        {m.locked_by ? m.locked_by.replace('_', ' ') : '—'}
-                        {m.locked_at && (
-                          <div className="chip-note">{fmtWhen(m.locked_at)}</div>
+                        <span className={`stamp stamp-${m.status}`}>{m.status}</span>
+                        {m.locked_by && (
+                          <div className="chip-note" title={m.locked_at ? fmtWhen(m.locked_at) : undefined}>
+                            by {m.locked_by.replace('_', ' ').toLowerCase()}
+                          </div>
                         )}
                       </td>
                       <td>
@@ -517,7 +627,8 @@ export function LedgerView({
                             <span className="party-amt">{inr(m.txn.amount)}</span>
                             <span className="party-ref">{m.txn.bank_ref}</span>
                             <span className="party-meta">
-                              {[m.txn.value_date, m.txn.zone].filter(Boolean).join(' · ')}
+                              {[m.txn.value_date ? fmtDay(m.txn.value_date) : null, m.txn.zone]
+                                .filter(Boolean).join(' · ')}
                             </span>
                           </div>
                         ) : '—'}
@@ -539,7 +650,7 @@ export function LedgerView({
                     </tr>
                     {expanded[m.id] && (
                       <tr className="xq-detail">
-                        <td colSpan={9}>
+                        <td colSpan={8}>
                           {ev === 'loading' || ev === undefined ? (
                             <p className="frame-note"><span className="quill" /> loading evidence…</p>
                           ) : ev === 'missing' || ev === 'manual' ? (
@@ -594,35 +705,27 @@ export function LedgerView({
                     </Fragment>
                   )
                 })}
+                <MoreRows remaining={drawnMatches.remaining} onMore={drawnMatches.more}
+                          colSpan={8} noun="matches" />
               </tbody>
             </table>
             </div>
-          </>
-        )}
+            ))}
 
-        {data && allExceptions.length > 0 && (
-          <>
-            <h3 className="ledger-h" ref={excRef}>Exceptions</h3>
-            <div className="ledger-filter-row">
-              <FilterChips chips={excChips} />
-              {exceptions.length !== allExceptions.length && (
-                <span className="ledger-count-note">
-                  {exceptions.length} of {allExceptions.length} exceptions
-                </span>
-              )}
-            </div>
-            {exceptions.length === 0 ? (
-              <p className="frame-note">
-                Nothing matching {[
-                  excFilter.length ? `status ${excFilter.map(titleCase).join(' / ').toLowerCase()}` : null,
-                  excTypeFilter.length ? `type ${excTypeFilter.map(deSnake).join(' / ').toLowerCase()}` : null,
-                  excGapFilter.length ? `gap ${excGapFilter.map(deSnake).join(' / ').toLowerCase()}` : null,
-                  excOpenWork ? 'needs action' : null,
-                ].filter(Boolean).join(' · ') || 'these filters'}
-                {runSet ? ' for the selected runs' : ''} —{' '}
-                <button className="link-btn"
-                        onClick={() => { setExcFilter([]); setExcTypeFilter([]); setExcGapFilter([]); setExcOpenWork(false); clearWindow() }}>show all</button>
-              </p>
+            {activeTab === 'exceptions' && (allExceptions.length === 0 ? (
+              <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />} title="No exceptions">
+                <span>Every credit and advised bill the runs have seen is accounted for.</span>
+              </EmptyState>
+            ) : exceptions.length === 0 ? (
+              <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />}
+                          title={`Nothing matching ${[
+                            excFilter.length ? `status ${excFilter.map(titleCase).join(' / ').toLowerCase()}` : null,
+                            excTypeFilter.length ? `type ${excTypeFilter.map(typeLabel).join(' / ').toLowerCase()}` : null,
+                            excGapFilter.length ? `gap ${excGapFilter.map(deSnake).join(' / ').toLowerCase()}` : null,
+                            excOpenWork ? 'needs action' : null,
+                          ].filter(Boolean).join(' · ') || 'these filters'}${runSet ? ' for the selected runs' : ''}`}>
+                <TextLink onClick={clearExc}>Show all exceptions</TextLink>
+              </EmptyState>
             ) : (
               <div className="ledger-wrap">
               <table className="ledger ledger-exceptions">
@@ -631,7 +734,7 @@ export function LedgerView({
                     <th>
                       Type
                       <ColumnFilter label="Type" value={excTypeFilter} onApply={setExcTypeFilter}
-                                    format={deSnake}
+                                    format={typeLabel}
                                     options={buildOptions(allExceptions, (e) => e.exception_type)} />
                     </th>
                     <th>
@@ -640,7 +743,7 @@ export function LedgerView({
                                     format={titleCase}
                                     options={buildOptions(allExceptions, (e) => e.status)} />
                     </th>
-                    <th>Ref</th>
+                    <th>Reference</th>
                     <th>Zone</th>
                     <th>Date</th>
                     <th className="th-num">Amount</th>
@@ -650,13 +753,13 @@ export function LedgerView({
                                     format={deSnake}
                                     options={buildOptions(allExceptions, gapOf)} />
                     </th>
-                    <th>First seen (run)</th>
+                    <th>First seen</th>
                     <th>Resolved by</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {exceptions.map((e) => {
+                  {drawnExc.shown.map((e) => {
                     const c = excCells(e)
                     const open = !!excOpen[e.id]
                     return (
@@ -666,7 +769,10 @@ export function LedgerView({
                       <td>
                         <ChevronRight className="chev chev-ic" size={14}
                                       strokeWidth={2} aria-hidden />
-                        <span className={`stamp stamp-${e.exception_type}`}>{e.exception_type.replace('_', ' ')}</span>
+                        <span className={`ui-type type-${e.exception_type}`} title={typeLabel(e.exception_type)}>
+                          {e.exception_type === 'BANK_ONLY' ? 'Credit'
+                            : e.exception_type === 'BILL_ONLY' ? 'Bill' : deSnake(e.exception_type)}
+                        </span>
                       </td>
                       <td><span className={`stamp stamp-${e.status}`}>{e.status}</span></td>
                       <td>
@@ -676,7 +782,7 @@ export function LedgerView({
                         </div>
                       </td>
                       <td>{c.zone ?? '—'}</td>
-                      <td className="date">{c.date || '—'}</td>
+                      <td className="nowrap" title={c.date ?? undefined}>{c.date ? fmtDay(c.date) : '—'}</td>
                       <td className="num">{inr(c.amount)}</td>
                       <td className="exc-gap">{c.gap ?? '—'}</td>
                       <td className="run-cell" title={e.first_seen_run_id ?? undefined}>
@@ -690,7 +796,7 @@ export function LedgerView({
                       </td>
                       <td onClick={(ev) => ev.stopPropagation()}>
                         {e.status === 'OPEN' && (
-                          <button className="btn-open"
+                          <button type="button" className="ui-btn is-sm"
                                   title={e.exception_type === 'BANK_ONLY'
                                     ? 'pair this credit with open bill(s) by hand'
                                     : 'pair this bill with an open credit by hand'}
@@ -746,20 +852,24 @@ export function LedgerView({
                     </Fragment>
                     )
                   })}
+                  <MoreRows remaining={drawnExc.remaining} onMore={drawnExc.more}
+                            colSpan={10} noun="exceptions" />
                 </tbody>
               </table>
               </div>
-            )}
-          </>
-        )}
-      </div>
+            ))}
 
-      <p className="footer-note">
-        HIGH-confidence matches lock automatically; review-confidence matches wait here (and in the
-        exception queue) for a human decision. A locked match never re-enters the matching pool;
-        rejecting one releases its bills and re-opens the credit. A rejection can be undone with
-        Reopen — unless a later run has already claimed the credit or its bills.
-      </p>
-    </>
+            <div className="ui-card-foot">
+              {activeTab === 'matches'
+                ? <>HIGH-confidence matches lock automatically; weaker ones wait here for accept or
+                    reject. Rejecting releases the bills and re-opens the credit — Reopen undoes it
+                    unless a later run has claimed either side.</>
+                : <>Click a row for advice on what to do next. “Match to bill… / credit…” pairs an
+                    open exception by hand, and the match is locked straight away.</>}
+            </div>
+          </section>
+        </>
+      )}
+    </section>
   )
 }

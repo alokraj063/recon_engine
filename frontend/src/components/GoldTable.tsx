@@ -5,6 +5,7 @@ import { fetchGoldFiles, fetchGoldFrame } from '../api'
 import { AMOUNT_COLS, fmtCell, inDayRange } from '../format'
 import { SHARED_PRESETS } from '../framePresets'
 import { DataTable } from './DataTable'
+import { Notice } from './ui'
 
 /** Which source types can own rows of each gold frame — scopes the
  *  ingestion-filter dropdown to relevant files. */
@@ -122,12 +123,12 @@ export function GoldTable({ customerId, frame, intent, onIntentHandled }: Props)
 
   const filter = (
     <>
-      <label className="gold-filter">
-        <span>Ingestion:</span>
+      <label className="dt-field">
+        <span>Ingestion</span>
         <select value={bronzeFileId ?? ''}
                 onChange={(e) => setBronzeFileId(
                   e.target.value === '' ? undefined : Number(e.target.value))}>
-          <option value="">All data</option>
+          <option value="">All ingestions</option>
           {files.map((f) => (
             <option key={f.bronze_file_id} value={f.bronze_file_id}>
               {f.original_name}
@@ -136,8 +137,8 @@ export function GoldTable({ customerId, frame, intent, onIntentHandled }: Props)
         </select>
       </label>
       {dateField && (
-        <label className="gold-filter gold-dates">
-          <span>{dateField.label}:</span>
+        <label className="dt-field gold-dates">
+          <span>{dateField.label}</span>
           <input type="date" value={dateFrom} aria-label={`${dateField.label} from`}
                  onChange={(e) => setDateFrom(e.target.value)} />
           <span className="chip-note">to</span>
@@ -163,13 +164,8 @@ export function GoldTable({ customerId, frame, intent, onIntentHandled }: Props)
       : []),
   ]
 
-  if (error) return <p className="frame-note">could not load: {error}</p>
-  if (rows === null)
-    return (
-      <p className="frame-note">
-        <span className="quill" /> loading gold {frame}…
-      </p>
-    )
+  if (error) return <div className="dt-state"><Notice tone="error">Could not load this table: {error}</Notice></div>
+  if (rows === null) return <div className="dt-loading" aria-busy="true"><span className="quill" /> Loading…</div>
 
   // column filters (facets declared in framePresets) are DataTable's own
   const { columns, hidden } = buildColumns(frame, rows)
@@ -194,10 +190,10 @@ export function GoldTable({ customerId, frame, intent, onIntentHandled }: Props)
         initialFilters={arrival?.filters}
       />
       {rows.length < total && (
-        <p className="frame-note">
-          showing the first {rows.length.toLocaleString('en-IN')} of{' '}
-          {total.toLocaleString('en-IN')} rows
-        </p>
+        <div className="ui-card-foot">
+          Showing the first {rows.length.toLocaleString('en-IN')} of{' '}
+          {total.toLocaleString('en-IN')} rows — pick an ingestion or a date window to narrow it.
+        </div>
       )}
     </>
   )

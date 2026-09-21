@@ -20,7 +20,7 @@ export function ErrorBanner({ error }: { error: ApiError }) {
         <h3>An incremental run is already in flight for this customer</h3>
         <p>
           Incremental runs update a shared ledger, so only one can run at a time. Runs typically
-          take 10–30 seconds — wait for it to finish, then check the Runs view, or run again.
+          take 10–30 seconds — wait for it to finish, then run again.
         </p>
         <p className="figures">{error.message}</p>
       </div>

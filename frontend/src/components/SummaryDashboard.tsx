@@ -1,7 +1,9 @@
+import { CheckCircle2, ShieldAlert } from 'lucide-react'
 import type { ReconMeta, SummaryRow } from '../types'
 import { findAmount, sumAmount, sumCounts } from '../combineRuns'
-import { inr } from '../format'
+import { inr, inrCompact, n, pct, plural } from '../format'
 import { IngestStatsSummary } from './IngestStatsSummary'
+import { Card, Notice, Stat, StatStrip } from './ui'
 
 export interface SummaryRun {
   runId: string
@@ -18,16 +20,18 @@ interface Props {
     counts: ReconMeta['counts']
     amounts: { matched: number; bank_only: number; bill_only: number }
   }
+  /** the figures open the run's own tables */
+  onOpen?: (view: 'matched' | 'exceptions' | 'bank') => void
 }
 
 function SummaryTable({ summary }: { summary: SummaryRow[] }) {
   return (
-    <table className="ledger">
+    <table className="ledger summary-table">
       <thead>
         <tr>
           <th>Category</th>
-          <th style={{ textAlign: 'right' }}>Count</th>
-          <th style={{ textAlign: 'right' }}>Amount</th>
+          <th className="num">Count</th>
+          <th className="num">Amount</th>
         </tr>
       </thead>
       <tbody>
@@ -43,7 +47,7 @@ function SummaryTable({ summary }: { summary: SummaryRow[] }) {
   )
 }
 
-export function SummaryDashboard({ runs, aggregate }: Props) {
+export function SummaryDashboard({ runs, aggregate, onOpen }: Props) {
   const multi = runs.length > 1
   const counts = multi
     ? aggregate?.counts ?? sumCounts(runs.map((r) => r.meta))
@@ -61,120 +65,129 @@ export function SummaryDashboard({ runs, aggregate }: Props) {
     ? meta.selfchecks
     : selfcheck ? [{ ...selfcheck, original_name: null as string | null }] : []
   const conflicts = ingest?.conflicts ?? 0
+  const failed = checks.filter((c) => c.passed === false)
 
-  const tiles = [
-    {
-      label: 'Bank credits',
-      count: counts.bank_credits,
-      amount: amountOf('Bank credits in statement'),
-      tone: 'tone-neutral',
-    },
-    {
-      label: 'Matched',
-      count: counts.matched,
-      amount: aggregate ? aggregate.amounts.matched : amountOf('Matched'),
-      tone: '',
-    },
-    {
-      label: 'Bank only — no bill',
-      count: counts.bank_only,
-      amount: aggregate ? aggregate.amounts.bank_only : amountOf('Exception - bank only'),
-      tone: 'tone-bank',
-    },
-    {
-      label: 'Bill only — no credit',
-      count: counts.bill_only,
-      amount: aggregate ? aggregate.amounts.bill_only : amountOf('Exception - bill only'),
-      tone: 'tone-bill',
-    },
-  ]
+  const matchedAmt = aggregate ? aggregate.amounts.matched : amountOf('Matched')
+  const bankOnlyAmt = aggregate ? aggregate.amounts.bank_only : amountOf('Exception - bank only')
+  const billOnlyAmt = aggregate ? aggregate.amounts.bill_only : amountOf('Exception - bill only')
+  const creditsAmt = amountOf('Bank credits in statement')
+  const unrecognised = counts.unrecognised_receipts ?? 0
+  const matchable = Math.max(0, counts.bank_credits - unrecognised)
 
   return (
-    <div>
+    <div className="ui-stack">
+      {!multi && failed.length > 0 && (
+        <Notice tone="warn">
+          <strong>The statement parse did not verify.</strong> The parsed credits do not tie to
+          the totals printed on the statement — check the figures under Parse checks before
+          relying on this run.
+        </Notice>
+      )}
       {!multi && conflicts > 0 && (
-        <div className="warn-banner">
-          <h3>Settled bills protected from a newer export</h3>
-          <p>
-            A newer export tried to change {conflicts} settled bill{conflicts === 1 ? '' : 's'} —
-            the locked values were kept and the attempted changes recorded as conflicts.
-          </p>
-        </div>
+        <Notice tone="warn">
+          <strong>Settled bills protected from a newer export.</strong> A newer export tried to
+          change {n(conflicts)} settled {plural(conflicts, 'bill', 'bills')} — the locked values
+          were kept and the attempted changes recorded as conflicts.
+        </Notice>
       )}
-
-      <div className="tiles reveal reveal-1">
-        {tiles.map((t) => (
-          <div key={t.label} className={`tile ${t.tone}`}>
-            <div className="tile-label">{t.label}</div>
-            <div className="tile-count">{t.count}</div>
-            <div className="tile-amount">{inr(t.amount)}</div>
-            {t.label === 'Bank credits' && (counts.unrecognised_receipts ?? 0) > 0 && (
-              <div className="tile-delta">
-                {counts.unrecognised_receipts} unrecognised receipt{counts.unrecognised_receipts === 1 ? '' : 's'} — not matchable
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
       {multi && (
-        <p className="footer-note overlap-hint reveal reveal-2">
-          Totals across {runs.length} runs. Open exceptions reported by several runs are
-          shown once (latest state); the bank-credits total is a per-run sum and can
-          double-count when runs share a statement.
-        </p>
+        <Notice>
+          Totals across {runs.length} runs. Open exceptions reported by several runs are shown
+          once (latest state); the bank-credits total is a per-run sum and can double-count when
+          runs share a statement.
+        </Notice>
       )}
 
-      {!multi && meta.mode === 'incremental' && ingest && (
-        <div className="reveal reveal-2">
-          <IngestStatsSummary stats={ingest} />
-          {ledger && (
-            <div className="stat-chips">
-              <span className="chip">matches created {ledger.matches_created}</span>
-              <span className="chip">auto-locked {ledger.auto_locked}</span>
-              <span className="chip">exceptions opened {ledger.exceptions_opened}</span>
-              <span className="chip">exceptions resolved {ledger.exceptions_resolved}</span>
-            </div>
+      <StatStrip>
+        <Stat label="Bank credits" value={n(counts.bank_credits)}
+              sub={<>{inrCompact(creditsAmt)}{unrecognised > 0
+                ? <> · {n(unrecognised)} other {plural(unrecognised, 'receipt', 'receipts')}</> : null}</>}
+              title={`${inr(creditsAmt)} on the statement`}
+              onOpen={onOpen && (() => onOpen('bank'))} />
+        <Stat label="Matched" value={n(counts.matched)} tone="ok"
+              sub={<>{inrCompact(matchedAmt)}{matchable > 0
+                ? <> · {pct(Math.min(1, counts.matched / matchable))} of matchable</> : null}</>}
+              title={inr(matchedAmt)}
+              onOpen={onOpen && (() => onOpen('matched'))} />
+        <Stat label="Credits with no bill" value={n(counts.bank_only)}
+              tone={counts.bank_only ? 'bad' : undefined}
+              sub={inrCompact(bankOnlyAmt)} title={inr(bankOnlyAmt)}
+              onOpen={onOpen && (() => onOpen('exceptions'))} />
+        <Stat label="Bills with no credit" value={n(counts.bill_only)}
+              tone={counts.bill_only ? 'warn' : undefined}
+              sub={inrCompact(billOnlyAmt)} title={inr(billOnlyAmt)}
+              onOpen={onOpen && (() => onOpen('exceptions'))} />
+        {(counts.match_review ?? 0) > 0 && (
+          <Stat label="Matches to review" value={n(counts.match_review ?? 0)} tone="warn"
+                sub="weak matches in the queue"
+                onOpen={onOpen && (() => onOpen('exceptions'))} />
+        )}
+      </StatStrip>
+
+      <div className="ui-grid-75">
+        <div className="ui-stack">
+          {multi ? runs.map((r) => (
+            <Card key={r.runId} title={r.label} sub={r.meta.mode ? `${r.meta.mode} run` : undefined} ruled>
+              <SummaryTable summary={r.summary} />
+            </Card>
+          )) : (
+            <Card title="Breakdown" sub="The workbook's Summary sheet" ruled>
+              <SummaryTable summary={runs[0].summary} />
+            </Card>
           )}
         </div>
-      )}
 
-      {!multi && checks.map((c, i) => {
-        const who = c.original_name ? `${c.original_name} states` : 'statement states'
-        return c.passed === false ? (
-          c.stated_count == null ? (
-            <p key={i} className="selfcheck-line selfcheck-warn reveal reveal-2">
-              <span className="tick">⚠ parse check failed</span> — {who.replace(/ states$/, '')}:{' '}
-              {c.detail ?? 'the bank adapter could not verify this statement'}
-            </p>
-          ) : (
-          <p key={i} className="selfcheck-line selfcheck-warn reveal reveal-2">
-            <span className="tick">⚠ parse mismatch</span> — {who} {c.stated_count} credits
-            / {inr(c.stated_total)}; gold rebuilt {c.parsed_count} / {inr(c.parsed_total)}
-          </p>
-          )
-        ) : (
-          <p key={i} className="selfcheck-line reveal reveal-2">
-            <span className="tick">✓ parse verified</span> — {who} {c.stated_count} credits
-            / {inr(c.stated_total)}; parsed {c.parsed_count} / {inr(c.parsed_total)}
-          </p>
-        )
-      })}
+        {!multi && (
+          <div className="ui-stack">
+            {checks.length > 0 && (
+              <Card title="Parse checks" sub="Parsed credits tied to the statement's printed totals" ruled>
+                <ul className="check-list">
+                  {checks.map((c, i) => {
+                    const who = c.original_name ?? 'Statement'
+                    const ok = c.passed !== false
+                    return (
+                      <li key={i} className={ok ? 'is-ok' : 'is-bad'}>
+                        {ok ? <CheckCircle2 size={16} strokeWidth={2} /> : <ShieldAlert size={16} strokeWidth={2} />}
+                        <div>
+                          <div className="check-title">
+                            {ok ? 'Verified' : c.stated_count == null ? 'Could not verify' : 'Mismatch'}
+                            <span className="check-who">{who}</span>
+                          </div>
+                          <div className="check-detail">
+                            {c.stated_count == null
+                              ? (c.detail ?? 'the bank adapter could not verify this statement')
+                              : <>states {n(c.stated_count)} credits / {inr(c.stated_total)} · parsed{' '}
+                                  {n(c.parsed_count ?? 0)} / {inr(c.parsed_total)}</>}
+                          </div>
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </Card>
+            )}
 
-      {multi ? (
-        runs.map((r) => (
-          <div key={r.runId} className="reveal reveal-3">
-            <h3 className="ledger-h">
-              {r.label}
-              {r.meta.mode && <span className="stamp seg-inline"> {r.meta.mode}</span>}
-            </h3>
-            <SummaryTable summary={r.summary} />
+            {meta.mode === 'incremental' && ledger && (
+              <Card title="Ledger changes" sub="What this run wrote to the durable ledger" ruled>
+                <dl className="kv-list">
+                  <div><dt>Matches created</dt><dd>{n(ledger.matches_created)}</dd></div>
+                  <div><dt>Auto-locked (HIGH)</dt><dd>{n(ledger.auto_locked)}</dd></div>
+                  <div><dt>Exceptions opened</dt><dd>{n(ledger.exceptions_opened)}</dd></div>
+                  <div><dt>Exceptions resolved</dt><dd>{n(ledger.exceptions_resolved)}</dd></div>
+                </dl>
+              </Card>
+            )}
+
+            {meta.mode === 'incremental' && ingest && (
+              <Card title="Data used" sub="Rows the run's ingestion contributed" ruled>
+                <div className="ui-card-body">
+                  <IngestStatsSummary stats={ingest} />
+                </div>
+              </Card>
+            )}
           </div>
-        ))
-      ) : (
-        <div className="reveal reveal-3">
-          <SummaryTable summary={runs[0].summary} />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }

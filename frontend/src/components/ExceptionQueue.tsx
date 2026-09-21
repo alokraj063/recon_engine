@@ -13,6 +13,7 @@ import {
   MatchDecision, PickList, billByNumber, ledgerStatusLabel, useMatchDecision, type Decide,
 } from './MatchDecision'
 import { ManualMatchPicker } from './ManualMatchPicker'
+import { EmptyState } from './ui'
 
 // header checklist filters (DataTable column meta `facet`); the codes
 // display de-underscored, like the cells
@@ -306,11 +307,7 @@ export function ExceptionQueue({
       columns={columns}
       numericIds={AMOUNT_COLS}
       toolbar={error ? <span className="flag-note">{error}</span> : undefined}
-      emptyNote={rows.length === 0 ? emptyNote : (
-        <p className="frame-note">
-          no exceptions in this run
-        </p>
-      )}
+      emptyNote={rows.length === 0 ? emptyNote : <EmptyState title="No exceptions in this run" />}
       renderDetail={(row) => (
         <Detail row={row} onOpenInQueue={onOpenInQueue} primaryRunId={primaryRunId}
                 ledger={ledger} customerId={customerId} onLedgerChanged={onLedgerChanged}

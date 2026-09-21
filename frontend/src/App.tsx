@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Download } from 'lucide-react'
+import { ArrowRight, Download, GitMerge, Inbox } from 'lucide-react'
 import {
   fetchCustomers, fetchLedger, fetchRun, fetchRuns, reconcileFromGold, workbookUrl,
 } from './api'
@@ -29,6 +29,7 @@ import {
 } from './dataPages'
 import { SourceTable } from './components/SourceTable'
 import { SummaryDashboard } from './components/SummaryDashboard'
+import { Dot, EmptyState, PageHeader, ToolSep } from './components/ui'
 
 const FRAME_VIEWS: FrameName[] = ['bank', 'bills', 'bills_enriched', 'recoveries']
 
@@ -156,6 +157,8 @@ export default function App() {
   const [customerId, setCustomerIdState] = useState<string>(
     () => localStorage.getItem(CUSTOMER_KEY) ?? 'default',
   )
+  // the page heads' context line names the customer, not its key
+  const customerName = customers.find((c) => c.key === customerId)?.name ?? customerId
   // which scope a Data-group sidebar click opens (Current | As of run);
   // the ACTIVE scope is always derived from the view itself (scopeOf)
   const [dataScope, setDataScope] = useState<DataScope>(readScopePref)
@@ -401,38 +404,38 @@ export default function App() {
   // the scope switch, then the scope's own context — run stamp + picker
   // in run scope, the customer stamp in current scope.
   const dataHead = (page: DataPage, withPicker: boolean) => (
-    <div className="result-head">
-      <h2 className="page-title">{page.label}</h2>
-      <span className="file-note">
-        {page.run ? (
-          <span className="seg seg-scope">
-            <button className={activeScope === 'current' ? 'on' : ''}
-                    onClick={() => setScope(page, 'current')}>Complete Data</button>
-            <button className={activeScope === 'run' ? 'on' : ''}
-                    onClick={() => setScope(page, 'run')}>Reconcile Data</button>
-          </span>
-        ) : (
-          <span className="chip-note">complete data only — runs keep no lineage snapshot</span>
-        )}
-        {activeScope === 'run' && page.runTrail && page.run && (
-          <span className="seg seg-scope">
-            <button className={view === page.run ? 'on' : ''}
-                    onClick={() => setView(page.run as View)}>Table</button>
-            <button className={view === page.runTrail ? 'on' : ''}
-                    onClick={() => setView(page.runTrail as View)}>With lineage trail</button>
-          </span>
-        )}
-        {activeScope === 'current' && <span className="stamp head-stamp">customer: {customerId}</span>}
-        {activeScope === 'run' && primary?.meta.mode && !multi && (
-          <span className="stamp head-stamp">{primary.meta.mode}</span>
-        )}
-        {activeScope === 'run' && restoring && <span className="chip-note">loading runs…</span>}
-        {activeScope === 'run' && withPicker && (
-          <RunPicker runs={runList} selection={selection}
-                     onChange={(ids) => void applySelection(ids)} />
-        )}
-      </span>
-    </div>
+    <PageHeader
+      title={page.label}
+      context={activeScope === 'current'
+        ? <>Everything ingested so far<Dot />{customerName}</>
+        : <>As of {multi && selectedRuns ? `${selectedRuns.length} runs` : (selectedRuns?.[0]?.label ?? 'a run')}
+            {primary?.meta.mode && !multi && <><Dot />{primary.meta.mode}</>}
+            {restoring && <><Dot />loading runs…</>}</>}>
+      {page.run ? (
+        <span className="ui-seg" role="group" aria-label="Data scope">
+          <button type="button" className={activeScope === 'current' ? 'on' : ''}
+                  title="The live gold layer — every ingestion, deduplicated"
+                  onClick={() => setScope(page, 'current')}>Complete Data</button>
+          <button type="button" className={activeScope === 'run' ? 'on' : ''}
+                  title="The frozen frame a reconciliation run used"
+                  onClick={() => setScope(page, 'run')}>Reconcile Data</button>
+        </span>
+      ) : (
+        <span className="ui-tool-note">Complete data only — runs keep no lineage snapshot</span>
+      )}
+      {activeScope === 'run' && page.runTrail && page.run && (
+        <span className="ui-seg" role="group" aria-label="Bills view">
+          <button type="button" className={view === page.run ? 'on' : ''}
+                  onClick={() => setView(page.run as View)}>Table</button>
+          <button type="button" className={view === page.runTrail ? 'on' : ''}
+                  onClick={() => setView(page.runTrail as View)}>With lineage trail</button>
+        </span>
+      )}
+      {activeScope === 'run' && withPicker && (
+        <RunPicker runs={runList} selection={selection}
+                   onChange={(ids) => void applySelection(ids)} />
+      )}
+    </PageHeader>
   )
 
   const showResult =
@@ -479,37 +482,34 @@ export default function App() {
   const openExceptions = counts
     ? counts.bank_only + counts.bill_only + (counts.match_review ?? 0) : 0
   const matchedEmptyNote = (
-    <div className="frame-note table-empty-note">
-      <p><strong>No matched reconciliations {runScope}.</strong></p>
+    <EmptyState icon={<Inbox className="is-muted" size={22} strokeWidth={1.75} />}
+                title={`No matched reconciliations ${runScope}`}>
       {primary?.meta.mode === 'incremental' && (
-        <p>
+        <span>
           Credits and bills locked by an earlier run never re-enter the matching pool, so a
           statement that was already reconciled matches nothing new — that is expected, not a
           failure.
-        </p>
+        </span>
       )}
       {counts && openExceptions > 0 && (
-        <p>
-          {counts.bank_only} bank-only and {counts.bill_only} bill-only exception
-          {counts.bank_only + counts.bill_only === 1 ? '' : 's'} went to the{' '}
-          <button className="link-btn" onClick={() => setView('exceptions')}>Exception queue</button>.
-        </p>
+        <button type="button" className="ui-link" onClick={() => setView('exceptions')}>
+          {counts.bank_only} bank-only and {counts.bill_only} bill-only{' '}
+          {counts.bank_only + counts.bill_only === 1 ? 'exception' : 'exceptions'} in the
+          Exception queue <ArrowRight size={13} strokeWidth={2} />
+        </button>
       )}
-    </div>
+    </EmptyState>
   )
   const exceptionsEmptyNote = (
-    <div className="frame-note table-empty-note">
-      <p><strong>No exceptions {runScope}.</strong></p>
-      <p>
-        Every credit on the statement found its bill and every advised bill found its credit.
-        {counts && counts.matched > 0 && (
-          <>
-            {' '}See the {counts.matched} matched row{counts.matched === 1 ? '' : 's'} under{' '}
-            <button className="link-btn" onClick={() => setView('matched')}>Matched</button>.
-          </>
-        )}
-      </p>
-    </div>
+    <EmptyState title={`No exceptions ${runScope}`}>
+      <span>Every credit on the statement found its bill and every advised bill found its credit.</span>
+      {counts && counts.matched > 0 && (
+        <button type="button" className="ui-link" onClick={() => setView('matched')}>
+          See the {counts.matched} matched {counts.matched === 1 ? 'row' : 'rows'}{' '}
+          <ArrowRight size={13} strokeWidth={2} />
+        </button>
+      )}
+    </EmptyState>
   )
 
   return (
@@ -531,6 +531,7 @@ export default function App() {
             onCustomerChange={setCustomerId}
             onCustomersChanged={loadCustomers}
             onIngested={onIngested}
+            onGoToReconcile={() => setView('reconcile')}
           />
           {restoring && <p className="footer-note">Restoring run…</p>}
         </div>
@@ -563,12 +564,7 @@ export default function App() {
               onGoToIngest={() => setView('ingest')}
               refreshKey={ingestEpoch}
             />
-            {error && <ErrorBanner error={error} />}
-            {primary && (
-              <p className="footer-note">
-                A run is loaded — pick a view from the left, or run again.
-              </p>
-            )}
+            {error && <div className="ui-page-after"><ErrorBanner error={error} /></div>}
           </>
         )}
 
@@ -580,6 +576,7 @@ export default function App() {
             intent={ledgerIntent}
             onIntentHandled={() => setLedgerIntent(null)}
             onGoToReconcile={() => setView('reconcile')}
+            customerName={customerName}
           />
         )}
 
@@ -614,12 +611,14 @@ export default function App() {
 
         {goldFrame && dataPage && (
           <>
-            {dataHead(dataPage, false)}
-            <div className="view-card">
-              <GoldTable key={`${customerId}:${goldFrame}:${ingestEpoch}`}
-                         customerId={customerId} frame={goldFrame}
-                         intent={goldIntent} onIntentHandled={clearGoldIntent} />
-            </div>
+            <section className="ui-page">
+              {dataHead(dataPage, false)}
+              <section className="ui-card">
+                <GoldTable key={`${customerId}:${goldFrame}:${ingestEpoch}`}
+                           customerId={customerId} frame={goldFrame}
+                           intent={goldIntent} onIntentHandled={clearGoldIntent} />
+              </section>
+            </section>
           </>
         )}
 
@@ -627,90 +626,94 @@ export default function App() {
             switched, or a stale link): guide instead of a blank page */}
         {!showResult
           && (FILTERED_VIEWS.has(view) || FRAME_VIEWS.includes(view as FrameName))
-          && (restoring ? (
-            <>
-              {dataPage && dataHead(dataPage, false)}
-              <p className="footer-note">Restoring run…</p>
-            </>
-          ) : (
-            <>
-            {dataPage && dataHead(dataPage, false)}
-            <div className="view-card empty-state">
-              <h3>{runList.length ? 'No run loaded' : 'No runs yet'}</h3>
-              <p>
-                {runList.length
-                  ? 'This view shows a reconciliation result. Pick a past run, or run a new one.'
-                  : 'This view shows a reconciliation result. Ingest documents, then initiate a reconciliation for this customer.'}
-              </p>
-              <div className="empty-state-actions">
-                <button className="btn-run" onClick={() => setView('reconcile')}>
-                  Initiate reconciliation
-                </button>
-                {runList.length > 0 && (
-                  <RunPicker runs={runList} selection={selection}
-                             onChange={(ids) => void applySelection(ids)} />
-                )}
-              </div>
-              {error && <ErrorBanner error={error} />}
-            </div>
-            </>
-          ))}
+          && (
+            <section className="ui-page">
+              {dataPage ? dataHead(dataPage, false) : (
+                <PageHeader title={VIEW_TITLES[view as keyof typeof VIEW_TITLES]} />
+              )}
+              {restoring ? (
+                <div className="ui-card sk" style={{ minHeight: 240 }} />
+              ) : (
+                <section className="ui-card">
+                  <EmptyState icon={<Inbox className="is-muted" size={22} strokeWidth={1.75} />}
+                              title={runList.length ? 'No run loaded' : 'No runs yet'}>
+                    <span>
+                      {runList.length
+                        ? 'This page shows a reconciliation result. Pick a past run, or run a new one.'
+                        : 'This page shows a reconciliation result. Ingest documents, then initiate a reconciliation for this customer.'}
+                    </span>
+                    <div className="ui-empty-actions">
+                      <button type="button" className="ui-btn ui-btn-primary" onClick={() => setView('reconcile')}>
+                        <GitMerge size={15} strokeWidth={1.75} /> Initiate reconciliation
+                      </button>
+                      {runList.length > 0 && (
+                        <RunPicker runs={runList} selection={selection}
+                                   onChange={(ids) => void applySelection(ids)} />
+                      )}
+                    </div>
+                  </EmptyState>
+                  {error && <div className="ui-card-body"><ErrorBanner error={error} /></div>}
+                </section>
+              )}
+            </section>
+          )}
 
         {showResult && primary && selectedRuns && (
-          <>
+          <section className="ui-page">
             {dataPage ? dataHead(dataPage, true) : (
-            <div className="result-head">
-              <h2 className="page-title">{VIEW_TITLES[view as keyof typeof VIEW_TITLES]}</h2>
-              <span className="file-note">
-                {FILTERED_VIEWS.has(view) && (
-                  <a className="btn-download btn-ic"
-                     href={workbookUrl(primary.run_id)} download
-                     title={'Full workbook for this run — Summary, Matched, '
-                       + 'Exception Queue, Recovery Detail'
-                       + (multi ? ' (primary run of the selection)' : '')}>
-                    <Download size={13} strokeWidth={1.75} /> Export (.xlsx)
-                  </a>
-                )}
-                {primary.meta.mode && !multi && (
-                  <span className="stamp head-stamp">{primary.meta.mode}</span>
-                )}
-                {!multi && (primary.meta.filenames?.statements?.length ?? 0) > 1 && (
-                  <span className="stamp head-stamp"
-                        title={primary.meta.filenames.statements!.join('\n')}>
-                    {primary.meta.filenames.statements!.length} statements
-                  </span>
-                )}
-                {primary.meta.customer && primary.meta.customer !== 'default' && (
-                  <span className="stamp head-stamp">{primary.meta.customer}</span>
-                )}
-                {restoring && <span className="chip-note">loading runs…</span>}
+              <PageHeader
+                title={VIEW_TITLES[view as keyof typeof VIEW_TITLES]}
+                context={<>
+                  {multi ? `${selectedRuns.length} runs selected` : selectedRuns[0].label}
+                  {primary.meta.mode && !multi && !selectedRuns[0].label.includes(primary.meta.mode)
+                    && <><Dot />{primary.meta.mode} run</>}
+                  {!multi && (primary.meta.filenames?.statements?.length ?? 0) > 1 && (
+                    <><Dot /><span title={primary.meta.filenames.statements!.join('\n')}>
+                      {primary.meta.filenames.statements!.length} statements</span></>
+                  )}
+                  {primary.meta.customer && <><Dot />{customerName}</>}
+                  {restoring && <><Dot />loading runs…</>}
+                </>}>
                 {PICKER_VIEWS.has(view) && (
                   <RunPicker runs={runList} selection={selection}
                              onChange={(ids) => void applySelection(ids)} />
                 )}
-              </span>
-            </div>
+                {FILTERED_VIEWS.has(view) && (
+                  <>
+                    <ToolSep />
+                    <a className="ui-btn" href={workbookUrl(primary.run_id)} download
+                       title={'Full workbook for this run — Summary, Matched, '
+                         + 'Exception Queue, Recovery Detail'
+                         + (multi ? ' (primary run of the selection)' : '')}>
+                      <Download size={15} strokeWidth={1.75} /> Export workbook
+                    </a>
+                  </>
+                )}
+              </PageHeader>
             )}
 
             {error && PICKER_VIEWS.has(view) && <ErrorBanner error={error} />}
 
-            <div className="view-card">
-              {view === 'summary' && (
-                <SummaryDashboard
-                  runs={selectedRuns.map((r) => ({
-                    runId: r.runId, label: r.label,
-                    summary: r.payload.summary, meta: r.payload.meta,
-                  }))}
-                  aggregate={multi && displayResult
-                    ? { counts: displayResult.meta.counts,
-                        amounts: amountsFromRows(matchedRows, exceptionRows) }
-                    : undefined}
-                />
-              )}
-              {view === 'matched' && (
+            {view === 'summary' && (
+              <SummaryDashboard
+                runs={selectedRuns.map((r) => ({
+                  runId: r.runId, label: r.label,
+                  summary: r.payload.summary, meta: r.payload.meta,
+                }))}
+                aggregate={multi && displayResult
+                  ? { counts: displayResult.meta.counts,
+                      amounts: amountsFromRows(matchedRows, exceptionRows) }
+                  : undefined}
+                onOpen={(v) => setView(v)}
+              />
+            )}
+            {view === 'matched' && (
+              <section className="ui-card">
                 <MatchedTable rows={matchedRows} emptyNote={matchedEmptyNote} />
-              )}
-              {view === 'exceptions' && (
+              </section>
+            )}
+            {view === 'exceptions' && (
+              <section className="ui-card">
                 <ExceptionQueue
                   rows={exceptionRows}
                   emptyNote={exceptionsEmptyNote}
@@ -723,24 +726,23 @@ export default function App() {
                     setView('ledger')
                   }}
                 />
-              )}
-              {FRAME_VIEWS.includes(view as FrameName) && (
+                <div className="ui-card-foot">
+                  Both sides are sources of truth: bank-only rows carry no bill fields and
+                  bill-only rows no bank fields, by design. A credit whose best pairing was
+                  claimed by another credit falls here instead of settling for a worse one — a
+                  missing match you can investigate beats a wrong match you cannot see.
+                </div>
+              </section>
+            )}
+            {FRAME_VIEWS.includes(view as FrameName) && (
+              <section className="ui-card">
                 <SourceTable
                   runs={selectedRuns.map((r) => ({ runId: r.runId, label: r.label }))}
                   name={view as FrameName}
                 />
-              )}
-            </div>
-
-            {view === 'exceptions' && (
-              <p className="footer-note">
-                Both sides are sources of truth: BANK ONLY rows carry no bill fields and BILL ONLY rows
-                no bank fields by design. A credit whose best pairing was claimed by another credit is
-                not allowed to settle for a worse one — it falls to this queue instead, because a
-                missing match you can investigate beats a wrong match you cannot see.
-              </p>
+              </section>
             )}
-          </>
+          </section>
         )}
         </div>
       </main>

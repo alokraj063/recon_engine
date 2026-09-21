@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { RotateCw } from 'lucide-react'
+import { AlertTriangle, CheckCircle2 } from 'lucide-react'
 import type { ArRow, ArStatus, ArView, RunListItem } from '../types'
 import { fetchAr, fetchOperatingUnits, fetchRuns } from '../api'
-import { inDayRange, inr } from '../format'
-import { FitText } from './FitText'
+import { fmtDay, inDayRange, inr, inrCompact, n, plural } from '../format'
 import { ColumnFilter } from './filters/ColumnFilter'
-import { FilterChips } from './filters/FilterChips'
+import { FilterChips, type FilterChip } from './filters/FilterChips'
 import { buildOptions } from './filters/facets'
 import { SnapshotNotice } from './SnapshotNotice'
 import {
@@ -15,6 +14,10 @@ import {
   DateFilter, UNASSIGNED_UNIT, resolveWindow, unitsLabel, windowLabel,
   type DateFilterValue,
 } from './DateFilter'
+import {
+  Card, Dot, EmptyState, MoreRows, Notice, PageHeader, PartitionBar, RefreshButton, TextLink,
+  useProgressiveRows,
+} from './ui'
 
 /** AR opens on the whole working set; the quick picks are one click away. */
 const AR_DEFAULT_FILTER: DateFilterValue = { pick: 'all', from: '', to: '', units: null }
@@ -43,26 +46,43 @@ interface Props {
 }
 
 const STATUS_LABEL: Record<ArStatus, string> = {
-  SETTLED: 'SETTLED',
-  IN_REVIEW: 'IN REVIEW',
-  AWAITING: 'AWAITING',
-  OVERDUE: 'OVERDUE',
+  SETTLED: 'Settled',
+  IN_REVIEW: 'In review',
+  AWAITING: 'Awaiting',
+  OVERDUE: 'Overdue',
 }
+/** the table's status tabs, most urgent first */
+const STATUS_ORDER: ArStatus[] = ['OVERDUE', 'AWAITING', 'IN_REVIEW', 'SETTLED']
 
-const pct = (v: number | null) => (v === null ? '—' : `${(v * 100).toFixed(1)}%`)
+const isOpen = (r: ArRow) => r.status === 'AWAITING' || r.status === 'OVERDUE'
 
-const BUCKET_TONE: Record<string, string> = {
-  '0-30': 'fill-green', '31-60': 'fill-gold', '61-90': 'fill-gold',
-  '90+': 'fill-sienna', undated: 'fill-green-soft',
+/* Aging of OUTSTANDING bills only — settled / in-review money is not
+   owed any more. Age runs from the advice / payment-order date. */
+const BUCKETS: Array<{ key: string; label: string; lo: number; hi: number | null; tone: string }> = [
+  { key: '0-30', label: '0–30 days', lo: 0, hi: 30, tone: 'a1' },
+  { key: '31-60', label: '31–60 days', lo: 31, hi: 60, tone: 'a2' },
+  { key: '61-90', label: '61–90 days', lo: 61, hi: 90, tone: 'a3' },
+  { key: '90+', label: 'Over 90 days', lo: 91, hi: null, tone: 'a4' },
+]
+function bucketOf(r: ArRow): string {
+  if (r.age_days === null) return 'undated'
+  const b = BUCKETS.find((x) => r.age_days! >= x.lo && (x.hi === null || r.age_days! <= x.hi))
+  return b?.key ?? 'undated'
 }
+const bucketLabel = (k: string) => BUCKETS.find((b) => b.key === k)?.label ?? 'No due date'
+
+const sum = (xs: Array<number | null>) => xs.reduce<number>((s, v) => s + (v ?? 0), 0)
 
 export function ARReconciliationView({
   customerId, refreshKey, onOpenInQueue, onGoToReconcile,
 }: Props) {
   const [data, setData] = useState<ArView | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // status column filter (multi-select; empty = every status)
+  const [loading, setLoading] = useState(false)
+  // status tab + the Status column filter share one state (empty = all)
   const [statusFilter, setStatusFilter] = useState<string[]>([])
+  // an aging bucket picked from the Aging card (outstanding rows only)
+  const [ageFilter, setAgeFilter] = useState<string[]>([])
   const [runs, setRuns] = useState<RunListItem[]>([])
   const [runFilter, setRunFilter] = useState<RunFilterValue>(EMPTY_RUN_FILTER)
   const [dateFilter, setDateFilter] = useState<DateFilterValue>(AR_DEFAULT_FILTER)
@@ -70,14 +90,19 @@ export function ARReconciliationView({
 
   const load = useCallback(() => {
     setError(null)
+    setLoading(true)
     fetchAr(customerId)
       .then(setData)
       .catch((e) => setError(String(e.message ?? e)))
+      .finally(() => setLoading(false))
     fetchRuns(customerId, 200).then(setRuns).catch(() => setRuns([]))
   }, [customerId])
 
   useEffect(load, [load, refreshKey])
-  useEffect(() => { setRunFilter(EMPTY_RUN_FILTER); setDateFilter(AR_DEFAULT_FILTER) }, [customerId])
+  useEffect(() => {
+    setRunFilter(EMPTY_RUN_FILTER); setDateFilter(AR_DEFAULT_FILTER)
+    setStatusFilter([]); setAgeFilter([])
+  }, [customerId])
   useEffect(() => {
     fetchOperatingUnits(customerId)
       .then((r) => setUnits(r.units.map((u) => u.unit)))
@@ -85,33 +110,30 @@ export function ARReconciliationView({
   }, [customerId, refreshKey])
 
   const runSet = useMemo(() => runFilterSet(runFilter, runs), [runFilter, runs])
-  // item 2.2: the run filter AND the date/unit filter narrow the working
-  // set, and the KPI tiles + aging bars follow it — the page reads as one
-  // scope (the whole-customer position is one "All time · all runs" away)
+  // the run filter AND the date/unit filter narrow the working set, and
+  // every figure on the page follows it — the page reads as one scope
   const win = resolveWindow(dateFilter)
-  const inScope = (data?.rows ?? []).filter((r) => {
+  const inScope = useMemo(() => (data?.rows ?? []).filter((r) => {
     if (runSet && !(!!r.run_id && runSet.has(r.run_id))) return false
     if (win.from || win.to) {
       const day = rowDay(r)
       if (!day || !inDayRange(day, win.from, win.to)) return false
     }
     return inUnits(r, dateFilter.units)
-  })
-  const rows = inScope.filter((r) => statusFilter.length === 0 || statusFilter.includes(r.status))
-  const statusChips = [{
-    key: 'status', label: 'Status', values: statusFilter,
-    format: (v: string) => STATUS_LABEL[v as ArStatus] ?? v,
-    onRemove: (v?: string) =>
-      setStatusFilter(v === undefined ? [] : statusFilter.filter((x) => x !== v)),
-  }]
+  }), [data, runSet, win.from, win.to, dateFilter.units])
+
+  const rows = inScope.filter((r) =>
+    (statusFilter.length === 0 || statusFilter.includes(r.status))
+    && (ageFilter.length === 0 || (isOpen(r) && ageFilter.includes(bucketOf(r)))))
+  const drawn = useProgressiveRows(rows)
   const statusCounts = inScope.reduce<Record<string, number>>(
     (acc, r) => ({ ...acc, [r.status]: (acc[r.status] ?? 0) + 1 }), {})
   const scoped = !!runSet || win.from !== '' || win.to !== '' || dateFilter.units !== null
   const runNote = data && scoped ? `${inScope.length} of ${data.rows.length} bills` : undefined
 
-  // KPIs + aging over the rows in scope (server KPIs are whole-customer)
-  const kpis = useMemo(() => {
-    const open = inScope.filter((r) => r.status === 'AWAITING' || r.status === 'OVERDUE')
+  // figures over the rows in scope (the server's KPIs are whole-customer)
+  const figs = useMemo(() => {
+    const open = inScope.filter(isOpen)
     const overdue = open.filter((r) => r.status === 'OVERDUE')
     const settledTxns = new Map<string, { amount: number; value_date: string | null }>()
     for (const r of inScope) {
@@ -123,210 +145,268 @@ export function ARReconciliationView({
     const now = new Date()
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
     const received = [...settledTxns.values()]
-    const sum = (xs: Array<number | null>) => xs.reduce<number>((s, v) => s + (v ?? 0), 0)
-    // denominator: statement credits of the runs in scope (all runs when
-    // no run filter), from the per-run counts the payload carries
-    const runsInScope = (data?.runs ?? []).filter((r) => !runSet || runSet.has(r.run_id))
-    // unrecognised receipts (no match signal) are excluded from the
-    // denominator: the rate is over recognised credits only
-    const credits = runsInScope.reduce<number>(
-      (s, r) => s + Math.max(0, (r.credits ?? 0) - (r.unrecognised ?? 0)), 0)
+    const aging = [...BUCKETS.map((b) => b.key), 'undated'].map((key) => {
+      const hit = open.filter((r) => bucketOf(r) === key)
+      return { key, count: hit.length, value: sum(hit.map((r) => r.net_payable_amount)) }
+    })
     return {
-      outstanding: { count: open.length, value: sum(open.map((r) => r.net_payable_amount)) },
+      open: { count: open.length, value: sum(open.map((r) => r.net_payable_amount)) },
       overdue: { count: overdue.length, value: sum(overdue.map((r) => r.net_payable_amount)) },
       received: {
         count: received.length,
         value: sum(received.map((t) => t.amount)),
-        mtd_value: sum(received.filter((t) => (t.value_date ?? '').startsWith(ym)).map((t) => t.amount)),
+        mtd: sum(received.filter((t) => (t.value_date ?? '').startsWith(ym)).map((t) => t.amount)),
       },
-      match_rate: credits > 0 ? Math.min(1, received.length / credits) : null,
-      aging: (() => {
-        const buckets: Array<[string, number, number | null]> = [
-          ['0-30', 0, 30], ['31-60', 31, 60], ['61-90', 61, 90], ['90+', 91, null]]
-        const out = buckets.map(([bucket, lo, hi]) => {
-          const hit = open.filter((r) => r.age_days !== null && r.age_days >= lo && (hi === null || r.age_days <= hi))
-          return { bucket, count: hit.length, value: sum(hit.map((r) => r.net_payable_amount)) }
-        })
-        const undated = open.filter((r) => r.age_days === null)
-        out.push({ bucket: 'undated', count: undated.length, value: sum(undated.map((r) => r.net_payable_amount)) })
-        return out
-      })(),
+      aging,
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inScope, data, runSet])
-  const agingMax = Math.max(1, ...kpis.aging.map((b) => b.value))
-  const scopeLabel = `${windowLabel(dateFilter)}${units.length ? ` · ${unitsLabel(dateFilter, units)}` : ''}${runSet ? ' · selected runs' : ''}`
+  }, [inScope])
 
-  const rowClick = (r: ArRow) => {
-    if (r.match_ledger_id) onOpenInQueue(r.match_ledger_id)
+  const scopeLabel = `${windowLabel(dateFilter)}${units.length ? ` · ${unitsLabel(dateFilter, units)}` : ''}${runSet ? ' · selected runs' : ''}`
+  const showStatus = (s: ArStatus | null) => { setStatusFilter(s ? [s] : []); setAgeFilter([]) }
+  const showAge = (k: string) => {
+    setAgeFilter(ageFilter.length === 1 && ageFilter[0] === k ? [] : [k])
+    setStatusFilter([])
   }
+  const clearAll = () => { setStatusFilter([]); setAgeFilter([]) }
+
+  const chips: FilterChip[] = [
+    { key: 'status', label: 'Status', values: statusFilter,
+      format: (v) => STATUS_LABEL[v as ArStatus] ?? v,
+      onRemove: (v) => setStatusFilter(v === undefined ? [] : statusFilter.filter((x) => x !== v)) },
+    { key: 'age', label: 'Age', values: ageFilter, format: bucketLabel,
+      onRemove: (v) => setAgeFilter(v === undefined ? [] : ageFilter.filter((x) => x !== v)) },
+  ]
+  const anyChip = statusFilter.length > 0 || ageFilter.length > 0
+  const agingMax = Math.max(1, ...figs.aging.map((b) => b.value))
+  const settledCount = statusCounts.SETTLED ?? 0
+  const reviewCount = statusCounts.IN_REVIEW ?? 0
+  const awaitingCount = statusCounts.AWAITING ?? 0
+  const overdueCount = statusCounts.OVERDUE ?? 0
 
   return (
-    <section className="intake">
-      <div className="ingest-head">
-        <h2 className="page-title">AR Reconciliation</h2>
-        <span className="file-note">
-          <button className="btn-refresh btn-ic" onClick={load}>
-            <RotateCw size={13} strokeWidth={1.75} /> refresh
-          </button>
-          <DateFilter value={dateFilter} onChange={setDateFilter} units={units} />
-          {runs.length > 0 && (
-            <RunFilter runs={runs} value={runFilter} onChange={setRunFilter}
-                       note={runNote} />
-          )}
-        </span>
-      </div>
+    <section className="ui-page">
+      <PageHeader title="AR Reconciliation"
+                  context={<>What is owed, what came in, and how old the rest is<Dot />{scopeLabel}</>}>
+        <DateFilter value={dateFilter} onChange={setDateFilter} units={units} />
+        {runs.length > 0 && (
+          <RunFilter runs={runs} value={runFilter} onChange={setRunFilter} note={runNote} />
+        )}
+        <RefreshButton onClick={load} loading={loading} label="Refresh AR" />
+      </PageHeader>
 
-      {error && <p className="frame-note">could not load AR view: {error}</p>}
-      {!data && !error && <p className="frame-note"><span className="quill" /> loading…</p>}
+      {error && (
+        <Notice tone="error" action={<TextLink onClick={load}>Try again</TextLink>}>
+          Could not load the AR view: {error}
+        </Notice>
+      )}
+      {!data && !error && (
+        <div className="ui-grid-75">
+          <div className="ui-card sk" style={{ minHeight: 210 }} />
+          <div className="ui-card sk" style={{ minHeight: 210 }} />
+        </div>
+      )}
 
       {data && data.rows.length === 0 && (
-        <SnapshotNotice runs={runs} what="AR Reconciliation" onGoToReconcile={onGoToReconcile} />
+        <section className="ui-card">
+          <SnapshotNotice runs={runs} what="AR Reconciliation" onGoToReconcile={onGoToReconcile} />
+        </section>
       )}
 
       {data && data.rows.length > 0 && (
         <>
-          <div className="tiles cc-tiles ar-tiles">
-            <div className="tile tone-bill">
-              <div className="tile-label">AR outstanding</div>
-              <div className="tile-count"><FitText>{inr(kpis.outstanding.value)}</FitText></div>
-              <div className="tile-amount">{kpis.outstanding.count.toLocaleString('en-IN')} bills awaiting credit</div>
-              <div className="tile-delta">{scopeLabel}</div>
-            </div>
-            <div className="tile">
-              <div className="tile-label">Received</div>
-              <div className="tile-count"><FitText>{inr(kpis.received.value)}</FitText></div>
-              <div className="tile-amount">{kpis.received.count} credits settled</div>
-              <div className="tile-delta">{inr(kpis.received.mtd_value)} this month · {scopeLabel}</div>
-            </div>
-            <div className="tile tone-neutral">
-              <div className="tile-label">Match rate</div>
-              <div className="tile-count"><FitText>{pct(kpis.match_rate)}</FitText></div>
-              <div className="tile-amount">of recognised statement credits{runSet ? ' in the selected runs' : ''}</div>
-              <div className="tile-delta">{scopeLabel}</div>
-            </div>
-            <div className="tile tone-bank">
-              <div className="tile-label">Overdue &gt; 30d</div>
-              <div className="tile-count"><FitText>{inr(kpis.overdue.value)}</FitText></div>
-              <div className="tile-amount">{kpis.overdue.count.toLocaleString('en-IN')} bills</div>
-              <div className="tile-delta">{scopeLabel}</div>
-            </div>
+          <div className="ui-grid-75">
+            {/* ---- the position ---- */}
+            <Card title="Receivables position" className="ar-position">
+              <div className="ar-position-body">
+                <div className="ar-figures">
+                  <button type="button" className="ar-figure"
+                          onClick={() => setStatusFilter(['AWAITING', 'OVERDUE'])}
+                          title={`${inr(figs.open.value)} — show the outstanding bills`}>
+                    <span className="ui-eyebrow">Outstanding</span>
+                    <span className="ui-big">{inrCompact(figs.open.value)}</span>
+                    <span className="ar-figure-sub">
+                      {n(figs.open.count)} {plural(figs.open.count, 'bill', 'bills')} awaiting credit
+                    </span>
+                  </button>
+                  <button type="button" className="ar-figure is-bad" onClick={() => showStatus('OVERDUE')}
+                          title={`${inr(figs.overdue.value)} — show the overdue bills`}>
+                    <span className="ui-eyebrow">Overdue</span>
+                    <span className="ui-big">{inrCompact(figs.overdue.value)}</span>
+                    <span className="ar-figure-sub">
+                      {n(figs.overdue.count)} {plural(figs.overdue.count, 'bill', 'bills')} past the due window
+                    </span>
+                  </button>
+                  <button type="button" className="ar-figure" onClick={() => showStatus('SETTLED')}
+                          title={`${inr(figs.received.value)} — show the settled bills`}>
+                    <span className="ui-eyebrow">Received</span>
+                    <span className="ui-big">{inrCompact(figs.received.value)}</span>
+                    <span className="ar-figure-sub">
+                      {n(figs.received.count)} {plural(figs.received.count, 'credit', 'credits')} settled
+                      · {inrCompact(figs.received.mtd)} this month
+                    </span>
+                  </button>
+                </div>
+                <div className="ar-partition">
+                  <span className="ui-eyebrow">Bills by status</span>
+                  <PartitionBar unit={['bill', 'bills']} showCount parts={[
+                    { key: 'SETTLED', tone: 'settled', label: 'Settled', count: settledCount,
+                      onOpen: () => showStatus('SETTLED') },
+                    { key: 'IN_REVIEW', tone: 'review', label: 'In review', count: reviewCount,
+                      onOpen: () => showStatus('IN_REVIEW') },
+                    { key: 'AWAITING', tone: 'awaiting', label: 'Awaiting', count: awaitingCount,
+                      onOpen: () => showStatus('AWAITING') },
+                    { key: 'OVERDUE', tone: 'open', label: 'Overdue', count: overdueCount,
+                      onOpen: () => showStatus('OVERDUE') },
+                  ]} />
+                </div>
+              </div>
+            </Card>
+
+            {/* ---- how old the rest is ---- */}
+            <Card title="Aging" sub="Outstanding bills, by days since advice" ruled>
+              {figs.open.count === 0 ? (
+                <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />} title="Nothing outstanding">
+                  <span>Every bill in this scope has a credit against it.</span>
+                </EmptyState>
+              ) : (
+                <ul className="ar-aging">
+                  {figs.aging.filter((b) => b.count > 0 || b.key !== 'undated').map((b) => {
+                    const on = ageFilter.includes(b.key)
+                    const tone = BUCKETS.find((x) => x.key === b.key)?.tone ?? 'neutral'
+                    return (
+                      <li key={b.key}>
+                        <button type="button" className={`ar-aging-row${on ? ' is-on' : ''}`}
+                                disabled={b.count === 0} onClick={() => showAge(b.key)}
+                                title={`${inr(b.value)} · ${n(b.count)} ${plural(b.count, 'bill', 'bills')}`}>
+                          <span className="ar-aging-label">{bucketLabel(b.key)}</span>
+                          <span className="ar-aging-track">
+                            <span className={`ar-aging-fill seg-${tone}`}
+                                  style={{ width: `${(b.value / agingMax) * 100}%` }} />
+                          </span>
+                          <span className="ar-aging-value">{inrCompact(b.value)}</span>
+                          <span className="ar-aging-count">{n(b.count)}</span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </Card>
           </div>
 
-          <div className="ar-grid">
-            <div className="cc-panel">
-              <div className="cc-panel-head">
-                <h3 className="ledger-h">
-                  Bills ↔ payments
-                  {scoped && <span className="chip-note"> {runNote}</span>}
-                </h3>
-                <FilterChips chips={statusChips} />
+          {figs.overdue.count > 0 && statusFilter.length === 0 && ageFilter.length === 0 && (
+            <Notice tone="warn" action={<TextLink onClick={() => showStatus('OVERDUE')}>Show overdue</TextLink>}>
+              {n(figs.overdue.count)} {plural(figs.overdue.count, 'bill is', 'bills are')} overdue
+              — {inrCompact(figs.overdue.value)} advised but not yet credited.
+            </Notice>
+          )}
+
+          {/* ---- the working set ---- */}
+          <section className="ui-card">
+            <div className="ui-tabbar">
+              <div className="ui-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected={statusFilter.length === 0}
+                        className={`ui-tab${statusFilter.length === 0 ? ' is-on' : ''}`}
+                        onClick={() => showStatus(null)}>
+                  All bills <span className="ui-tab-count">{n(inScope.length)}</span>
+                </button>
+                {STATUS_ORDER.map((s) => {
+                  const on = statusFilter.length === 1 && statusFilter[0] === s
+                  return (
+                    <button key={s} type="button" role="tab" aria-selected={on}
+                            className={`ui-tab${on ? ' is-on' : ''}`} onClick={() => showStatus(s)}>
+                      {s === 'OVERDUE' && (statusCounts[s] ?? 0) > 0
+                        && <AlertTriangle size={13} strokeWidth={2} className="ar-tab-warn" />}
+                      {STATUS_LABEL[s]} <span className="ui-tab-count">{n(statusCounts[s] ?? 0)}</span>
+                    </button>
+                  )
+                })}
               </div>
-              {rows.length === 0 ? (
-                <p className="frame-note">
-                  nothing with this status{scoped ? ' in this scope' : ''} —{' '}
-                  <button className="link-btn" onClick={() => setStatusFilter([])}>show all</button>
-                </p>
-              ) : (
-                <div className="ledger-wrap ar-table-wrap">
-                  <table className="ledger">
-                    <thead>
-                      <tr>
-                        <th>Bill no.</th><th>Zone</th><th>Due date</th>
-                        <th style={{ textAlign: 'right' }}>Net payable</th>
-                        <th>Pay ref</th>
-                        <th style={{ textAlign: 'right' }}>Paid amt</th>
-                        <th>Value date</th>
-                        <th style={{ textAlign: 'right' }}>Variance</th>
-                        <th>Match</th><th>Run</th>
-                        <th>
-                          Status
-                          <ColumnFilter label="Status" value={statusFilter} onApply={setStatusFilter}
-                                        format={(v) => STATUS_LABEL[v as ArStatus] ?? v}
-                                        options={buildOptions(inScope, (r) => r.status)} />
-                        </th>
-                        <th>Age</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((r, i) => (
-                        <tr key={r.match_ledger_id ?? r.exception_id ?? i}
-                            className={r.match_ledger_id ? 'ar-row-link' : ''}
-                            title={r.match_ledger_id ? 'open in Analyst queue' : undefined}
-                            onClick={() => rowClick(r)}>
-                          <td className="mono-cell">{r.bill_number ?? '—'}</td>
-                          <td>{r.zone ?? '—'}</td>
-                          <td className="date">{r.due_date ?? '—'}</td>
-                          <td className="num">{r.net_payable_amount !== null ? inr(r.net_payable_amount) : '—'}</td>
-                          <td className="mono-cell">{r.pay?.bank_ref ?? '—'}</td>
-                          <td className="num">{r.pay?.amount != null ? inr(r.pay.amount) : '—'}</td>
-                          <td className="date">{r.pay?.value_date ?? '—'}</td>
-                          <td className="num">
-                            {r.variance === null ? '—'
-                              : r.variance === 0 ? <span className="empty-cell">₹0</span>
-                              : <span className="ar-variance">{inr(r.variance)}</span>}
-                          </td>
-                          <td>{r.match_seq !== null ? `M-${r.match_seq}` : '—'}</td>
-                          <td className="run-cell" title={r.run_id ?? undefined}>
-                            {runLabelFor(runs, r.run_id)}
-                          </td>
-                          <td><span className={`stamp stamp-ar-${r.status}`}>
-                            {STATUS_LABEL[r.status]}</span></td>
-                          <td>
-                            {r.age_days !== null && r.status !== 'SETTLED' && r.status !== 'IN_REVIEW'
-                              ? <span className={r.status === 'OVERDUE' ? 'ar-age-hot' : ''}>{r.age_days}d</span>
-                              : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+              {rows.length !== inScope.length && (
+                <span className="ui-tabbar-note">
+                  {n(rows.length)} of {n(inScope.length)} bills
+                  <TextLink onClick={clearAll}>Show all</TextLink>
+                </span>
               )}
             </div>
+            {anyChip && <div className="ui-filterbar"><FilterChips chips={chips} /></div>}
 
-            <div className="ar-side">
-              <div className="cc-panel">
-                <div className="cc-panel-head">
-                  <h3 className="ledger-h">Aging analysis</h3>
-                </div>
-                {kpis.aging.filter((b) => b.count > 0 || b.bucket !== 'undated').map((b) => (
-                  <div key={b.bucket} className="cc-meter-row">
-                    <span className="cc-meter-label">{b.bucket === 'undated' ? 'no due date' : `${b.bucket} days`}</span>
-                    <div className="cc-meter-track">
-                      <div className={`cc-meter-fill ${BUCKET_TONE[b.bucket]}`}
-                           style={{ width: `${(b.value / agingMax) * 100}%` }} />
-                    </div>
-                    <span className="cc-meter-count">{b.count.toLocaleString('en-IN')}</span>
-                  </div>
-                ))}
-                <p className="chip-note ar-aging-note">
-                  bars = ₹ value per bucket · counts at right · age runs from the
-                  advice / payment-order date
-                </p>
+            {rows.length === 0 ? (
+              <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />} title="No bills here">
+                <span>Nothing with this status{scoped ? ' in this scope' : ''}.</span>
+                <TextLink onClick={clearAll}>Show all bills</TextLink>
+              </EmptyState>
+            ) : (
+              <div className="ledger-wrap ar-table-wrap">
+                <table className="ledger ar-table">
+                  <thead>
+                    <tr>
+                      <th>Bill</th>
+                      <th>
+                        Status
+                        <ColumnFilter label="Status" value={statusFilter} onApply={setStatusFilter}
+                                      format={(v) => STATUS_LABEL[v as ArStatus] ?? v}
+                                      options={buildOptions(inScope, (r) => r.status)} />
+                      </th>
+                      <th>Zone</th>
+                      <th>Due</th>
+                      <th className="num">Age</th>
+                      <th className="num">Net payable</th>
+                      <th>Paid by</th>
+                      <th className="num">Paid</th>
+                      <th className="num">Variance</th>
+                      <th>Match</th>
+                      <th>Run</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drawn.shown.map((r, i) => (
+                      <tr key={r.match_ledger_id ?? r.exception_id ?? i}
+                          className={r.match_ledger_id ? 'ar-row-link' : ''}
+                          title={r.match_ledger_id ? 'Open this match in the Analyst queue' : undefined}
+                          onClick={() => { if (r.match_ledger_id) onOpenInQueue(r.match_ledger_id) }}>
+                        <td className="mono">{r.bill_number ?? '—'}</td>
+                        <td><span className={`stamp stamp-ar-${r.status}`}>{STATUS_LABEL[r.status]}</span></td>
+                        <td>{r.zone ?? '—'}</td>
+                        <td className="nowrap" title={r.due_date ?? undefined}>{fmtDay(r.due_date)}</td>
+                        <td className="num">
+                          {r.age_days !== null && isOpen(r)
+                            ? <span className={`ui-age${r.status === 'OVERDUE' ? ' is-late' : ''}`}>{r.age_days}d</span>
+                            : '—'}
+                        </td>
+                        <td className="num strong">{r.net_payable_amount !== null ? inr(r.net_payable_amount) : '—'}</td>
+                        <td>
+                          {r.pay ? (
+                            <div className="party-cell">
+                              <span className="party-ref">{r.pay.bank_ref ?? '—'}</span>
+                              <span className="party-meta">{fmtDay(r.pay.value_date)}</span>
+                            </div>
+                          ) : <span className="muted">—</span>}
+                        </td>
+                        <td className="num">{r.pay?.amount != null ? inr(r.pay.amount) : '—'}</td>
+                        <td className="num">
+                          {r.variance === null || !r.pay ? '—'
+                            : r.variance === 0 ? <span className="empty-cell">₹0</span>
+                            : <span className="ar-variance">{inr(r.variance)}</span>}
+                        </td>
+                        <td className="mono">{r.match_seq !== null ? `M-${r.match_seq}` : '—'}</td>
+                        <td className="run-cell" title={r.run_id ?? undefined}>{runLabelFor(runs, r.run_id)}</td>
+                      </tr>
+                    ))}
+                    <MoreRows remaining={drawn.remaining} onMore={drawn.more}
+                              colSpan={11} noun="bills" />
+                  </tbody>
+                </table>
               </div>
-
-              <div className="cc-panel">
-                <div className="cc-panel-head">
-                  <h3 className="ledger-h">Status breakdown</h3>
-                </div>
-                {(['OVERDUE', 'AWAITING', 'IN_REVIEW', 'SETTLED'] as ArStatus[]).map((s) => (
-                  <div key={s} className="ar-status-row">
-                    <span className={`stamp stamp-ar-${s}`}>{STATUS_LABEL[s]}</span>
-                    <span className="ar-status-count">{(statusCounts[s] ?? 0).toLocaleString('en-IN')}</span>
-                  </div>
-                ))}
-              </div>
+            )}
+            <div className="ui-card-foot">
+              Settled and in-review rows come from the match ledger — click one to open it in the
+              Analyst queue. Outstanding rows are open bill-side exceptions, aged from the day the
+              money was advised.
             </div>
-          </div>
+          </section>
         </>
       )}
-
-      <p className="footer-note">
-        Every row is live AR state: settled and in-review rows come from the durable match
-        ledger (click one to decide it in the Analyst queue); outstanding rows are open
-        bill-side exceptions aged from the day the money was advised.
-      </p>
     </section>
   )
 }

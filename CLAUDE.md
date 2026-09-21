@@ -558,6 +558,30 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                question the form asked. @tanstack/react-table v8 (keep the ^8 pin)
                + lucide-react (nav/button icons — professional stroke set,
                tree-shaken per import; the only other runtime dep);
+               ONE VISUAL LANGUAGE (since 2026-09-21, feat/ui-unify): the
+               Command Center's redesign was promoted to a shared kit —
+               components/ui.tsx (Page / PageHeader / Card / Notice /
+               EmptyState / Stat + StatStrip / PartitionBar /
+               CustomerSelect / RefreshButton / TextLink / ToolSep / Dot)
+               over the `ui-*` classes in styles.css (the "UI kit"
+               sections; `cc-*` is left only for Command-Center-only
+               pieces: ring, received figure, attention rows, board).
+               Every page is PageHeader (title + a quiet context line;
+               tools right: filters, refresh, separator, actions, primary
+               last) then cards; a table's active filters show in a
+               `ui-filterbar` chip row and "N of M · Show all" sits in its
+               `ui-tabbar`; tables inside a card (`.ui-card .ledger`,
+               `.ui-card table.data`) take the Command Center's table look
+               automatically. Number/date display helpers (n, pct, plural,
+               fmtDay, ageDays, inrCompact) live in format.ts. The
+               pre-kit shells (intake, result-head, view-card, cc-panel,
+               tiles, slot rows) were deleted from styles.css — build new
+               UI from the kit, never from those names. Big tables draw
+               progressively (ui.tsx useProgressiveRows + MoreRows: 150
+               rows, then the next batch as the table's foot scrolls into
+               view; sort/filter/counts still see every row) — DataTable,
+               AR, both Analyst queue tabs and the Audit feed use it; a
+               deep link to row N calls reveal(N) first (Analyst focusId);
                IA: "Operate" group — Command Center (default landing;
                redesigned 2026-09-17 as a 7/5 board where EVERY FIGURE
                APPEARS ONCE — header (customer · data-through date; date
@@ -601,21 +625,27 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                customer in localStorage, sent as /overview query params;
                the "last run · last ingest" strap was removed on request)
                -> Ingest documents (IngestForm; page heading and nav label
-               both say "Ingest documents":
-               per-slot include toggles + File-format dropdowns that PUT
-               /sources; a slot shows either your upload or "no file selected"
-               — there is no default-document prefill, and only the files of
-               ticked slots are posted; an "Additional lineage documents" section for the
-               customer's extra lineage_* slots — add ("+ add lineage
-               source"), remove (null adapter), upload under the slot key —
-               "+ new customer" and "⧉ All ingestions" both top
-               right — IngestionsView renders inline) -> Reconcile (nav
-               label stays "Reconcile"; ReconcileForm's page heading is
-               "Initiate Reconciliation", renamed from "Reconcile from
-               gold", and its explanatory hint was removed on request:
-               statement picker from gold/files + mode;
-               MatchingConfigPanel opens inline from the "⚙ Matching config"
-               button top right — edits the customer's full rule set incl.
+               both say "Ingest documents": numbered cards — 1 Bank
+               statement, 2 ERP documents, 3 Additional lineage documents
+               — with per-slot include toggles, the File-format / ERP
+               dropdowns (PUT /sources) in each card head, and dashed drop
+               zones listing attached files; a slot shows your upload or
+               nothing — there is no default-document prefill, and only
+               the files of ticked slots are posted. A sticky "Ready to
+               ingest" panel lists what will be posted per slot beside the
+               primary "Ingest N files" button; the result is its own card
+               with a "Reconcile now" next step. Extra lineage_* slots: add
+               ("Add lineage source"), remove (null adapter), upload under
+               the slot key. "New customer" and "All ingestions" are head
+               buttons — IngestionsView renders as a card) -> Reconcile
+               (nav label stays "Reconcile"; ReconcileForm's page heading
+               is "Initiate Reconciliation": a Statements card (select
+               all, name, credit period, credits) and a Mode card
+               (Incremental marked recommended) beside a sticky Run
+               summary with the primary button;
+               MatchingConfigPanel opens as a full-width card from the
+               "Matching config" head button (sticky save bar naming
+               unsaved changes) — edits the customer's full rule set incl.
                field_map, the new scalar knobs and the "Terminology &
                guidance" copy editors (edits accumulate in copy_overrides;
                the server stores only diffs from defaults) via GET/PUT
@@ -631,8 +661,16 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                no runs at all the empty state guides to Ingest/Reconcile
                (on a Data page the head with its scope switch still renders
                above that card, so "Current" is one click away).
-               Every page heading is `<h2 className="page-title">`
-               (--fs-h1 token); panel headings stay at --fs-h2.
+               Every page heading is PageHeader's `<h2 className="page-title">`
+               (--fs-h1 token); card headings are --fs-h4. The run
+               Summary opens on clickable figures (bank credits, matched
+               + share of matchable, credits with no bill, bills with no
+               credit, matches to review — each opens its run table), then
+               the Breakdown table beside Parse checks / Ledger changes /
+               Data used cards. The Data pages' scope switch is a `ui-seg`
+               in the head; DataTable has a tool bar (page filters, search,
+               row count, Columns menu), a sticky header and real empty
+               states that clear whatever emptied them.
                The run-scoped Exception queue KEEPS its MATCH_REVIEW rows
                and decides them in place: components/MatchDecision.tsx
                (accept incl. pick-list / reject / unlock / reopen +
@@ -651,7 +689,14 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                variance, note optional with a WARNING — not a block — when
                |variance| > amount_tolerance) -> POST /api/matches/manual.
                "Workspace": Analyst queue (LedgerView renamed in UI
-               ONLY — /api/ledger and DB names unchanged; hosts the same
+               ONLY — /api/ledger and DB names unchanged; opens on four
+               quick views — To review / Open exceptions (needs action) /
+               Awaiting data / Settled — each an ordinary LedgerIntent
+               applied through the same applyIntent as a Command Center
+               arrival, so it lands as chips; the figures count within an
+               arrival's date window, so they equal the Command Center's; then ONE card with Matches |
+               Exceptions tabs (intent.section picks the tab; with none,
+               the tab with work — matches to review first); hosts the same
                MatchDecision + ManualMatchPicker, shows MANUAL matches as
                "Matched by user" with their note, exceptions carry a
                "Resolved by" column — the Exceptions table uses the Command
@@ -676,10 +721,16 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                db/overview.py ar_view: the bill-centric AR working set
                (settled / in-review from the match ledger, outstanding =
                open BILL_ONLY aged from payment_advice/order/submission
-               date, OVERDUE > 30d), KPIs + aging buckets; every row carries
+               date, OVERDUE > 30d): a Receivables position card
+               (Outstanding / Overdue / Received — each opens its bills —
+               and one bills-by-status partition), an Aging card whose
+               buckets filter the table (outstanding rows only), and the
+               bills table with status tabs; NO match rate here since
+               2026-09-21 — it lives on the Command Center only, where its
+               definition is; every row carries
                run_id (match's run / exception's first-seen run) so the same
-               RunFilter narrows the table + status breakdown AND (since
-               2026-09-07, on request) the four KPI tiles + aging buckets,
+               RunFilter narrows the table AND (since 2026-09-07, on
+               request) every figure and the aging buckets,
                recomputed client-side over the in-scope rows; the same
                DateFilter (default All) applies to the aging anchor date
                of outstanding rows and the credit value_date of settled
@@ -688,7 +739,9 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                not an IREPS concept) + Audit trail
                (AuditTrailView over GET /api/audit — the real audit_log
                stream with client-side category/actor/window filters and a
-               by-record timeline). "Platform": Architecture
+               by-record timeline; its stat strip's figures set those
+               filters, and events show a readable name — EVENT_NAME,
+               extend it with the taxonomy below — over the raw code). "Platform": Architecture
                (ArchitectureView — the real six-layer stack described in
                frontend/src/architecture.ts with live KPIs from /api/
                overview; keep its statements factually in sync with this

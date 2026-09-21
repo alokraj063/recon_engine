@@ -6,6 +6,7 @@ import type { Overview } from '../types'
 import { fetchOverview, fetchRuns } from '../api'
 import { ARCHITECTURE_LAYERS, type LayerKPI } from '../architecture'
 import type { View } from './Sidebar'
+import { Dot, PageHeader } from './ui'
 
 interface Props {
   customerId: string
@@ -57,17 +58,12 @@ export function ArchitectureView({ customerId, onNavigate }: Props) {
   }
 
   return (
-    <section className="intake">
-      <div className="ingest-head">
-        <div>
-          <h2 className="page-title">Architecture</h2>
-          <p className="strap-note">
-            the real stack — sources → medallion store → matching engine → ledger →
-            governance → interface · live figures for customer {customerId}
-          </p>
-        </div>
-      </div>
+    <section className="ui-page">
+      <PageHeader title="Architecture"
+                  context={<>Sources → medallion store → matching engine → ledger → governance →
+                    interface<Dot />live figures for {customerId}</>} />
 
+      <section className="ui-card arch-card">
       <div className="arch-pipe" role="tablist" tabIndex={0} onKeyDown={onKey}>
         {ARCHITECTURE_LAYERS.map((l, i) => {
           const Icon = LAYER_ICONS[l.id]
@@ -104,7 +100,9 @@ export function ArchitectureView({ customerId, onNavigate }: Props) {
         })}
       </div>
 
-      <div className="arch-detail" role="tabpanel" key={layer.id}>
+      </section>
+
+      <section className="ui-card arch-detail" role="tabpanel" key={layer.id}>
         <div className="arch-detail-head">
           <span className="arch-index">{layer.index}</span>
           <div className="arch-detail-main">
@@ -115,8 +113,8 @@ export function ArchitectureView({ customerId, onNavigate }: Props) {
             <div className="arch-links">
               <span className="arch-label">Operating screens</span>
               {layer.linksTo.map((l) => (
-                <button key={l.view} className="btn-open" onClick={() => onNavigate(l.view)}>
-                  {l.label} ↗
+                <button key={l.view} type="button" className="ui-btn is-sm" onClick={() => onNavigate(l.view)}>
+                  {l.label} <ArrowRight size={13} strokeWidth={2} />
                 </button>
               ))}
             </div>
@@ -165,7 +163,7 @@ export function ArchitectureView({ customerId, onNavigate }: Props) {
             </div>
           </div>
         </div>
-      </div>
+      </section>
     </section>
   )
 }
