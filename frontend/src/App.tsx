@@ -156,6 +156,8 @@ export default function App() {
   const [customerId, setCustomerIdState] = useState<string>(
     () => localStorage.getItem(CUSTOMER_KEY) ?? 'default',
   )
+  // the page heads' context line names the customer, not its key
+  const customerName = customers.find((c) => c.key === customerId)?.name ?? customerId
   // which scope a Data-group sidebar click opens (Current | As of run);
   // the ACTIVE scope is always derived from the view itself (scopeOf)
   const [dataScope, setDataScope] = useState<DataScope>(readScopePref)
@@ -580,6 +582,7 @@ export default function App() {
             intent={ledgerIntent}
             onIntentHandled={() => setLedgerIntent(null)}
             onGoToReconcile={() => setView('reconcile')}
+            customerName={customerName}
           />
         )}
 
