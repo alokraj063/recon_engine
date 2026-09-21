@@ -3222,3 +3222,25 @@ td.ui-table-empty {
 /* the progressive-rows sentinel at the foot of a big table */
 tr.ui-more-row td { padding: 14px 18px !important; text-align: center; background: hsl(220 16% 98.5%); }
 tr.ui-more-row:hover td { background: hsl(220 16% 98.5%) !important; }
+
+/* Command Center density (2026-09-21): the rate ring stacks above its
+   text so IREPS credits received gets the width it needs — its figure
+   and legend no longer wrap, the health card stays short, and the
+   attention rows are not stretched to fill a tall row. */
+.cc-health { grid-template-columns: minmax(200px, auto) minmax(0, 1fr); }
+.cc-rate {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+  padding: 18px 22px;
+}
+.cc-ring { width: 88px; height: 88px; }
+.cc-ring-label { font-size: 18px; }
+.cc-received { padding: 16px 20px; gap: 9px; }
+.cc-received-figure, .ui-big { white-space: nowrap; }
+.cc-att { padding-top: 8px; padding-bottom: 8px; }
+.ui-table th { padding: 8px 14px; }
+.ui-table td { padding: 9px 14px; }
+.ui-table th:first-child, .ui-table td:first-child { padding-left: 18px; }
+.ui-table th:last-child, .ui-table td:last-child { padding-right: 18px; }
