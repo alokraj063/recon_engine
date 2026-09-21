@@ -19,6 +19,7 @@
 !backend/scripts
 !backend/env_file.py
 !backend/logging_setup.py
+!backend/passwords.py
 
 # --- frontend: sources needed for `npm ci && npm run build`
 !frontend/package.json
