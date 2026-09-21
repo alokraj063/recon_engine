@@ -7,6 +7,18 @@ export function inr(v: number | null | undefined): string {
   return '₹' + INR.format(v)
 }
 
+/** Headline rupees in Indian units (₹525.19 Cr, ₹96.15 L, ₹48,200) —
+ *  for KPI figures where the exact inr() string would not fit; callers
+ *  put the exact value in a title so nothing is lost. */
+export function inrCompact(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '—'
+  const a = Math.abs(v)
+  const sign = v < 0 ? '−' : ''
+  if (a >= 1e7) return `${sign}₹${(a / 1e7).toFixed(2)} Cr`
+  if (a >= 1e5) return `${sign}₹${(a / 1e5).toFixed(2)} L`
+  return `${sign}₹${Math.round(a).toLocaleString('en-IN')}`
+}
+
 /** Backend timestamps are naive UTC (no offset in the ISO string);
  *  append Z so the browser doesn't parse them as local time. */
 export function parseUtc(iso: string): Date {

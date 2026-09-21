@@ -180,8 +180,10 @@ export async function fetchOperatingUnits(customerId: string): Promise<Operating
 }
 
 /** The customer's audit_log event stream, newest first. */
-export async function fetchAudit(customerId: string): Promise<AuditEventRow[]> {
-  return getJson(`/api/audit?customer_id=${encodeURIComponent(customerId)}`)
+export async function fetchAudit(customerId: string, limit?: number): Promise<AuditEventRow[]> {
+  const q = new URLSearchParams({ customer_id: customerId })
+  if (limit) q.set('limit', String(limit))
+  return getJson(`/api/audit?${q.toString()}`)
 }
 
 /** AR working set: settled / in-review / outstanding bills + aging. */
