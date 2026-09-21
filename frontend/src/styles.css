@@ -3158,3 +3158,61 @@ td.ui-table-empty {
 .ui-empty > span { max-width: 52ch; }
 .ui-empty svg.is-muted { color: var(--ink-faint); }
 .ui-stat .ui-eyebrow { display: inline-flex; align-items: center; gap: 5px; }
+.ui-card .ledger td.strong { font-weight: 600; color: var(--ink); }
+.ui-card .ledger td.num { font-family: var(--font-body); font-size: var(--fs-body); font-variant-numeric: tabular-nums; }
+.ui-card .ledger .muted { color: var(--ink-faint); }
+
+/* --- AR Reconciliation ------------------------------------------------ */
+.ar-position-body { display: flex; flex-direction: column; gap: 18px; padding: 4px 18px 20px; }
+.ar-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@container (max-width: 700px) { .ar-figures { grid-template-columns: minmax(0, 1fr); } }
+.ar-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.ar-figure .ui-big { font-size: 24px; }
+.ar-figure:hover { border-color: var(--green); background: hsl(175 70% 28% / 0.03); }
+.ar-figure:hover .ui-big { color: var(--green); }
+.ar-figure.is-bad .ui-big { color: var(--sienna); }
+.ar-figure:focus-visible { outline: 2px solid hsl(175 70% 34% / 0.6); outline-offset: 2px; }
+.ar-figure-sub { font-size: var(--fs-note); color: var(--ink-faint); }
+.ar-partition { display: flex; flex-direction: column; gap: 8px; }
+
+.ar-aging { margin: 0; padding: 6px 0; list-style: none; }
+.ar-aging-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 76px 36px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 18px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: pointer;
+}
+.ar-aging-row:hover:not(:disabled) { background: hsl(220 16% 97.5%); }
+.ar-aging-row.is-on { background: hsl(175 70% 28% / 0.06); box-shadow: inset 3px 0 0 var(--green); }
+.ar-aging-row:disabled { cursor: default; opacity: 0.55; }
+.ar-aging-track { height: 8px; border-radius: 4px; background: var(--paper-deep); overflow: hidden; }
+.ar-aging-fill { display: block; height: 100%; min-width: 2px; border-radius: 4px; }
+.ar-aging-value { text-align: right; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ar-aging-count { text-align: right; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.ar-tab-warn { color: var(--sienna); }
+.ar-table-wrap { max-height: 64vh; overflow-y: auto; }
+.ar-table thead th { position: sticky; top: 0; z-index: 1; }
