@@ -120,7 +120,7 @@ function buildEvents(row: Row): TlEvent[] {
     events.unshift({
       date: null,
       title: 'No receipt document',
-      detail: 'nothing found in the RNOTE / CRN exports — see whether the bill predates the export window',
+      detail: 'No RNOTE or CRN document found; the bill may predate the export window',
       kind: 'hollow',
     })
   }

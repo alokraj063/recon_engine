@@ -111,13 +111,13 @@ function ManualMatchAction({ row, ledger, customerId, onLedgerChanged }: {
     return (
       <div className="detail-section">
         <button className="btn-open" disabled title={live
-          ? 'already resolved in the ledger'
-          : 'snapshot run — no ledger row to match (run incremental to feed the queue)'}>
+          ? 'Already resolved'
+          : 'Not available for snapshot runs'}>
           {label}
         </button>
         {!live && (
           <span className="chip-note">
-            {' '}snapshot run — no durable exception to match (run incremental to feed the queue)
+            {' '}Not available for snapshot runs
           </span>
         )}
       </div>
@@ -165,15 +165,15 @@ function Detail({ row, onOpenInQueue, primaryRunId, ledger, busy, decide, custom
       <div className="detail-grid">
         {advice}
         <div className="detail-section">
-          Weak match — stands in the Matched tab until decided{' '}
+          Match pending review{' '}
           {typeof row.confidence === 'string' && <ConfidenceBadge label={row.confidence} />}
           {!hasLedgerId && (
             <span className="chip-note">
-              {' '}snapshot run — no durable match to decide (run incremental to feed the queue)
+              {' '}Decisions are not available for snapshot runs
             </span>
           )}
           {hasLedgerId && !live && (
-            <span className="chip-note">{' '}loading ledger state…</span>
+            <span className="chip-note">{' '}Loading…</span>
           )}
           {live && (
             <span className="live-decision">
@@ -203,7 +203,7 @@ function Detail({ row, onOpenInQueue, primaryRunId, ledger, busy, decide, custom
     return (
       <div className="detail-grid">
         {advice}
-        <div className="detail-section">Bank credit — no bill behind it</div>
+        <div className="detail-section">Unmatched credit</div>
         {BANK_DETAIL.map(([k, l]) => (
           <DetailField key={k} row={row} k={k} label={l} />
         ))}
@@ -215,7 +215,7 @@ function Detail({ row, onOpenInQueue, primaryRunId, ledger, busy, decide, custom
   return (
     <>
       {advice && <div className="detail-grid">{advice}</div>}
-      <BillTrailDetail row={row} title="Bill — advised but no credit landed" />
+      <BillTrailDetail row={row} title="Unmatched bill" />
       <div className="detail-grid">
         <ManualMatchAction row={row} ledger={ledger} customerId={customerId}
                            onLedgerChanged={onLedgerChanged} />

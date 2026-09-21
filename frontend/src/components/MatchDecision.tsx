@@ -69,7 +69,7 @@ export function MatchDecision({ match, busy, decide }: {
     return (
       <span className="decide">
         <button className="btn-open"
-                title="Reopen this decision — the match returns to OPEN for review"
+                title="Reopen for review"
                 disabled={busy}
                 onClick={() => decide(match.id, 'unlock')}>
           Unlock
@@ -80,7 +80,7 @@ export function MatchDecision({ match, busy, decide }: {
   return (
     <span className="decide">
       <button className="btn-reopen"
-              title="Undo this rejection — the match returns to OPEN and re-claims its credit and bills"
+              title="Undo rejection and return the match to review"
               disabled={busy}
               onClick={() => decide(match.id, 'reopen')}>
         Reopen
@@ -100,7 +100,7 @@ export function PickList({ match, busy, decide }: {
   return (
     <>
       <div className="detail-section">
-        Pick the settling bill — accepting locks the credit to YOUR choice
+        Select the bill to accept
       </div>
       <div className="pick-list">
         {match.bills.map((b: LedgerBillInfo) => (

@@ -68,9 +68,9 @@ const EVENT_NAME: Record<string, string> = {
   'bronze.file_registered': 'File registered',
   'bronze.file_deduped': 'Duplicate file recognised',
   'silver.rows_persisted': 'Parsed rows stored',
-  'gold.rows_persisted': 'Gold rows stored',
-  'gold.ingest_completed': 'Gold ingest completed',
-  'gold.ingest_conflict': 'Locked bill protected from change',
+  'gold.rows_persisted': 'Records stored',
+  'gold.ingest_completed': 'Ingestion completed',
+  'gold.ingest_conflict': 'Update to locked bill blocked',
   'gold.bills_merged': 'Duplicate bills merged',
   'run.started': 'Run started',
   'run.succeeded': 'Run succeeded',
@@ -212,7 +212,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
   return (
     <section className="ui-page">
       <PageHeader title="Audit trail"
-                  context={<>Every recorded event for {customerName} — who did what, and when</>}>
+                  context={customerName}>
         <CustomerSelect customers={customers} value={customerId} onChange={onCustomerChange} />
         <RefreshButton onClick={load} label="Refresh the audit trail" />
       </PageHeader>
@@ -227,15 +227,15 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
       {events && (
         <>
           <StatStrip>
-            <Stat label="Events" value={n(kpis.total)} sub="recorded for this customer"
+            <Stat label="Events" value={n(kpis.total)} 
                   onOpen={clearAll} title="Show every event" />
-            <Stat label="Decisions" value={n(kpis.decisions)} sub="accept / reject / unlock"
-                  onOpen={() => only('decision')} title="Show the analysts' match decisions" />
-            <Stat label="Runs" value={n(kpis.runs)} sub="reconciliations executed"
+            <Stat label="Decisions" value={n(kpis.decisions)} sub="Match decisions"
+                  onOpen={() => only('decision')} title="Show match decisions" />
+            <Stat label="Runs" value={n(kpis.runs)} 
                   onOpen={() => only('run')} title="Show run events" />
-            <Stat label="Ingest events" value={n(kpis.ingests)} sub="bronze → silver → gold"
+            <Stat label="Ingest events" value={n(kpis.ingests)} 
                   onOpen={() => only('ingest')} title="Show ingestion events" />
-            <Stat label="Last 24 hours" value={n(kpis.last24)} sub="recent activity"
+            <Stat label="Last 24 hours" value={n(kpis.last24)} 
                   onOpen={() => { clearAll(); setWin('24h') }} title="Show the last 24 hours" />
           </StatStrip>
 
@@ -262,7 +262,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
             <div className="dt-tools audit-tools">
               <label className="dt-search">
                 <Search size={14} strokeWidth={2} aria-hidden />
-                <input type="search" placeholder="Search event, record, run, details…"
+                <input type="search" placeholder="Search events"
                        aria-label="Search events" value={query} onChange={(e) => setQuery(e.target.value)} />
               </label>
               <span className="ui-seg" role="group" aria-label="Actor">
@@ -360,7 +360,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                                 </div>
                               ))}
                               {!e.details && !e.context && (
-                                <p className="frame-note">No detail payload.</p>
+                                <p className="frame-note">No details.</p>
                               )}
                               {onOpenMatch && e.entity_type === 'match_ledger' && e.entity_id && (
                                 <div>

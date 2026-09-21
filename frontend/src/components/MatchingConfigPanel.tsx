@@ -191,12 +191,6 @@ export function MatchingConfigPanel({ customerId }: Props) {
 
   return (
     <div className="config-panel">
-      <p className="hint">
-        Which gold-layer fields drive reconciliation for <strong>{config.name}</strong>.
-        Amount is a filter — pairs are only considered when amounts already agree — while
-        the date and exact signals score and break ties. Changes apply to every future run
-        for this customer.
-      </p>
 
       <div className="config-section">
         <h3 className="ledger-h">Amount join</h3>
@@ -254,20 +248,18 @@ export function MatchingConfigPanel({ customerId }: Props) {
           </label>
         </div>
         <p className="explain">
-          A match on the primary date carries more weight than the fallback. Set fallback to
-          “— none —” to disable the second date entirely.
+          The primary date carries more weight. Set the fallback to “— none —” to disable it.
         </p>
       </div>
 
       <div className="config-section">
         <h3 className="ledger-h">Exact signals</h3>
         <p className="explain">
-          Field pairs compared for exact (case/space-insensitive) equality — each agreeing
-          pair adds its weight, and a HIGH-confidence match needs all of them to agree. With
-          no signals, confidence tops out below HIGH.
+          Field pairs compared for exact equality (case- and space-insensitive). Each agreeing
+          pair adds its weight; HIGH confidence requires all pairs to agree.
         </p>
         {fm.exact_signals.length === 0 && (
-          <p className="chip-note">⚠ no exact signals — matches rely on amount + date only.</p>
+          <p className="chip-note">No exact signals configured. Matching uses amount and date only.</p>
         )}
         {fm.exact_signals.map((sig, i) => (
           <div className="config-grid signal-row" key={i}>
@@ -323,9 +315,8 @@ export function MatchingConfigPanel({ customerId }: Props) {
                       onChange={(v) => patchMap({ fallback_due_statuses: v })} />
         </div>
         <p className="explain">
-          A bill with no primary date is still expected in a statement when its status is in
-          the fallback-due list and its fallback date falls inside the lookback window —
-          the payment order can go out before the export refreshes the status.
+          Bills without a primary date are expected when their status is fallback-due and
+          the fallback date is within the lookback window.
         </p>
       </div>
 
@@ -369,17 +360,16 @@ export function MatchingConfigPanel({ customerId }: Props) {
           </label>
         </div>
         <p className="explain">
-          Batch slack is the amount gap a batched (one-credit-covers-several-bills)
-          match may leave unexplained; amount decimals is the rounding precision of
-          the amount join.
+          Batch amount slack: unexplained amount allowed in a batched match. Amount decimals:
+          rounding precision of the amount comparison.
         </p>
       </div>
 
       <div className="config-section">
         <h3 className="ledger-h">Terminology &amp; guidance</h3>
         <p className="explain">
-          The advisory text and display names stamped into exception rows, editable
-          per customer — the underlying codes never change. Edits apply to future runs.
+          Display names and guidance text shown on exception rows. Codes are unchanged; edits
+          apply to future runs.
         </p>
         {COPY_SECTIONS.map(({ section, title, note }) => {
           const codes = Object.keys(rules.copy_effective?.[section] ?? {})

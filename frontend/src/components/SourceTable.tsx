@@ -100,10 +100,10 @@ interface Props {
 
 /** Why a run's frozen frame can be empty, per frame. */
 const EMPTY_NOTES: Record<FrameName, (scope: string) => string> = {
-  bank: (s) => `No bank credits were reconciled ${s}.`,
-  bills: (s) => `No bills were reconciled ${s}.`,
-  bills_enriched: (s) => `No bills were reconciled ${s}, so there is nothing to enrich with lineage.`,
-  recoveries: (s) => `No recovery lines ${s} — none of the bills carried deductions.`,
+  bank: (s) => `No bank transactions ${s}.`,
+  bills: (s) => `No bills ${s}.`,
+  bills_enriched: (s) => `No bills ${s}.`,
+  recoveries: (s) => `No recovery lines ${s}.`,
 }
 
 // fetched frames, kept across tab switches (keyed by run so a new run
@@ -178,7 +178,7 @@ export function SourceTable({ runs, name }: Props) {
       columns={columns}
       numericIds={AMOUNT_COLS}
       initialHidden={hidden}
-      emptyNote={<EmptyState title="Nothing in this table"><span>{EMPTY_NOTES[name](scope)}</span></EmptyState>}
+      emptyNote={<EmptyState title={EMPTY_NOTES[name](scope)} />}
       renderDetail={
         name === 'bills_enriched'
           ? (row) => <BillTrailDetail row={row} title={`Bill ${row.bill_number ?? ''} — lineage`} />

@@ -15,7 +15,7 @@ import {
   type DateFilterValue,
 } from './DateFilter'
 import {
-  Card, Dot, EmptyState, MoreRows, Notice, PageHeader, PartitionBar, RefreshButton, TextLink,
+  Card, EmptyState, MoreRows, Notice, PageHeader, PartitionBar, RefreshButton, TextLink,
   useProgressiveRows,
 } from './ui'
 
@@ -186,7 +186,7 @@ export function ARReconciliationView({
   return (
     <section className="ui-page">
       <PageHeader title="AR Reconciliation"
-                  context={<>What is owed, what came in, and how old the rest is<Dot />{scopeLabel}</>}>
+                  context={scopeLabel}>
         <DateFilter value={dateFilter} onChange={setDateFilter} units={units} />
         {runs.length > 0 && (
           <RunFilter runs={runs} value={runFilter} onChange={setRunFilter} note={runNote} />
@@ -225,7 +225,7 @@ export function ARReconciliationView({
                     <span className="ui-eyebrow">Outstanding</span>
                     <span className="ui-big">{inrCompact(figs.open.value)}</span>
                     <span className="ar-figure-sub">
-                      {n(figs.open.count)} {plural(figs.open.count, 'bill', 'bills')} awaiting credit
+                      {n(figs.open.count)} {plural(figs.open.count, 'bill', 'bills')}
                     </span>
                   </button>
                   <button type="button" className="ar-figure is-bad" onClick={() => showStatus('OVERDUE')}
@@ -233,7 +233,7 @@ export function ARReconciliationView({
                     <span className="ui-eyebrow">Overdue</span>
                     <span className="ui-big">{inrCompact(figs.overdue.value)}</span>
                     <span className="ar-figure-sub">
-                      {n(figs.overdue.count)} {plural(figs.overdue.count, 'bill', 'bills')} past the due window
+                      {n(figs.overdue.count)} {plural(figs.overdue.count, 'bill', 'bills')}
                     </span>
                   </button>
                   <button type="button" className="ar-figure" onClick={() => showStatus('SETTLED')}
@@ -241,8 +241,7 @@ export function ARReconciliationView({
                     <span className="ui-eyebrow">Received</span>
                     <span className="ui-big">{inrCompact(figs.received.value)}</span>
                     <span className="ar-figure-sub">
-                      {n(figs.received.count)} {plural(figs.received.count, 'credit', 'credits')} settled
-                      · {inrCompact(figs.received.mtd)} this month
+                      {n(figs.received.count)} {plural(figs.received.count, 'credit', 'credits')} · {inrCompact(figs.received.mtd)} MTD
                     </span>
                   </button>
                 </div>
@@ -263,10 +262,9 @@ export function ARReconciliationView({
             </Card>
 
             {/* ---- how old the rest is ---- */}
-            <Card title="Aging" sub="Outstanding bills, by days since advice" ruled>
+            <Card title="Aging" sub="Outstanding bills by days since advice" ruled>
               {figs.open.count === 0 ? (
-                <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />} title="Nothing outstanding">
-                  <span>Every bill in this scope has a credit against it.</span>
+                <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />} title="No outstanding bills">
                 </EmptyState>
               ) : (
                 <ul className="ar-aging">
@@ -293,13 +291,6 @@ export function ARReconciliationView({
               )}
             </Card>
           </div>
-
-          {figs.overdue.count > 0 && statusFilter.length === 0 && ageFilter.length === 0 && (
-            <Notice tone="warn" action={<TextLink onClick={() => showStatus('OVERDUE')}>Show overdue</TextLink>}>
-              {n(figs.overdue.count)} {plural(figs.overdue.count, 'bill is', 'bills are')} overdue
-              — {inrCompact(figs.overdue.value)} advised but not yet credited.
-            </Notice>
-          )}
 
           {/* ---- the working set ---- */}
           <section className="ui-card">
@@ -332,9 +323,8 @@ export function ARReconciliationView({
             {anyChip && <div className="ui-filterbar"><FilterChips chips={chips} /></div>}
 
             {rows.length === 0 ? (
-              <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />} title="No bills here">
-                <span>Nothing with this status{scoped ? ' in this scope' : ''}.</span>
-                <TextLink onClick={clearAll}>Show all bills</TextLink>
+              <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />} title="No bills match the current filters">
+                <TextLink onClick={clearAll}>Clear filters</TextLink>
               </EmptyState>
             ) : (
               <div className="ledger-wrap ar-table-wrap">
@@ -363,7 +353,7 @@ export function ARReconciliationView({
                     {drawn.shown.map((r, i) => (
                       <tr key={r.match_ledger_id ?? r.exception_id ?? i}
                           className={r.match_ledger_id ? 'ar-row-link' : ''}
-                          title={r.match_ledger_id ? 'Open this match in the Analyst queue' : undefined}
+                          title={r.match_ledger_id ? 'Open in Analyst queue' : undefined}
                           onClick={() => { if (r.match_ledger_id) onOpenInQueue(r.match_ledger_id) }}>
                         <td className="mono">{r.bill_number ?? '—'}</td>
                         <td><span className={`stamp stamp-ar-${r.status}`}>{STATUS_LABEL[r.status]}</span></td>
@@ -399,11 +389,6 @@ export function ARReconciliationView({
                 </table>
               </div>
             )}
-            <div className="ui-card-foot">
-              Settled and in-review rows come from the match ledger — click one to open it in the
-              Analyst queue. Outstanding rows are open bill-side exceptions, aged from the day the
-              money was advised.
-            </div>
           </section>
         </>
       )}

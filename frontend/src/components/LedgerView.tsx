@@ -157,10 +157,10 @@ function resolvedBy(e: LedgerException, runs: RunListItem[]): string {
   if (e.status !== 'RESOLVED') return '—'
   const m = e.resolved_by_match_seq != null ? `M-${e.resolved_by_match_seq}` : null
   switch (e.resolved_by) {
-    case 'USER_ACCEPT': return `accepted${m ? ` ${m}` : ''}`
-    case 'USER_MANUAL': return `matched by user${m ? ` (${m})` : ''}`
-    case 'USER_REOPEN': return `reopened${m ? ` ${m}` : ''}`
-    default: return e.resolved_by_run_id ? `run ${runLabelFor(runs, e.resolved_by_run_id)}` : '—'
+    case 'USER_ACCEPT': return `Accepted${m ? ` ${m}` : ''}`
+    case 'USER_MANUAL': return `Manual match${m ? ` ${m}` : ''}`
+    case 'USER_REOPEN': return `Reopened${m ? ` ${m}` : ''}`
+    default: return e.resolved_by_run_id ? `Run ${runLabelFor(runs, e.resolved_by_run_id)}` : '—'
   }
 }
 
@@ -464,15 +464,14 @@ export function LedgerView({
   return (
     <section className="ui-page">
       <PageHeader title="Analyst queue"
-                  context={<>Decide weak matches and work the exceptions
-                    {customerName ? <> · {customerName}</> : null}</>}>
+                  context={customerName}>
         {runs.length > 0 && (
           <RunFilter runs={runs} value={runFilter} onChange={setRunFilter} note={runNote} />
         )}
         <RefreshButton onClick={load} label="Refresh the queue" />
         <ToolSep />
         <a className="ui-btn" href={ledgerWorkbookUrl(customerId)} download
-           title="Ledger as Excel — Matches (incl. manual), Manual_Matches, Exceptions">
+           title="Download the match and exception ledger (.xlsx)">
           <Download size={15} strokeWidth={1.75} /> Export ledger
         </a>
       </PageHeader>
@@ -494,28 +493,28 @@ export function LedgerView({
                   value={n(toReview.length)} tone={toReview.length ? 'warn' : 'ok'}
                   sub={toReview.length
                     ? `${plural(toReview.length, 'match', 'matches')} · ${inrCompact(sumTxn(toReview))}`
-                    : 'nothing waiting'}
+                    : 'None pending'}
                   onOpen={() => applyIntent(QV_REVIEW)}
-                  title="Weak matches waiting for accept or reject" />
+                  title="Matches pending a decision" />
             <Stat label={<><AlertTriangle size={12} strokeWidth={2} /> Open exceptions</>}
                   value={n(needsAction.length)} tone={needsAction.length ? 'bad' : 'ok'}
                   sub={needsAction.length
                     ? `${n(needCredits)} ${plural(needCredits, 'credit', 'credits')} · ${n(needBills)} ${plural(needBills, 'bill', 'bills')} · ${inrCompact(sumExc(needsAction))}`
-                    : 'all clear'}
+                    : 'None open'}
                   onOpen={() => applyIntent(QV_OPEN)}
-                  title="Unmatched credits and bills that need an analyst (other receipts and credits awaiting data left out)" />
+                  title="Unmatched credits and bills requiring review. Excludes other receipts and credits awaiting data." />
             <Stat label={<><Clock3 size={12} strokeWidth={2} /> Awaiting data</>}
                   value={n(awaiting.length)}
                   sub={awaiting.length
                     ? `${plural(awaiting.length, 'credit', 'credits')} · ${inrCompact(sumExc(awaiting))}`
-                    : 'none'}
+                    : 'None'}
                   onOpen={() => applyIntent(QV_AWAITING)}
-                  title="Credits that could not have matched yet — the bill is still in flight, or its export is not ingested" />
+                  title="Credits pending source status or bill data" />
             <Stat label={<><Lock size={12} strokeWidth={2} /> Settled</>}
                   value={n(settled.length)}
                   sub={`${plural(settled.length, 'match', 'matches')} · ${inrCompact(sumTxn(settled))}`}
                   onOpen={() => applyIntent(QV_SETTLED)}
-                  title="Locked matches — auto (HIGH), accepted or matched by hand" />
+                  title="Locked matches: automatic, accepted or manual" />
           </StatStrip>
 
           <section className="ui-card">
@@ -546,8 +545,8 @@ export function LedgerView({
             )}
 
             {activeTab === 'matches' && (allMatches.length === 0 ? (
-              <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />} title="No matches yet">
-                <span>Matches appear here once an incremental run pairs credits with bills.</span>
+              <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />} title="No matches">
+                <span>Matches are created by incremental reconciliation runs.</span>
               </EmptyState>
             ) : (
             <div className="ledger-wrap">
@@ -582,8 +581,8 @@ export function LedgerView({
                 {visibleMatches.length === 0 && (
                   <tr>
                     <td colSpan={8} className="ui-table-empty">
-                      No matches for these filters —{' '}
-                      <TextLink onClick={clearMatches}>show all</TextLink>
+                      No matches for the current filters.{' '}
+                      <TextLink onClick={clearMatches}>Clear filters</TextLink>
                     </td>
                   </tr>
                 )}
@@ -657,8 +656,8 @@ export function LedgerView({
                             <div className="detail-grid">
                               <div className="detail-section">
                                 {ev === 'manual'
-                                  ? 'Matched by user — no engine evidence; the analyst paired this credit and bill(s) by hand.'
-                                  : "Evidence unavailable — the creating run's payload could not be read. Ledger summary:"}
+                                  ? 'Manual match. No engine evidence is available.'
+                                  : 'Evidence unavailable. Ledger summary:'}
                               </div>
                               {ev === 'manual' && (
                                 <div>
@@ -714,17 +713,16 @@ export function LedgerView({
 
             {activeTab === 'exceptions' && (allExceptions.length === 0 ? (
               <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />} title="No exceptions">
-                <span>Every credit and advised bill the runs have seen is accounted for.</span>
               </EmptyState>
             ) : exceptions.length === 0 ? (
               <EmptyState icon={<CheckCircle2 size={22} strokeWidth={1.75} />}
-                          title={`Nothing matching ${[
+                          title={`No exceptions match ${[
                             excFilter.length ? `status ${excFilter.map(titleCase).join(' / ').toLowerCase()}` : null,
                             excTypeFilter.length ? `type ${excTypeFilter.map(typeLabel).join(' / ').toLowerCase()}` : null,
                             excGapFilter.length ? `gap ${excGapFilter.map(deSnake).join(' / ').toLowerCase()}` : null,
                             excOpenWork ? 'needs action' : null,
                           ].filter(Boolean).join(' · ') || 'these filters'}${runSet ? ' for the selected runs' : ''}`}>
-                <TextLink onClick={clearExc}>Show all exceptions</TextLink>
+                <TextLink onClick={clearExc}>Clear filters</TextLink>
               </EmptyState>
             ) : (
               <div className="ledger-wrap">
@@ -798,8 +796,8 @@ export function LedgerView({
                         {e.status === 'OPEN' && (
                           <button type="button" className="ui-btn is-sm"
                                   title={e.exception_type === 'BANK_ONLY'
-                                    ? 'pair this credit with open bill(s) by hand'
-                                    : 'pair this bill with an open credit by hand'}
+                                    ? 'Match this credit to open bills'
+                                    : 'Match this bill to an open credit'}
                                   onClick={() => setPicking(picking === e.id ? null : e.id)}>
                             {e.exception_type === 'BANK_ONLY' ? 'Match to bill…' : 'Match to credit…'}
                           </button>
@@ -813,7 +811,7 @@ export function LedgerView({
                           <div className="detail-grid">
                             {e.txn ? (
                               <>
-                                <div className="detail-section">Bank credit — no bill behind it</div>
+                                <div className="detail-section">Unmatched credit</div>
                                 <div>
                                   <div className="dt-label">Narrative</div>
                                   <div className="dt-value">{e.txn.narrative || '—'}</div>
@@ -821,7 +819,7 @@ export function LedgerView({
                               </>
                             ) : (
                               <>
-                                <div className="detail-section">Bill — advised but no credit landed</div>
+                                <div className="detail-section">Unmatched bill</div>
                                 <div>
                                   <div className="dt-label">Submission ref</div>
                                   <div className="dt-value">{e.bill?.submission_ref ?? '—'}</div>
@@ -859,14 +857,6 @@ export function LedgerView({
               </div>
             ))}
 
-            <div className="ui-card-foot">
-              {activeTab === 'matches'
-                ? <>HIGH-confidence matches lock automatically; weaker ones wait here for accept or
-                    reject. Rejecting releases the bills and re-opens the credit — Reopen undoes it
-                    unless a later run has claimed either side.</>
-                : <>Click a row for advice on what to do next. “Match to bill… / credit…” pairs an
-                    open exception by hand, and the match is locked straight away.</>}
-            </div>
           </section>
         </>
       )}

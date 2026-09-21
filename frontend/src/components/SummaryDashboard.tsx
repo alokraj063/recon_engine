@@ -78,23 +78,20 @@ export function SummaryDashboard({ runs, aggregate, onOpen }: Props) {
     <div className="ui-stack">
       {!multi && failed.length > 0 && (
         <Notice tone="warn">
-          <strong>The statement parse did not verify.</strong> The parsed credits do not tie to
-          the totals printed on the statement — check the figures under Parse checks before
-          relying on this run.
+          <strong>Statement totals do not reconcile.</strong> Parsed credits differ from the
+          statement's printed totals. Review Parse checks before relying on this run.
         </Notice>
       )}
       {!multi && conflicts > 0 && (
         <Notice tone="warn">
-          <strong>Settled bills protected from a newer export.</strong> A newer export tried to
-          change {n(conflicts)} settled {plural(conflicts, 'bill', 'bills')} — the locked values
-          were kept and the attempted changes recorded as conflicts.
+          <strong>{n(conflicts)} locked {plural(conflicts, 'bill', 'bills')} not updated.</strong> A
+          newer export attempted changes; they were recorded as ingest conflicts.
         </Notice>
       )}
       {multi && (
         <Notice>
-          Totals across {runs.length} runs. Open exceptions reported by several runs are shown
-          once (latest state); the bank-credits total is a per-run sum and can double-count when
-          runs share a statement.
+          Combined totals for {runs.length} runs. Exceptions reported by more than one run are
+          counted once; bank credit totals are summed per run.
         </Notice>
       )}
 
@@ -119,7 +116,7 @@ export function SummaryDashboard({ runs, aggregate, onOpen }: Props) {
               onOpen={onOpen && (() => onOpen('exceptions'))} />
         {(counts.match_review ?? 0) > 0 && (
           <Stat label="Matches to review" value={n(counts.match_review ?? 0)} tone="warn"
-                sub="weak matches in the queue"
+                sub="pending decision"
                 onOpen={onOpen && (() => onOpen('exceptions'))} />
         )}
       </StatStrip>
@@ -131,7 +128,7 @@ export function SummaryDashboard({ runs, aggregate, onOpen }: Props) {
               <SummaryTable summary={r.summary} />
             </Card>
           )) : (
-            <Card title="Breakdown" sub="The workbook's Summary sheet" ruled>
+            <Card title="Breakdown" ruled>
               <SummaryTable summary={runs[0].summary} />
             </Card>
           )}
@@ -140,7 +137,7 @@ export function SummaryDashboard({ runs, aggregate, onOpen }: Props) {
         {!multi && (
           <div className="ui-stack">
             {checks.length > 0 && (
-              <Card title="Parse checks" sub="Parsed credits tied to the statement's printed totals" ruled>
+              <Card title="Parse checks" sub="Parsed credits vs statement totals" ruled>
                 <ul className="check-list">
                   {checks.map((c, i) => {
                     const who = c.original_name ?? 'Statement'
@@ -155,8 +152,8 @@ export function SummaryDashboard({ runs, aggregate, onOpen }: Props) {
                           </div>
                           <div className="check-detail">
                             {c.stated_count == null
-                              ? (c.detail ?? 'the bank adapter could not verify this statement')
-                              : <>states {n(c.stated_count)} credits / {inr(c.stated_total)} · parsed{' '}
+                              ? (c.detail ?? 'Statement could not be verified')
+                              : <>Statement {n(c.stated_count)} credits / {inr(c.stated_total)} · Parsed{' '}
                                   {n(c.parsed_count ?? 0)} / {inr(c.parsed_total)}</>}
                           </div>
                         </div>
@@ -168,7 +165,7 @@ export function SummaryDashboard({ runs, aggregate, onOpen }: Props) {
             )}
 
             {meta.mode === 'incremental' && ledger && (
-              <Card title="Ledger changes" sub="What this run wrote to the durable ledger" ruled>
+              <Card title="Ledger changes" ruled>
                 <dl className="kv-list">
                   <div><dt>Matches created</dt><dd>{n(ledger.matches_created)}</dd></div>
                   <div><dt>Auto-locked (HIGH)</dt><dd>{n(ledger.auto_locked)}</dd></div>
@@ -179,7 +176,7 @@ export function SummaryDashboard({ runs, aggregate, onOpen }: Props) {
             )}
 
             {meta.mode === 'incremental' && ingest && (
-              <Card title="Data used" sub="Rows the run's ingestion contributed" ruled>
+              <Card title="Data used" ruled>
                 <div className="ui-card-body">
                   <IngestStatsSummary stats={ingest} />
                 </div>

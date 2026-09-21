@@ -94,7 +94,7 @@ export function LoginView({ onSignedIn, expired }: Props) {
         </button>
 
         <p className="login-foot">
-          Accounts are created by an administrator — there is no self sign-up.
+          Contact your administrator for access.
         </p>
       </form>
     </div>
