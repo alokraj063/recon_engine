@@ -19,7 +19,7 @@ const DEFAULT_FIELD_MAP: FieldMap = {
   bill_date_fallback: 'payment_order_date',
   exact_signals: [{ bank_field: 'zone_guess', bill_field: 'zone', weight: 2, key: 'zone' }],
   eligibility_field: 'bill_status',
-  fallback_due_statuses: ['CO7 DONE'],
+  fallback_due_statuses: [],
 }
 
 const DEFAULT_RULES: CustomerRules = {
@@ -29,13 +29,14 @@ const DEFAULT_RULES: CustomerRules = {
   co7_lookback_days: 5,
   allow_batched: true,
   max_batch_size: 3,
-  paid_statuses: ['CO7 DONE', 'PAYMENT MADE'],
+  paid_statuses: ['PAYMENT MADE'],
   weights: { advice_date: 4, zone: 2, co7_date: 1 },
   field_map: DEFAULT_FIELD_MAP,
   copy_overrides: {},
   batch_amount_slack: 0.5,
   amount_decimals: 2,
   ar_overdue_days: 30,
+  awaiting_status_days: 7,
 }
 
 /** Terminology sections in display order: section key + heading + what
@@ -358,10 +359,16 @@ export function MatchingConfigPanel({ customerId }: Props) {
             <input type="number" min={0} value={rules.ar_overdue_days}
                    onChange={(e) => patch({ ar_overdue_days: Number(e.target.value) })} />
           </label>
+          <label className="ctx-field">
+            <span className="slot-label">Awaiting status for (days)</span>
+            <input type="number" min={0} value={rules.awaiting_status_days}
+                   onChange={(e) => patch({ awaiting_status_days: Number(e.target.value) })} />
+          </label>
         </div>
         <p className="explain">
           Batch amount slack: unexplained amount allowed in a batched match. Amount decimals:
-          rounding precision of the amount comparison.
+          rounding precision of the amount comparison. Awaiting status: how long a credit whose
+          bill is still in flight stays excused before it counts as an exception.
         </p>
       </div>
 

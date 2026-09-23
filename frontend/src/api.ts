@@ -268,22 +268,55 @@ export async function fetchGoldFrame(
  *  goldBillId overrides an ambiguous pick: the chosen candidate becomes
  *  the settled bill (must belong to the match; 400 otherwise). */
 export async function acceptMatch(
-  id: string, goldBillId?: string,
+  id: string, goldBillId?: string, note?: string,
 ): Promise<{ id: string; status: string; locked_by: string | null }> {
   return postJson(`/api/matches/${id}/accept`,
-                  goldBillId ? { gold_bill_id: goldBillId } : undefined)
+                  { gold_bill_id: goldBillId ?? null, note: note || null })
 }
 
 /** Reject an OPEN ledger match, releasing both sides back to the pool. */
-export async function rejectMatch(id: string): Promise<{ id: string; status: string }> {
-  return postJson(`/api/matches/${id}/reject`)
+export async function rejectMatch(id: string, note?: string): Promise<{ id: string; status: string }> {
+  return postJson(`/api/matches/${id}/reject`, { note: note || null })
 }
 
 /** Reopen a LOCKED match (USER or AUTO_HIGH) — back to OPEN for review. */
 export async function unlockMatch(
-  id: string,
+  id: string, note?: string,
 ): Promise<{ id: string; status: string; locked_by: string | null }> {
-  return postJson(`/api/matches/${id}/unlock`)
+  return postJson(`/api/matches/${id}/unlock`, { note: note || null })
+}
+
+/** Bank Transactions' Source edit — the same decision as the queue's
+ *  Approve (NON_IREPS) / Reject (IREPS) / Undo (null), made from the
+ *  credit. 409 CREDIT_MATCHED while a live match holds the credit. */
+export async function setCreditSource(
+  customerId: string, goldBankTxnId: string, source: 'IREPS' | 'NON_IREPS' | null,
+): Promise<{ gold_bank_txn_id: string; source_decision: string | null;
+            exception_id: string | null; exception_status: string | null }> {
+  return sendJson('PUT', `/api/bank/${goldBankTxnId}/source`,
+                  { customer_id: customerId, source })
+}
+
+/** Approve a whole group of non-IREPS receipts in one call — rows that
+ *  are no longer OPEN are skipped, and the response counts both. */
+export async function approveNonIrepsBulk(
+  customerId: string, exceptionIds: string[],
+): Promise<{ approved: number; requested: number; skipped: number }> {
+  return postJson('/api/exceptions/non-ireps/approve-bulk',
+                  { customer_id: customerId, exception_ids: exceptionIds })
+}
+
+export type NonIrepsDecision = 'approve' | 'reject' | 'undo'
+
+/** The Non-IREPS receipts tab: approve (a non-IREPS receipt — closed,
+ *  never matched), reject (IREPS money — back to the IREPS queue and into
+ *  matching) or undo either. 409 when the row is not in that state. */
+export async function decideNonIreps(
+  exceptionId: string, decision: NonIrepsDecision, note?: string,
+): Promise<{ id: string; status: string; resolved_by: string | null;
+            source_decision: string | null }> {
+  return postJson(`/api/exceptions/${exceptionId}/non-ireps/${decision}`,
+                  { note: note || null })
 }
 
 /** Pair an open credit with open bill(s) by hand. No tolerance applies;
@@ -301,9 +334,9 @@ export async function createManualMatch(
 /** Undo a REJECTED match — back to OPEN, re-claiming its credit and bills.
  *  409 MATCH_CONFLICT if a later run already claimed either side. */
 export async function reopenMatch(
-  id: string,
+  id: string, note?: string,
 ): Promise<{ id: string; status: string; locked_by: string | null }> {
-  return postJson(`/api/matches/${id}/reopen`)
+  return postJson(`/api/matches/${id}/reopen`, { note: note || null })
 }
 
 // --- authentication ---------------------------------------------------

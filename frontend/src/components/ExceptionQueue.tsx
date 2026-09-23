@@ -10,7 +10,7 @@ import { ConfidenceBadge } from './ConfidenceBadge'
 import { DataTable } from './DataTable'
 import { deSnake } from './filters/facets'
 import {
-  MatchDecision, PickList, billByNumber, ledgerStatusLabel, useMatchDecision, type Decide,
+  MatchDecision, billByNumber, ledgerStatusLabel, useMatchDecision, type Decide,
 } from './MatchDecision'
 import { ManualMatchPicker } from './ManualMatchPicker'
 import { EmptyState } from './ui'
@@ -188,12 +188,11 @@ function Detail({ row, onOpenInQueue, primaryRunId, ledger, busy, decide, custom
             </span>
           )}
         </div>
-        {live && <PickList match={live} busy={busy} decide={decide} />}
         <ReviewEvidence row={row} runId={runId} busy={busy}
                         onAcceptBill={live && live.status === 'OPEN'
-                          ? (no) => {
+                          ? (no, note) => {
                               const b = billByNumber(live, no)
-                              if (b) decide(live.id, 'accept', b.gold_bill_id)
+                              if (b) decide(live.id, 'accept', b.gold_bill_id, note)
                             }
                           : undefined} />
       </div>
@@ -303,6 +302,7 @@ export function ExceptionQueue({
   // (the ALL / BANK ONLY / … segment it replaced sat above the table)
   return (
     <DataTable
+      fill
       rows={rows}
       columns={columns}
       numericIds={AMOUNT_COLS}

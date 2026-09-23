@@ -22,6 +22,19 @@ export const UNASSIGNED_UNIT = 'UNASSIGNED'
 
 export const DEFAULT_DATE_FILTER: DateFilterValue = { pick: 'month', from: '', to: '', units: null }
 
+/** Where the Command Center remembers each customer's filter. The
+ *  Analyst queue reads the same entry, so the window set on the Command
+ *  Center is the window every queue tab opens on. */
+export const SAVED_FILTER_KEY = (customer: string) => `recon.cc.filter.${customer}`
+
+export function loadSavedDateFilter(customer: string): DateFilterValue {
+  try {
+    const raw = localStorage.getItem(SAVED_FILTER_KEY(customer))
+    if (raw) return { ...DEFAULT_DATE_FILTER, ...JSON.parse(raw) }
+  } catch { /* fall through */ }
+  return DEFAULT_DATE_FILTER
+}
+
 const pad = (n: number) => String(n).padStart(2, '0')
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 

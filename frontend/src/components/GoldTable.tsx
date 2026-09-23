@@ -1,11 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { GoldFileInfo, GoldFrameName, Row } from '../types'
-import { fetchGoldFiles, fetchGoldFrame } from '../api'
+import { fetchGoldFiles, fetchGoldFrame, setCreditSource } from '../api'
+import { ApiError } from '../types'
 import { AMOUNT_COLS, fmtCell, inDayRange } from '../format'
-import { SHARED_PRESETS } from '../framePresets'
+import { COLUMN_FORMATS, SHARED_PRESETS } from '../framePresets'
 import { DataTable } from './DataTable'
 import { Notice } from './ui'
+
+/** How each gold table opens: newest first on its own date column, and —
+ *  on the bank table — showing the CREDITS. Reconciliation is about money
+ *  in; the debits outnumber them 3:1 and used to fill the first screens.
+ *  Both land as ordinary sort / filter state the analyst can change, and
+ *  the credits filter shows as a removable chip. */
+const OPENS_WITH: Partial<Record<GoldFrameName, {
+  sort?: { id: string; desc: boolean }[]
+  filters?: Record<string, string[]>
+}>> = {
+  bank: { sort: [{ id: 'value_date', desc: true }], filters: { used_in_recon: ['true'] } },
+  bills: { sort: [{ id: 'submission_date', desc: true }] },
+}
 
 /** Which source types can own rows of each gold frame — scopes the
  *  ingestion-filter dropdown to relevant files. */
@@ -16,21 +30,29 @@ const FRAME_SOURCE_TYPES: Record<GoldFrameName, string[]> = {
   lineage: ['lineage_rnote', 'lineage_crn'],
 }
 
-function buildColumns(frame: GoldFrameName, rows: Row[]): { columns: ColumnDef<Row>[]; hidden: string[] } {
+function buildColumns(frame: GoldFrameName, rows: Row[],
+                      renderCell?: (key: string, row: Row) => ReactNode | undefined,
+): { columns: ColumnDef<Row>[]; hidden: string[] } {
   const preset = SHARED_PRESETS[frame]
   const present = new Set(rows.flatMap((r) => Object.keys(r)))
   const curated = preset.curated.filter(([k]) => present.has(k))
   const rest = [...present].filter((k) => !preset.curated.some(([c]) => c === k)).sort()
 
   const facets = new Map(preset.facets ?? [])
+  const clamped = new Set(preset.clamp ?? [])
   const make = (key: string, label: string): ColumnDef<Row> => ({
     id: key,
     header: label,
-    meta: facets.has(key) ? { facet: true, facetLabel: facets.get(key) } : undefined,
+    meta: facets.has(key)
+      ? { facet: true, facetLabel: facets.get(key), facetFormat: COLUMN_FORMATS[key] }
+      : undefined,
     accessorFn: (row) => row[key],
     cell: (ctx) => {
+      const custom = renderCell?.(key, ctx.row.original)
+      if (custom !== undefined) return custom
       const text = fmtCell(key, ctx.row.original[key])
-      return text === '—' ? <span className="empty-cell">—</span> : text
+      if (text === '—') return <span className="empty-cell">—</span>
+      return clamped.has(key) ? <span className="cell-clamp" title={text}>{text}</span> : text
     },
   })
 
@@ -95,6 +117,11 @@ export function GoldTable({ customerId, frame, intent, onIntentHandled }: Props)
   const [error, setError] = useState<string | null>(null)
   const [files, setFiles] = useState<GoldFileInfo[]>([])
   const [bronzeFileId, setBronzeFileId] = useState<number | undefined>(undefined)
+  // Source edits (bank only): a change refetches the frame IN PLACE (the
+  // server re-derives source + credit_scope), keeping the table mounted so
+  // its filters, sort and scroll survive the edit
+  const [editing, setEditing] = useState<string | null>(null)
+  const [editError, setEditError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchGoldFiles(customerId)
@@ -167,8 +194,41 @@ export function GoldTable({ customerId, frame, intent, onIntentHandled }: Props)
   if (error) return <div className="dt-state"><Notice tone="error">Could not load this table: {error}</Notice></div>
   if (rows === null) return <div className="dt-loading" aria-busy="true"><span className="quill" /> Loading…</div>
 
+  const editSource = (row: Row, value: string) => {
+    const id = String(row.gold_bank_txn_id)
+    setEditing(id)
+    setEditError(null)
+    setCreditSource(customerId, id,
+                    value === 'AUTO' ? null : (value as 'IREPS' | 'NON_IREPS'))
+      .then(() => fetchGoldFrame(customerId, frame, bronzeFileId))
+      .then((d) => { setRows(d.rows); setTotal(d.total) })
+      .catch((e) => setEditError(e instanceof ApiError ? e.message : String(e)))
+      .finally(() => setEditing(null))
+  }
+  // Bank credits: Source is editable in place. Debits have no source to
+  // decide; the selection mirrors the Analyst queue's Non-IREPS decisions
+  const renderCell = frame === 'bank'
+    ? (key: string, row: Row): ReactNode | undefined => {
+        if (key !== 'source' || !row.gold_bank_txn_id || row.source === 'DEBIT') return undefined
+        const decided = row.source_decided === true
+        return (
+          <span className="src-edit" onClick={(e) => e.stopPropagation()}>
+            <select value={String(row.source ?? '')} disabled={editing === row.gold_bank_txn_id}
+                    aria-label="Source"
+                    title={decided ? 'Set by an analyst' : 'Derived from the narrative zone'}
+                    className={`src-select src-${String(row.source).toLowerCase()}`}
+                    onChange={(e) => editSource(row, e.target.value)}>
+              <option value="IREPS">IREPS</option>
+              <option value="NON_IREPS">Non-IREPS</option>
+              {decided && <option value="AUTO">Auto (from zone)</option>}
+            </select>
+            {decided && <span className="src-edited" title="Set by an analyst">edited</span>}
+          </span>
+        )
+      }
+    : undefined
   // column filters (facets declared in framePresets) are DataTable's own
-  const { columns, hidden } = buildColumns(frame, rows)
+  const { columns, hidden } = buildColumns(frame, rows, renderCell)
   // a row with no date at all is outside any bounded window, as it is for
   // the server's count (a NULL date never satisfies a bound)
   const shown = windowOn
@@ -179,7 +239,9 @@ export function GoldTable({ customerId, frame, intent, onIntentHandled }: Props)
     : rows
   return (
     <>
+      {editError && <div className="dt-state"><Notice tone="error">{editError}</Notice></div>}
       <DataTable
+        fill
         rows={shown}
         totalRows={rows.length}
         columns={columns}
@@ -187,7 +249,8 @@ export function GoldTable({ customerId, frame, intent, onIntentHandled }: Props)
         initialHidden={hidden}
         toolbar={filter}
         externalChips={externalChips}
-        initialFilters={arrival?.filters}
+        initialSort={OPENS_WITH[frame]?.sort}
+        initialFilters={arrival?.filters ?? OPENS_WITH[frame]?.filters}
       />
       {rows.length < total && (
         <div className="ui-card-foot">

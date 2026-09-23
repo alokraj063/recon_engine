@@ -1,13 +1,15 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowRight, ChevronRight, Search } from 'lucide-react'
 import { FilterChips } from './filters/FilterChips'
+import { buildOptions } from './filters/facets'
 import type { AuditEventRow, CustomerInfo } from '../types'
 import { fetchAudit } from '../api'
 import { fmtWhen, n } from '../format'
 import {
-  CustomerSelect, EmptyState, MoreRows, Notice, PageHeader, RefreshButton, Stat, StatStrip, TextLink,
-  useProgressiveRows,
+  CustomerSelect, EmptyState, HelpLabel, MoreRows, Notice, PageHeader, RefreshButton, Stat, StatStrip,
+  TextLink, useProgressiveRows,
 } from './ui'
+import { ColumnFilter } from './filters/ColumnFilter'
 
 interface Props {
   customers: CustomerInfo[]
@@ -39,15 +41,26 @@ function category(e: AuditEventRow): Category {
       || t === 'ingestion.completed') return 'ingest'
   if (t.startsWith('run.') || t.startsWith('pipeline.')) return 'run'
   if (t === 'ledger.finalized') return 'ledger'
-  if (t.startsWith('ledger.match_')) return 'decision'
+  // every analyst decision on the ledger: matches, and a credit's source
+  if (t.startsWith('ledger.match_') || t.startsWith('ledger.non_ireps_')
+      || t.startsWith('ledger.credit_source_')) return 'decision'
   if (t.startsWith('config.') || t === 'customer.created') return 'config'
   return 'other'
 }
 
-/** No auth yet: decisions and config edits are the human actions, the
- *  rest is the system doing its job. */
-const actorOf = (c: Category): 'user' | 'system' =>
-  c === 'decision' || c === 'config' ? 'user' : 'system'
+/** A signed-in user's request stamps its events with the user. Events
+ *  from before users were recorded carry none: there, decisions and
+ *  config edits were still the human actions. */
+const actorOf = (e: AuditEventRow & { cat: Category }): 'user' | 'system' =>
+  e.actor_user_id != null || e.cat === 'decision' || e.cat === 'config' ? 'user' : 'system'
+
+/** Who, as the User column shows it: the name, System for the platform's
+ *  own work, "Not recorded" for a human action older than user tracking. */
+function actorName(e: AuditEventRow & { cat: Category }): string {
+  if (e.actor) return e.actor
+  if (e.actor_user_id != null) return `User #${e.actor_user_id}`
+  return actorOf(e) === 'user' ? 'Not recorded' : 'System'
+}
 
 /** pill + feed-icon tone per category (the kit's four tones) */
 const CATEGORY_TONE: Record<Category, 'ok' | 'bad' | 'info' | 'warn' | 'neutral'> = {
@@ -85,6 +98,10 @@ const EVENT_NAME: Record<string, string> = {
   'ledger.match_unlocked': 'Match unlocked',
   'ledger.match_reopened': 'Match reopened',
   'ledger.match_created_manual': 'Manual match created',
+  'ledger.non_ireps_approved': 'Non-IREPS receipt approved',
+  'ledger.non_ireps_rejected': 'Marked as IREPS',
+  'ledger.credit_source_undone': 'Source decision undone',
+  'ledger.credit_source_set': 'Credit source changed',
   'run.reconcile_failed': 'Reconciliation failed',
   'run.selfcheck_mismatch': 'Statement totals mismatch',
   'run.selfcheck_error': 'Statement check errored',
@@ -106,18 +123,108 @@ function within(w: Window, iso: string): boolean {
   return Date.now() - new Date(/[Zz]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z').getTime() <= ms
 }
 
+/** What an audit record IS, in business terms (never a table name). */
+const ENTITY_NAME: Record<string, string> = {
+  match_ledger: 'Match',
+  gold_bank_txn: 'Credit',
+  gold_bill: 'Bill',
+  exception_ledger: 'Exception',
+  bronze_file: 'File',
+  match_rule_set: 'Matching config',
+  source_config: 'Source setup',
+  customer: 'Customer',
+  user: 'User',
+}
+
+/** The record an event concerns, as people say it: "Match M-42",
+ *  "Credit · HSBC123", "File · statement.pdf", "Run · 1a2b3c4d". */
 function recordKey(e: AuditEventRow): string {
-  if (e.entity_label) return e.entity_label
-  if (e.entity_type && e.entity_id) return `${e.entity_type} ${e.entity_id}`
-  if (e.run_id) return `run ${e.run_id.slice(0, 8)}`
-  return 'system'
+  const kind = e.entity_type ? (ENTITY_NAME[e.entity_type] ?? e.entity_type.replace(/_/g, ' ')) : null
+  if (e.entity_label) {
+    if (e.entity_type === 'match_ledger') return `Match ${e.entity_label}`
+    if (e.entity_type === 'bronze_file') return `File · ${e.entity_label}`
+    return e.entity_label
+  }
+  if (kind && e.entity_id) return `${kind} · ${e.entity_id.slice(0, 8)}`
+  if (kind) return e.event_type.endsWith('_bulk') || e.details?.bulk ? `${kind}s (bulk)` : kind
+  if (e.run_id) return `Run · ${e.run_id.slice(0, 8)}`
+  // an ingestion summary concerns the upload as a whole, not one record
+  if (e.event_type === 'ingestion.completed' || e.event_type.startsWith('gold.ingest')) return 'Ingestion'
+  return 'System'
+}
+
+/** Readable names for the detail keys events carry; others are spelled out. */
+const DETAIL_LABEL: Record<string, string> = {
+  was: 'Was',
+  source: 'Now',
+  note: 'Note',
+  via: 'Changed from',
+  confidence: 'Confidence',
+  exceptions_resolved: 'Exceptions closed',
+  exceptions_reopened: 'Exceptions reopened',
+  user_overrode_pick: 'Different bill chosen',
+  was_locked_by: 'Was locked by',
+  bill_count: 'Bills',
+  has_note: 'Has note',
+  approved: 'Approved',
+  requested: 'Requested',
+  changes: 'Changes',
+  signals: 'Match signals',
+  copy_overridden: 'Custom wording',
+  params_slots: 'Slots with settings',
+  sources: 'Sources',
+  bronze_file_id: 'File #',
+  changed_field_names: 'Changed fields',
+  rows_reported: 'Rows reported',
+  rows_inserted: 'Rows added',
+}
+// shown inside another key (was_auto rides with "was") or not at all
+const DETAIL_HIDDEN = new Set(['was_auto', 'bulk'])
+
+const VALUE_TEXT: Record<string, string> = {
+  IREPS: 'IREPS', NON_IREPS: 'Non-IREPS', AUTO_HIGH: 'System (high confidence)',
+  USER: 'User', bank: 'Bank transactions',
+}
+
+const words = (k: string) => {
+  const w = k.replace(/_/g, ' ')
+  return w.charAt(0).toUpperCase() + w.slice(1)
+}
+/** "weights.zone" -> "Weights › Zone" */
+const fieldName = (path: string) => path.split('.').map(words).join(' › ')
+
+function valueText(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '—'
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No'
+  if (typeof v === 'string') return VALUE_TEXT[v] ?? v
+  if (Array.isArray(v)) return v.map(valueText).join(', ') || '—'
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
+interface Change { field: string; from: unknown; to: unknown }
+
+/** An event's details as [label, text] pairs, in reading order. */
+function detailPairs(d: AuditEventRow['details']): Array<[string, string]> {
+  if (!d) return []
+  const out: Array<[string, string]> = []
+  for (const [k, v] of Object.entries(d)) {
+    if (DETAIL_HIDDEN.has(k)) continue
+    if (k === 'note' && (v === null || v === '')) continue
+    if (k === 'changes' && Array.isArray(v)) {
+      (v as Change[]).forEach((c) => out.push([fieldName(c.field),
+                                               `${valueText(c.from)} → ${valueText(c.to)}`]))
+      continue
+    }
+    let text = valueText(v)
+    if (k === 'was' && d.was_auto) text += ' (automatic)'
+    out.push([DETAIL_LABEL[k] ?? words(k), text])
+  }
+  return out
 }
 
 function detailsText(d: AuditEventRow['details']): string {
-  if (!d) return ''
-  return Object.entries(d)
-    .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
-    .join(' · ')
+  return detailPairs(d).map(([k, v]) => `${k}: ${v}`).join(' · ')
 }
 
 function CategoryChip({ c }: { c: Category }) {
@@ -135,6 +242,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
   const [tab, setTab] = useState<Tab>('feed')
   // single-select focus filter, consistent with Actor/Window
   const [cat, setCat] = useState<Category | 'all'>('all')
+  const [users, setUsers] = useState<string[]>([])
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
 
   const load = useCallback(() => {
@@ -170,17 +278,18 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
     const q = query.trim().toLowerCase()
     return enriched.filter((e) => {
       if (cat !== 'all' && e.cat !== cat) return false
-      if (actor !== 'all' && actorOf(e.cat) !== actor) return false
+      if (actor !== 'all' && actorOf(e) !== actor) return false
+      if (users.length && !users.includes(actorName(e))) return false
       if (!within(win, e.created_at)) return false
       if (q) {
-        const blob = `${e.event_type} ${e.entity_type ?? ''} ${e.entity_id ?? ''} `
-          + `${e.entity_label ?? ''} ${detailsText(e.context ?? null)} `
+        const blob = `${e.event_type} ${eventName(e.event_type)} ${recordKey(e)} ${e.entity_id ?? ''} `
+          + `${actorName(e)} ${detailsText(e.context ?? null)} `
           + `${e.run_id ?? ''} ${detailsText(e.details)}`
         if (!blob.toLowerCase().includes(q)) return false
       }
       return true
     })
-  }, [enriched, cat, actor, win, query])
+  }, [enriched, cat, actor, win, query, users])
 
   const grouped = useMemo(() => {
     const groups = new Map<string, typeof filtered>()
@@ -201,16 +310,17 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
     { key: 'q', label: 'Search', values: query ? [query] : [], onRemove: () => setQuery('') },
     { key: 'actor', label: 'Actor', values: actor === 'all' ? [] : [actor],
       format: (v: string) => (v === 'user' ? 'Human' : 'System'), onRemove: () => setActor('all') },
+    { key: 'users', label: 'User', values: users, onRemove: () => setUsers([]) },
     { key: 'win', label: 'Window', values: win === 'all' ? [] : [win], onRemove: () => setWin('all') },
     { key: 'cat', label: 'Category', values: cat === 'all' ? [] : [cat],
       format: (v: string) => CATEGORY_LABEL[v as Category], onRemove: () => setCat('all') },
   ]
   const anyChip = chips.some((c) => c.values.length > 0)
-  const clearAll = () => { setQuery(''); setActor('all'); setWin('all'); setCat('all') }
+  const clearAll = () => { setQuery(''); setActor('all'); setWin('all'); setCat('all'); setUsers([]) }
   const only = (c: Category) => { clearAll(); setCat(c) }
 
   return (
-    <section className="ui-page">
+    <section className="ui-page is-fill">
       <PageHeader title="Audit trail"
                   context={customerName}>
         <CustomerSelect customers={customers} value={customerId} onChange={onCustomerChange} />
@@ -239,7 +349,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                   onOpen={() => { clearAll(); setWin('24h') }} title="Show the last 24 hours" />
           </StatStrip>
 
-          <section className="ui-card">
+          <section className="ui-card is-fill">
             <div className="ui-tabbar">
               <div className="ui-tabs" role="tablist">
                 <button type="button" role="tab" aria-selected={tab === 'feed'}
@@ -296,12 +406,21 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                 <TextLink onClick={clearAll}>Clear all filters</TextLink>
               </EmptyState>
             ) : (
-              <div className="ledger-wrap audit-wrap">
+              <div className="ledger-wrap is-fill audit-wrap">
                 <table className="ledger audit-table">
                   <thead>
                     <tr>
-                      <th>When</th><th>Category</th><th>Event</th>
-                      <th>Record</th><th>Run</th><th>Severity</th>
+                      <th><HelpLabel k="ui:audit_when">When</HelpLabel></th>
+                      <th>
+                        <HelpLabel k="ui:audit_user">User</HelpLabel>
+                        <ColumnFilter label="User" value={users} onApply={setUsers}
+                                      options={buildOptions(enriched, actorName)} />
+                      </th>
+                      <th><HelpLabel k="ui:audit_category">Category</HelpLabel></th>
+                      <th><HelpLabel k="ui:audit_event">Event</HelpLabel></th>
+                      <th><HelpLabel k="ui:audit_record">Record</HelpLabel></th>
+                      <th><HelpLabel k="ui:run">Run</HelpLabel></th>
+                      <th><HelpLabel k="ui:audit_severity">Severity</HelpLabel></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -313,6 +432,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                           <ChevronRight className="chev chev-ic" size={14} strokeWidth={2} aria-hidden />
                           {fmtWhen(e.created_at)}
                         </td>
+                        <td className={`nowrap${e.actor ? '' : ' muted'}`}>{actorName(e)}</td>
                         <td><CategoryChip c={e.cat} /></td>
                         <td>
                           <div className="party-cell">
@@ -320,13 +440,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                             <span className="party-ref">{e.event_type}</span>
                           </div>
                         </td>
-                        <td className="mono">
-                          {e.entity_label
-                            ? <span className="audit-entity">{e.entity_label}</span>
-                            : e.entity_type
-                              ? `${e.entity_type} ${(e.entity_id ?? '').slice(0, 12)}`
-                              : '—'}
-                        </td>
+                        <td><span className="audit-entity">{recordKey(e)}</span></td>
                         <td className="mono">{e.run_id ? e.run_id.slice(0, 8) : '—'}</td>
                         <td>{e.severity === 'INFO' ? <span className="muted">—</span>
                           : <span className={`ui-pill ${e.severity === 'WARNING' ? 'tone-warn' : 'tone-bad'}`}>
@@ -335,28 +449,24 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                       </tr>
                       {expanded[e.id] && (
                         <tr className="xq-detail">
-                          <td colSpan={6}>
+                          <td colSpan={7}>
                             <div className="detail-grid">
+                              <div>
+                                <div className="dt-label">User</div>
+                                <div className="dt-value">{actorName(e)}</div>
+                              </div>
                               {e.context && Object.entries(e.context)
                                 .filter(([, v]) => v !== null && v !== undefined)
                                 .map(([k, v]) => (
                                 <div key={`ctx-${k}`}>
-                                  <div className="dt-label">{k.replace(/_/g, ' ')}</div>
-                                  <div className="dt-value">{String(v)}</div>
+                                  <div className="dt-label">{words(k)}</div>
+                                  <div className="dt-value">{valueText(v)}</div>
                                 </div>
                               ))}
-                              {e.entity_label && e.entity_type && (
-                                <div>
-                                  <div className="dt-label">record</div>
-                                  <div className="dt-value">{e.entity_type} {e.entity_id}</div>
-                                </div>
-                              )}
-                              {e.details && Object.entries(e.details).map(([k, v]) => (
-                                <div key={k}>
-                                  <div className="dt-label">{k.replace(/_/g, ' ')}</div>
-                                  <div className="dt-value">
-                                    {typeof v === 'object' ? JSON.stringify(v) : String(v)}
-                                  </div>
+                              {detailPairs(e.details).map(([k, v], i) => (
+                                <div key={`${k}-${i}`}>
+                                  <div className="dt-label">{k}</div>
+                                  <div className="dt-value">{v}</div>
                                 </div>
                               ))}
                               {!e.details && !e.context && (
@@ -377,7 +487,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                       </Fragment>
                     ))}
                     <MoreRows remaining={drawn.remaining} onMore={drawn.more}
-                              colSpan={6} noun="events" />
+                              colSpan={7} noun="events" />
                   </tbody>
                 </table>
               </div>
@@ -405,6 +515,7 @@ export function AuditTrailView({ customers, customerId, onCustomerChange,
                           <span className="ui-feed-body">
                             <span className="ui-feed-title">
                               {eventName(e.event_type)} <CategoryChip c={e.cat} />
+                              <span className="decision-who"> · {actorName(e)}</span>
                             </span>
                             {e.details && <span className="ui-feed-detail" title={detailsText(e.details)}>
                               {detailsText(e.details)}</span>}

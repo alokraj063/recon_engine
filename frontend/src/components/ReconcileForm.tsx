@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, GitMerge, Inbox, Settings2 } from 'lucide-react'
+import { ArrowRight, GitMerge, Inbox } from 'lucide-react'
 import type { CustomerInfo, GoldFileInfo, RunMode } from '../types'
 import { fetchGoldFiles } from '../api'
 import { fmtDay, n } from '../format'
-import { MatchingConfigPanel } from './MatchingConfigPanel'
-import { Card, CustomerSelect, EmptyState, PageHeader, TextLink, ToolSep } from './ui'
+import { Card, CustomerSelect, EmptyState, PageHeader, TextLink } from './ui'
 
 interface Props {
   running: boolean
@@ -13,6 +12,8 @@ interface Props {
   onCustomerChange: (key: string) => void
   onReconcile: (statementBronzeIds: number[], mode: RunMode) => void
   onGoToIngest: () => void
+  /** matching rules live on the Settings page */
+  onGoToSettings: () => void
   refreshKey: number
 }
 
@@ -43,14 +44,13 @@ function period(s: GoldFileInfo): string {
 
 export function ReconcileForm({
   running, customers, customerId, onCustomerChange,
-  onReconcile, onGoToIngest, refreshKey,
+  onReconcile, onGoToIngest, onGoToSettings, refreshKey,
 }: Props) {
   const [mode, setMode] = useState<RunMode>('incremental')
   const [statements, setStatements] = useState<GoldFileInfo[] | null>(null)
   // several statements may be ticked: one run over the union of their credits
   const [statementIds, setStatementIds] = useState<number[]>([])
   const [elapsed, setElapsed] = useState(0)
-  const [showConfig, setShowConfig] = useState(false)
 
   useEffect(() => {
     fetchGoldFiles(customerId)
@@ -89,22 +89,7 @@ export function ReconcileForm({
       <PageHeader title="Initiate Reconciliation"
                   context={customerName}>
         <CustomerSelect customers={customers} value={customerId} onChange={onCustomerChange} />
-        {customers.length > 1 && <ToolSep />}
-        <button type="button" className={`ui-btn${showConfig ? ' is-on' : ''}`}
-                aria-pressed={showConfig} onClick={() => setShowConfig((v) => !v)}>
-          <Settings2 size={15} strokeWidth={1.75} /> Matching config
-        </button>
       </PageHeader>
-
-      {showConfig && (
-        <Card title="Matching config"
-              sub="Applies to all runs for this customer"
-              ruled>
-          <div className="ui-card-body config-body">
-            <MatchingConfigPanel customerId={customerId} />
-          </div>
-        </Card>
-      )}
 
       <div className="ui-grid-75 ingest-grid">
         <div className="ui-stack">
@@ -191,7 +176,10 @@ export function ReconcileForm({
               <div><dt>Mode</dt><dd>{chosenMode.label}</dd></div>
               <div>
                 <dt>Matching rules</dt>
-                <dd><TextLink onClick={() => setShowConfig(true)}>View</TextLink></dd>
+                <dd>
+                  Saved config{' '}
+                  <TextLink onClick={onGoToSettings}>Edit in Settings</TextLink>
+                </dd>
               </div>
             </dl>
             <div className="ui-card-body up-go">

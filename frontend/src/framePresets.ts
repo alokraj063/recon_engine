@@ -9,6 +9,9 @@
 export interface FramePreset {
   curated: Array<[string, string]>
   hidden: string[]
+  /** long free-text columns clamped to two lines (the full value stays
+   *  on hover) — without it one narrative makes a row 8 lines tall */
+  clamp?: string[]
   /** categorical columns that get a header checklist filter (DataTable
    *  column meta `facet`) in BOTH the gold tables and the run frames —
    *  [column key, filter label]; options are derived from the rows, so
@@ -16,13 +19,28 @@ export interface FramePreset {
   facets?: Array<[string, string]>
 }
 
+/** Display text for a column's stored codes (cell + filter list). */
+export const COLUMN_FORMATS: Record<string, (v: string) => string> = {
+  source: (v) => (v === 'NON_IREPS' ? 'Non-IREPS' : v === 'DEBIT' ? 'Debit' : v),
+  // the bank table's "Used" column IS the credit / debit split
+  used_in_recon: (v) => (v === 'true' ? 'Credits' : v === 'false' ? 'Debits' : v),
+}
+
+/** A frozen run frame has no read-time Source: derive it the way the
+ *  engine does for a credit no analyst has classified — a zone in the
+ *  narrative makes it IREPS money. Debits (used_in_recon false) read DEBIT. */
+export function sourceFromZone(r: Record<string, unknown>): string | null {
+  if (r.used_in_recon === false) return 'DEBIT'
+  return String(r.zone_guess ?? '').trim() ? 'IREPS' : 'NON_IREPS'
+}
+
 export const SHARED_PRESETS: Record<'bank' | 'bills' | 'recoveries' | 'lineage', FramePreset> = {
   bank: {
     curated: [
       ['used_in_recon', 'Used'],
-      ['credit_scope', 'Credit scope'],
       ['txn_type', 'Type'],
       ['amount', 'Amount'],
+      ['source', 'Source'],
       ['value_date', 'Value date'],
       ['zone_guess', 'Zone'],
       ['narrative', 'Narrative'],
@@ -30,11 +48,16 @@ export const SHARED_PRESETS: Record<'bank' | 'bills' | 'recoveries' | 'lineage',
       ['customer_ref', 'Customer ref'],
       ['page', 'Page'],
     ],
-    hidden: ['supplementary', 'timestamp', 'bronze_file_id', 'row_seq'],
-    // credit_scope is read-time (live gold only, db/overview.credit_scopes):
-    // the Command Center funnel bucket each credit is counted in
-    facets: [['txn_type', 'Type'], ['zone_guess', 'Zone'], ['used_in_recon', 'Used'],
-             ['credit_scope', 'Credit scope']],
+    // credit_scope stays in the preset (hidden) because Command Center
+    // links filter on it; Source is the column people read
+    hidden: ['credit_scope', 'supplementary', 'timestamp', 'bronze_file_id', 'row_seq',
+             'gold_bank_txn_id', 'source_decided'],
+    clamp: ['narrative'],
+    // source + credit_scope are read-time (live gold, db/overview
+    // credit_sources / credit_scopes); in run scope SourceTable derives
+    // source from the zone (sourceFromZone)
+    facets: [['txn_type', 'Type'], ['source', 'Source'], ['zone_guess', 'Zone'],
+             ['used_in_recon', 'Credits / debits'], ['credit_scope', 'Credit scope']],
   },
   bills: {
     curated: [

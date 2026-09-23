@@ -4,7 +4,7 @@ import type { FrameName, Row } from '../types'
 import { fetchFrame } from '../api'
 import { AMOUNT_COLS, fmtCell } from '../format'
 import { combineFrameRows } from '../combineRuns'
-import { SHARED_PRESETS, type FramePreset } from '../framePresets'
+import { COLUMN_FORMATS, SHARED_PRESETS, sourceFromZone, type FramePreset } from '../framePresets'
 import { BillTrailDetail } from './BillTrailDetail'
 import { DataTable } from './DataTable'
 import { EmptyState, Notice } from './ui'
@@ -52,10 +52,13 @@ function buildColumns(name: FrameName, rows: Row[]): { columns: ColumnDef<Row>[]
     .sort()
 
   const facets = new Map(preset.facets ?? [])
+  const clamped = new Set(preset.clamp ?? [])
   const make = (key: string, label: string): ColumnDef<Row> => ({
     id: key,
     header: label,
-    meta: facets.has(key) ? { facet: true, facetLabel: facets.get(key) } : undefined,
+    meta: facets.has(key)
+      ? { facet: true, facetLabel: facets.get(key), facetFormat: COLUMN_FORMATS[key] }
+      : undefined,
     accessorFn: (row) => row[key],
     cell: (ctx) => {
       const v = ctx.row.original[key]
@@ -77,7 +80,8 @@ function buildColumns(name: FrameName, rows: Row[]): { columns: ColumnDef<Row>[]
         )
       }
       const text = fmtCell(key, v)
-      return text === '—' ? <span className="empty-cell">—</span> : text
+      if (text === '—') return <span className="empty-cell">—</span>
+      return clamped.has(key) ? <span className="cell-clamp" title={text}>{text}</span> : text
     },
   })
 
@@ -168,12 +172,15 @@ export function SourceTable({ runs, name }: Props) {
           // filterable token for bills that went through several attempts
           Attempts_Flag: typeof r.AttemptCount === 'number' && r.AttemptCount > 1 ? 'MULTI_ATTEMPT' : null,
         }))
-      : rows
+      : name === 'bank'
+        ? rows.map((r) => ({ ...r, source: sourceFromZone(r) }))
+        : rows
 
   const { columns, hidden } = buildColumns(name, shown)
   const scope = runs.length > 1 ? `in the ${runs.length} selected runs` : 'in this run'
   return (
     <DataTable
+      fill
       rows={shown}
       columns={columns}
       numericIds={AMOUNT_COLS}

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle, CheckCircle2, Info, RotateCw } from 'lucide-react'
 import type { CustomerInfo } from '../types'
 import { n, pct, plural } from '../format'
+import { COLUMN_HELP } from '../columnHelp'
 
 /* The shared page kit — the Command Center's visual language, used by
    every page so the app reads as one product. Styles live in the
@@ -143,11 +145,17 @@ export function SkeletonCards({ heights }: { heights: number[] }) {
 
 /** A headline figure: eyebrow label, big number, a quiet sub-line.
  *  Clickable when onOpen is given — the figure opens its own rows. */
-export function Stat({ label, value, sub, tone, onOpen, title }: {
+/** What a figure portrays, in the Command Center's colours (settled
+ *  green, review amber, unmatched red, awaiting slate) plus other
+ *  receipts (violet): a top rule, a tinted label and value. */
+export type StatAccent = 'settled' | 'review' | 'open' | 'awaiting' | 'other'
+
+export function Stat({ label, value, sub, tone, accent, onOpen, title }: {
   label: ReactNode
   value: ReactNode
   sub?: ReactNode
   tone?: 'ok' | 'warn' | 'bad' | 'info'
+  accent?: StatAccent
   onOpen?: () => void
   title?: string
 }) {
@@ -158,7 +166,7 @@ export function Stat({ label, value, sub, tone, onOpen, title }: {
       {sub && <span className="ui-stat-sub">{sub}</span>}
     </>
   )
-  const cls = `ui-stat${tone ? ` tone-${tone}` : ''}`
+  const cls = `ui-stat${tone ? ` tone-${tone}` : ''}${accent ? ` accent-${accent}` : ''}`
   return onOpen ? (
     <button type="button" className={`${cls} is-link`} onClick={onOpen} title={title}>{body}</button>
   ) : (
@@ -283,4 +291,78 @@ export function MoreRows({ remaining, colSpan, onMore, noun = 'rows' }: {
       </td>
     </tr>
   )
+}
+
+/** One button of a DecisionDialog. `tone` picks its look: primary (the
+ *  default action, Ctrl+Enter), danger, or plain. */
+export interface DialogAction {
+  label: string
+  tone?: 'primary' | 'danger' | 'plain'
+  run: (note: string) => void | Promise<void>
+}
+
+export const NOTE_MAX = 500
+
+/** A small modal for a decision that deserves a moment: a title, one line
+ *  on what will happen, an optional note, and the actions. Esc or the
+ *  backdrop cancels; Ctrl/⌘+Enter runs the first primary action. The only
+ *  modal in the app — use it sparingly (unlock/reopen, or a decision the
+ *  analyst chose to annotate), never in front of every click. Portalled to
+ *  <body>: its hosts sit in sticky table cells, whose stacking context
+ *  would otherwise draw the table over it. */
+export function DecisionDialog({ title, message, actions, onClose, busy, withNote = true,
+                                 notePlaceholder = 'Add a note (optional)' }: {
+  title: ReactNode
+  message?: ReactNode
+  actions: DialogAction[]
+  onClose: () => void
+  busy?: boolean
+  withNote?: boolean
+  notePlaceholder?: string
+}) {
+  const [note, setNote] = useState('')
+  const noteRef = useRef<HTMLTextAreaElement>(null)
+  const primary = actions.find((a) => a.tone === 'primary') ?? actions[0]
+  useEffect(() => {
+    noteRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  const run = (a: DialogAction) => { if (!busy) void a.run(note.trim()) }
+  return createPortal(
+    <div className="ui-dialog-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="ui-dialog" role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}
+           onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && primary) run(primary) }}>
+        <h3 className="ui-dialog-title">{title}</h3>
+        {message && <div className="ui-dialog-msg">{message}</div>}
+        {withNote && (
+          <label className="ui-dialog-note">
+            <textarea ref={noteRef} rows={3} maxLength={NOTE_MAX} value={note}
+                      placeholder={notePlaceholder} onChange={(e) => setNote(e.target.value)} />
+            <span className="ui-dialog-count">{note.length}/{NOTE_MAX}</span>
+          </label>
+        )}
+        <div className="ui-dialog-actions">
+          <button type="button" className="ui-btn" onClick={onClose} disabled={busy}>Cancel</button>
+          {actions.map((a) => (
+            <button key={a.label} type="button" disabled={busy} onClick={() => run(a)}
+                    className={`ui-btn${a.tone === 'primary' ? ' ui-btn-primary'
+                      : a.tone === 'danger' ? ' ui-btn-danger' : ''}`}>
+              {a.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/** A table header's text with its description (columnHelp.ts) on hover —
+ *  `k` is the column key, or a `ui:` key for a header that is not a data
+ *  column. With no description written it renders the text plainly. */
+export function HelpLabel({ k, children }: { k: string; children: ReactNode }) {
+  const help = COLUMN_HELP[k]
+  return help ? <span className="has-help" title={help}>{children}</span> : <>{children}</>
 }

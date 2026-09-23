@@ -2,7 +2,7 @@ import type { ComponentType } from 'react'
 import {
   ArrowDownLeft, Boxes, FileSearch, FileStack, Gauge, GitMerge,
   Landmark, LayoutDashboard, Link2, ListChecks, ListMinus, ReceiptText,
-  TriangleAlert, Upload, Download, LogOut,
+  TriangleAlert, Upload, Download, LogOut, Settings,
 } from 'lucide-react'
 import type { ReconResponse } from '../types'
 import { workbookUrl } from '../api'
@@ -20,6 +20,7 @@ export type View =
   | 'ar'
   | 'audit'
   | 'architecture'
+  | 'settings'
   | 'summary'
   | 'matched'
   | 'exceptions'
@@ -157,6 +158,7 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
         {DATA_PAGES.map(dataItem)}
 
         <div className="nav-group-label">Platform</div>
+        {openItem({ view: 'settings', label: 'Settings', icon: Settings })}
         {openItem({ view: 'architecture', label: 'Architecture', icon: Boxes })}
       </nav>
 

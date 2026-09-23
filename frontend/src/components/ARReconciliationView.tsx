@@ -15,7 +15,7 @@ import {
   type DateFilterValue,
 } from './DateFilter'
 import {
-  Card, EmptyState, MoreRows, Notice, PageHeader, PartitionBar, RefreshButton, TextLink,
+  Card, EmptyState, HelpLabel, MoreRows, Notice, PageHeader, PartitionBar, RefreshButton, TextLink,
   useProgressiveRows,
 } from './ui'
 
@@ -184,7 +184,7 @@ export function ARReconciliationView({
   const overdueCount = statusCounts.OVERDUE ?? 0
 
   return (
-    <section className="ui-page">
+    <section className="ui-page is-fill">
       <PageHeader title="AR Reconciliation"
                   context={scopeLabel}>
         <DateFilter value={dateFilter} onChange={setDateFilter} units={units} />
@@ -268,7 +268,8 @@ export function ARReconciliationView({
                 </EmptyState>
               ) : (
                 <ul className="ar-aging">
-                  {figs.aging.filter((b) => b.count > 0 || b.key !== 'undated').map((b) => {
+                  {/* only buckets that hold bills — four rows of ₹0 said nothing */}
+                  {figs.aging.filter((b) => b.count > 0).map((b) => {
                     const on = ageFilter.includes(b.key)
                     const tone = BUCKETS.find((x) => x.key === b.key)?.tone ?? 'neutral'
                     return (
@@ -293,7 +294,7 @@ export function ARReconciliationView({
           </div>
 
           {/* ---- the working set ---- */}
-          <section className="ui-card">
+          <section className="ui-card is-fill">
             <div className="ui-tabbar">
               <div className="ui-tabs" role="tablist">
                 <button type="button" role="tab" aria-selected={statusFilter.length === 0}
@@ -327,26 +328,27 @@ export function ARReconciliationView({
                 <TextLink onClick={clearAll}>Clear filters</TextLink>
               </EmptyState>
             ) : (
-              <div className="ledger-wrap ar-table-wrap">
+              <div className="ledger-wrap is-fill ar-table-wrap">
                 <table className="ledger ar-table">
                   <thead>
                     <tr>
-                      <th>Bill</th>
+                      <th><HelpLabel k="bill_number">Bill</HelpLabel></th>
                       <th>
-                        Status
+                        <HelpLabel k="ui:ar_status">Status</HelpLabel>
                         <ColumnFilter label="Status" value={statusFilter} onApply={setStatusFilter}
                                       format={(v) => STATUS_LABEL[v as ArStatus] ?? v}
                                       options={buildOptions(inScope, (r) => r.status)} />
                       </th>
-                      <th>Zone</th>
-                      <th>Due</th>
-                      <th className="num">Age</th>
-                      <th className="num">Net payable</th>
-                      <th>Paid by</th>
-                      <th className="num">Paid</th>
-                      <th className="num">Variance</th>
-                      <th>Match</th>
-                      <th>Run</th>
+                      <th><HelpLabel k="zone">Zone</HelpLabel></th>
+                      <th><HelpLabel k="ui:ar_due">Due</HelpLabel></th>
+                      <th className="num"><HelpLabel k="ui:ar_age">Age</HelpLabel></th>
+                      <th className="num"><HelpLabel k="net_payable_amount">Net payable</HelpLabel></th>
+                      <th><HelpLabel k="ui:ar_paid_by">Paid by</HelpLabel></th>
+                      <th className="num"><HelpLabel k="ui:ar_paid">Paid</HelpLabel></th>
+                      <th className="num"><HelpLabel k="ui:ar_variance">Variance</HelpLabel></th>
+                      <th><HelpLabel k="ui:match">Match</HelpLabel></th>
+                      <th><HelpLabel k="ui:decided_by">Decided by</HelpLabel></th>
+                      <th><HelpLabel k="ui:run">Run</HelpLabel></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -380,11 +382,17 @@ export function ARReconciliationView({
                             : <span className="ar-variance">{inr(r.variance)}</span>}
                         </td>
                         <td className="mono">{r.match_seq !== null ? `M-${r.match_seq}` : '—'}</td>
+                        <td className="nowrap">
+                          {/* in review = nobody has decided yet; a settled row with
+                              no user predates user tracking */}
+                          {r.decided_by ?? (r.status === 'SETTLED'
+                            ? <span className="muted">Not recorded</span> : '—')}
+                        </td>
                         <td className="run-cell" title={r.run_id ?? undefined}>{runLabelFor(runs, r.run_id)}</td>
                       </tr>
                     ))}
                     <MoreRows remaining={drawn.remaining} onMore={drawn.more}
-                              colSpan={11} noun="bills" />
+                              colSpan={12} noun="bills" />
                   </tbody>
                 </table>
               </div>
