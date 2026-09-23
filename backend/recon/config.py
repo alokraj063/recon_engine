@@ -42,10 +42,10 @@ class ReconConfig:
     co7_lookback_days: int = 5
 
     # --- statuses that can produce a credit ---------------------------
-    # CO7 DONE is included because the payment order goes out before the
-    # export refreshes the status to PAYMENT MADE.
+    # CO7 DONE is deliberately NOT here (since 2026-09-22): a payment
+    # order does not guarantee payment, so only PAYMENT MADE can settle.
     paid_statuses: frozenset = field(
-        default_factory=lambda: frozenset({"PAYMENT MADE", "CO7 DONE"})
+        default_factory=lambda: frozenset({"PAYMENT MADE"})
     )
 
     def validate(self):

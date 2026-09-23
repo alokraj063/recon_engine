@@ -17,7 +17,8 @@ into the same canonical gold columns, so display never varies.
 from dataclasses import dataclass, field, replace
 from typing import Dict, FrozenSet, Optional, Tuple
 
-DEFAULT_PAID_STATUSES = frozenset({"PAYMENT MADE", "CO7 DONE"})
+# CO7 DONE removed 2026-09-22: a payment order does not guarantee payment
+DEFAULT_PAID_STATUSES = frozenset({"PAYMENT MADE"})
 DEFAULT_WEIGHTS = {"advice_date": 4, "zone": 2, "co7_date": 1}
 
 # Sections a copy_overrides dict may carry. The CODES (gap_type,
@@ -68,9 +69,15 @@ class FieldMapping:
     exact_signals: Tuple[ExactSignal, ...] = (
         ExactSignal("zone_guess", "zone", 2, key="zone"),)
     eligibility_field: str = "bill_status"
-    # statuses whose FALLBACK date makes a bill expected in the window
-    # (engine._expected_bills' co7_due branch); empty disables the branch
-    fallback_due_statuses: Tuple[str, ...] = ("CO7 DONE",)
+    # Statuses whose FALLBACK date makes a bill expected in the window
+    # (engine._expected_bills' co7_due branch); empty disables the branch.
+    # EMPTY by default since 2026-09-23, on the same reasoning that took
+    # CO7 DONE out of paid_statuses: a payment order can sit as long as a
+    # PASSED or REGISTERED bill does, so it is no more a promise of a
+    # credit than they are. Only an ADVISED bill (payment made) is
+    # expected to be paid. A customer whose source advises differently can
+    # put its own statuses back.
+    fallback_due_statuses: Tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -130,6 +137,11 @@ class MatchRuleSet:
     amount_decimals: int = 2
     # AR view: days past the due date before an open bill shows OVERDUE
     ar_overdue_days: int = 30
+    # How long a credit whose only same-amount bill is still IN FLIGHT
+    # (PASSED / REGISTERED / CO7 DONE) is excused as "awaiting source
+    # status". Past it the status lag is a process problem, not a timing
+    # quirk, and the credit counts as an ordinary unmatched exception.
+    awaiting_status_days: int = 7
 
     def merged(self, overrides: Optional[dict]) -> "MatchRuleSet":
         """A copy with any non-None overrides applied. Unknown keys are

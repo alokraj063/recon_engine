@@ -71,7 +71,18 @@ BANK_ACTIONS = {
     "AWAITING_BILL_DATA":
         "This credit is valued after the latest bill export ingested, so "
         "the bill covering it cannot be here yet. Ingest the next export "
-        "before treating it as a gap.",
+        "before treating it as a gap.",    # read-time too (db/overview.BILL_RETURNED): a bill of this amount
+    # exists but the source system returned it
+    "BILL_RETURNED":
+        "A bill of this amount exists but the source system RETURNED it. "
+        "Check whether it was resubmitted and paid under a new bill "
+        "number, or whether this credit belongs elsewhere.",
+    # read-time too: an analyst rejected the non-IREPS reading of a credit
+    # with no match signal (db/overview.MARKED_IREPS)
+    "MARKED_IREPS":
+        "Marked as IREPS money by an analyst, but no bill in the export "
+        "shares its amount. Match it to a bill by hand, or wait for a "
+        "later export.",
 }
 
 # Matches that stand but need a human eye. They stay in the matched frame
@@ -126,6 +137,8 @@ DEFAULT_LABELS = {
     "UNRECOGNISED_RECEIPT": "Unrecognised receipt",
     "AWAITING_STATUS": "Awaiting source status",
     "AWAITING_BILL_DATA": "Awaiting bill data",
+    "MARKED_IREPS": "Marked IREPS, bill missing",
+    "BILL_RETURNED": "Bill returned, not paid",
     "ADVICE_DATE": "Advised, not received",
     "PAYMENT_ORDER_NO_ADVICE": "Payment order issued, no advice",
     "ZERO_NET_NOTHING_DUE": "Nil payable",
@@ -158,7 +171,8 @@ def resolve_copy(copy_overrides=None):
     return out
 
 
-def _expected_bills(bills, bank_df, window_days, co7_lookback_days, mapping):
+def _expected_bills(bills, bank_df, window_days, co7_lookback_days, mapping,
+                    expected_from=None):
     """
     Which bills could plausibly have been paid in this statement.
 
@@ -172,13 +186,20 @@ def _expected_bills(bills, bank_df, window_days, co7_lookback_days, mapping):
     stmt_hi = pd.to_datetime(bank_df[mapping.bank_date_field]).max()
     lo = stmt_lo - pd.Timedelta(days=window_days)
     hi = stmt_hi + pd.Timedelta(days=window_days)
+    # expected_from floors both branches: a bill due before the first
+    # credit the caller has bank data for cannot be judged unpaid
+    floor = pd.Timestamp(expected_from) if expected_from is not None else None
+    if floor is not None:
+        lo = max(lo, floor)
 
     advised = bills[mapping.bill_date_primary].between(lo, hi)
     if mapping.bill_date_fallback is not None and mapping.fallback_due_statuses:
+        co7_lo = stmt_lo - pd.Timedelta(days=co7_lookback_days)
+        if floor is not None:
+            co7_lo = max(co7_lo, floor)
         co7_due = (
             bills[mapping.eligibility_field].isin(mapping.fallback_due_statuses)
-            & bills[mapping.bill_date_fallback].between(
-                stmt_lo - pd.Timedelta(days=co7_lookback_days), hi)
+            & bills[mapping.bill_date_fallback].between(co7_lo, hi)
         )
     else:
         co7_due = pd.Series(False, index=bills.index)
@@ -320,7 +341,8 @@ def reconcile(bank_df, bill_df, lineage_df=None, extra_lineage_df=None,
               window_days=0, co7_lookback_days=5, date_tolerance_days=2,
               amount_tolerance=0.0, allow_batched=True, max_batch_size=3,
               paid_statuses=None, weights=None, field_map=None,
-              copy_overrides=None, batch_amount_slack=0.5, amount_decimals=2):
+              copy_overrides=None, batch_amount_slack=0.5, amount_decimals=2,
+              unmatchable=None, expected_from=None):
     """
     Returns a dict of frames: matched, bank_only, bill_only, summary,
     bills_enriched. lineage_df is the canonical unified lineage frame
@@ -330,6 +352,14 @@ def reconcile(bank_df, bill_df, lineage_df=None, extra_lineage_df=None,
     selects which gold columns drive the match signals; None = defaults.
     copy_overrides (MatchRuleSet.copy_overrides) swaps the advisory text
     stamped into `action`; codes and structure never change.
+    unmatchable: bank_df index labels never offered to the matcher (they
+    land in bank_only as-is) — db/incremental passes the pool's non-IREPS
+    receipts; every other caller leaves it None.
+    expected_from: a date floor on which bills count as EXPECTED (bill-only
+    exceptions) — never on which bills can be MATCHED. db/incremental
+    passes the earliest credit its ledger has seen, because its wide-open
+    window would otherwise report every advised bill since the first
+    export as unpaid. None (snapshot / CLI / golden) changes nothing.
     """
     from .rules import FieldMapping
     mapping = field_map or FieldMapping()
@@ -352,6 +382,7 @@ def reconcile(bank_df, bill_df, lineage_df=None, extra_lineage_df=None,
         mapping=mapping,
         batch_amount_slack=batch_amount_slack,
         amount_decimals=amount_decimals,
+        unmatchable=unmatchable,
     )
     # Stable id per match, and the settlement stamped onto the bills so a
     # bill row can say which credit paid it. All confidences are recorded;
@@ -374,7 +405,7 @@ def reconcile(bank_df, bill_df, lineage_df=None, extra_lineage_df=None,
         matched["match_id"] = [f"m{n}" for n in range(len(results))]
 
     expected = _expected_bills(bills, bank_df, window_days, co7_lookback_days,
-                               mapping)
+                               mapping, expected_from)
     hit_idx = {i for r in results for i in r.bill_indices}
     bill_only = expected[~expected.index.isin(hit_idx)].copy()
 
@@ -463,6 +494,9 @@ def exception_queue(out):
                               "zone_from_narrative": "zone"})
 
     q = pd.concat([a, b, c], ignore_index=True, sort=False)
+    if q.empty:
+        # a clean run: every credit matched HIGH, no bill left expected
+        return q
     front = ["exception_type", "action", "confidence", "amount", "value_date",
              "zone", "bank_ref", "bank_narrative", "gap_type",
              "CandidateSummary"]

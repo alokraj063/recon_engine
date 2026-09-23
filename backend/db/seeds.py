@@ -91,7 +91,7 @@ def seed_defaults(session):
             customer_id=customer.id,
             name="default",
             is_default=True,
-            paid_statuses=["PAYMENT MADE", "CO7 DONE"],
+            paid_statuses=["PAYMENT MADE"],
             weights={"advice_date": 4, "zone": 2, "co7_date": 1},
             copy_overrides=RAILWAY_COPY,
         ))
