@@ -41,8 +41,15 @@ def _init_with_test_user(self, *args, **kwargs):
     _orig_init(self, *args, **kwargs)
     # deferred: an engine-only test run never imports app.* at all
     from app.auth import AuthUser, require_user
+    from db.audit import set_actor
     user = AuthUser(id=TEST_USER_ID, email=TEST_USER_EMAIL, name="Test User")
-    self.dependency_overrides[require_user] = lambda: user
+
+    # async + set_actor, like the real gate, so events and ledger
+    # decisions made through a test app are stamped with this user
+    async def _test_user():
+        set_actor(user.id)
+        return user
+    self.dependency_overrides[require_user] = _test_user
 
 
 fastapi.FastAPI.__init__ = _init_with_test_user

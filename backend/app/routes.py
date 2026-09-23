@@ -7,6 +7,7 @@ then registered in the bronze file store; results persist to the
 database, so runs survive restarts.
 """
 
+import json
 import logging
 import re
 import shutil
@@ -273,6 +274,7 @@ def _effective_rules(rule_row, form_config):
             "batch_amount_slack": rule_row.batch_amount_slack,
             "amount_decimals": rule_row.amount_decimals,
             "ar_overdue_days": rule_row.ar_overdue_days,
+            "awaiting_status_days": rule_row.awaiting_status_days,
         }
     return MatchRuleSet().merged(db_overrides).merged(form_config)
 
@@ -316,6 +318,10 @@ def _build_payload(out, form_config, selfcheck, names, customer_key,
     }
     if extra_meta:
         payload["meta"].update(extra_meta)
+    if out.get("expected_from") is not None:
+        # incremental: the first day bills count as expected (the summary
+        # labels its "expected" row with it)
+        payload["meta"]["expected_from"] = str(out["expected_from"])[:10]
     if rules is not None:
         # echo the effective config so every run proves which field
         # mapping it actually used (the golden gate can't cover the
@@ -772,7 +778,12 @@ def download_ledger_workbook(customer_id: str = "default"):
 
 # --- ledger (incremental mode) -----------------------------------------
 
-class AcceptBody(BaseModel):
+class DecisionBody(BaseModel):
+    # optional free text the analyst leaves with the decision (<= 500)
+    note: Optional[str] = None
+
+
+class AcceptBody(DecisionBody):
     # override an ambiguous pick: must be one of the match's bills
     gold_bill_id: Optional[str] = None
 
@@ -808,7 +819,8 @@ def accept_match(match_ledger_id: str, body: Optional[AcceptBody] = None):
     WHICH of the match's candidate bills settles the credit."""
     try:
         state = incremental.accept_match(
-            match_ledger_id, body.gold_bill_id if body else None)
+            match_ledger_id, body.gold_bill_id if body else None,
+            body.note if body else None)
     except ValueError as e:
         _fail(400, "INVALID_INPUT", str(e))
     if state is None:
@@ -817,37 +829,112 @@ def accept_match(match_ledger_id: str, body: Optional[AcceptBody] = None):
 
 
 @router.post("/matches/{match_ledger_id}/unlock")
-def unlock_match(match_ledger_id: str):
+def unlock_match(match_ledger_id: str, body: Optional[DecisionBody] = None):
     """Reopen a LOCKED match (USER or AUTO_HIGH): back to OPEN for
     review; nothing is released — re-accept or reject from there."""
-    state = incremental.unlock_match(match_ledger_id)
+    try:
+        state = incremental.unlock_match(match_ledger_id,
+                                         body.note if body else None)
+    except ValueError as e:
+        _fail(400, "INVALID_INPUT", str(e))
     if state is None:
         _fail(404, "MATCH_NOT_FOUND", f"no ledger match {match_ledger_id}")
     return state
 
 
 @router.post("/matches/{match_ledger_id}/reject")
-def reject_match(match_ledger_id: str):
+def reject_match(match_ledger_id: str, body: Optional[DecisionBody] = None):
     """Reject an OPEN match: bills are released and the credit goes back
     into the pool as an OPEN BANK_ONLY exception."""
-    state = incremental.reject_match(match_ledger_id)
+    try:
+        state = incremental.reject_match(match_ledger_id,
+                                         body.note if body else None)
+    except ValueError as e:
+        _fail(400, "INVALID_INPUT", str(e))
     if state is None:
         _fail(404, "MATCH_NOT_FOUND", f"no ledger match {match_ledger_id}")
     return state
 
 
 @router.post("/matches/{match_ledger_id}/reopen")
-def reopen_match(match_ledger_id: str):
+def reopen_match(match_ledger_id: str, body: Optional[DecisionBody] = None):
     """Undo a REJECTED match: back to OPEN, re-claiming the credit and its
     bills and closing the BANK_ONLY exception the rejection opened. Fails
     409 if a later run already claimed either side."""
     try:
-        state = incremental.reopen_match(match_ledger_id)
+        state = incremental.reopen_match(match_ledger_id,
+                                         body.note if body else None)
     except incremental.LedgerConflict as e:
         _fail(409, "MATCH_CONFLICT", str(e))
+    except ValueError as e:
+        _fail(400, "INVALID_INPUT", str(e))
     if state is None:
         _fail(404, "MATCH_NOT_FOUND", f"no ledger match {match_ledger_id}")
     return state
+
+
+@router.post("/exceptions/{exception_id}/non-ireps/{decision}")
+def decide_non_ireps(exception_id: str, decision: str,
+                     body: Optional[DecisionBody] = None):
+    """The Non-IREPS receipts tab's decision on an OPEN BANK_ONLY row:
+    approve (it is a non-IREPS receipt: resolved, kept out of matching
+    for good), reject (it is IREPS money: stays open in the IREPS queue
+    and is matched from the next run on) or undo (drop the decision)."""
+    if decision not in ("approve", "reject", "undo"):
+        _fail(404, "NOT_FOUND", f"unknown decision '{decision}'")
+    try:
+        return incremental.decide_credit_source(exception_id, decision,
+                                                body.note if body else None)
+    except incremental.ExceptionNotFound:
+        _fail(404, "EXCEPTION_NOT_FOUND",
+              f"no bank-only exception {exception_id}")
+    except incremental.LedgerConflict as e:
+        _fail(409, "EXCEPTION_CONFLICT", str(e))
+    except ValueError as e:
+        _fail(400, "INVALID_INPUT", str(e))
+
+
+class CreditSourceBody(BaseModel):
+    customer_id: str = "default"
+    # IREPS | NON_IREPS, or null to drop the decision (auto)
+    source: Optional[str] = None
+
+
+@router.put("/bank/{gold_bank_txn_id}/source")
+def set_credit_source(gold_bank_txn_id: str, body: CreditSourceBody):
+    """Bank Transactions' Source edit: the same decision as the Analyst
+    queue's Non-IREPS Approve (NON_IREPS) / Reject (IREPS) / Undo (null),
+    made from the credit. 409 CREDIT_MATCHED while a live match holds a
+    credit being set NON_IREPS; 400 for a debit or a bad value."""
+    with SessionLocal() as session:
+        customer_pk = _get_customer(session, body.customer_id).id
+    try:
+        return incremental.set_credit_source(
+            customer_pk, gold_bank_txn_id, body.source)
+    except incremental.CreditNotFound:
+        _fail(404, "CREDIT_NOT_FOUND", f"no credit {gold_bank_txn_id}")
+    except incremental.LedgerConflict as e:
+        _fail(409, "CREDIT_MATCHED", str(e))
+    except ValueError as e:
+        _fail(400, "INVALID_INPUT", str(e))
+
+
+class BulkNonIrepsBody(BaseModel):
+    customer_id: str = "default"
+    exception_ids: list[str]
+
+
+@router.post("/exceptions/non-ireps/approve-bulk")
+def approve_non_ireps_bulk(body: BulkNonIrepsBody):
+    """Approve a whole group of non-IREPS receipts at once (the Non-IREPS
+    tab groups them by narrative kind). Rows that are not OPEN are
+    skipped, never half-applied; the response counts both."""
+    with SessionLocal() as session:
+        customer_pk = _get_customer(session, body.customer_id).id
+    try:
+        return incremental.approve_non_ireps_bulk(customer_pk, body.exception_ids)
+    except ValueError as e:
+        _fail(400, "INVALID_INPUT", str(e))
 
 
 @router.get("/ledger")
@@ -863,12 +950,16 @@ def ledger(customer_id: str = "default"):
         # and a Command Center row linking to "its" credits would open a
         # filter holding all three buckets.
         gaps = db_overview.gap_details(session, customer_pk)
+        # ...and, where the reading rests on a same-amount bill (awaiting
+        # status, returned), WHICH bill(s) and their current status
+        gap_bills = db_overview.gap_bills(session, customer_pk, gaps)
         # ...and the human sentence for that reading, resolved through the
         # CUSTOMER'S copy_overrides exactly as a run stamps `action`, so
         # the queue explains a gap in the same words the workbook does.
         copy_text = resolve_copy(_effective_rules(rule_row, {}).copy_overrides)
     for e in payload["exceptions"]:
         e["gap_detail"] = gaps.get(e["id"])
+        e["gap_bills"] = gap_bills.get(e["id"])
         # BILL_ONLY rows carry no stored code (their basis lives on the run
         # frame, not the ledger row), so only the bank side gets copy.
         code = e["gap_detail"] or e.get("gap_type")
@@ -1196,12 +1287,25 @@ def gold_frame(frame: str, customer_id: str = "default",
         # funnel figures can open this table filtered to their own rows
         scopes = (db_overview.credit_scopes(session, customer_pk)
                   if frame == "bank" else None)
+        # IREPS / NON_IREPS per credit (the Source column), read off the
+        # same scopes so it always agrees with "Other receipts"
+        sources = (db_overview.credit_sources(session, customer_pk, scopes)
+                   if frame == "bank" else None)
+        decided = (set(incremental._decisions(session, customer_pk))
+                   if frame == "bank" else set())
     rows = df_to_records(df)
     for rec, (bfid, seq, gid) in zip(rows, provenance):
         rec["bronze_file_id"] = bfid
         rec["row_seq"] = seq
         if scopes is not None:
+            # the row's identity, so the page can edit its Source, and
+            # whether that Source is an analyst's decision
+            rec["gold_bank_txn_id"] = gid
+            rec["source_decided"] = gid in decided
             rec["credit_scope"] = scopes.get(gid)
+            # debits are never reconciled, so they carry no IREPS reading
+            rec["source"] = sources.get(gid) or (
+                "DEBIT" if rec.get("used_in_recon") is False else None)
     return {"name": frame, "count": len(rows), "total": total, "rows": rows}
 
 
@@ -1570,6 +1674,7 @@ class RulesBody(BaseModel):
     batch_amount_slack: float = 0.5
     amount_decimals: int = 2
     ar_overdue_days: int = 30
+    awaiting_status_days: int = 7
 
 
 def _validate_rules(body: RulesBody):
@@ -1609,6 +1714,8 @@ def _validate_rules(body: RulesBody):
         _fail(400, "INVALID_INPUT", "amount_decimals must be 0..6")
     if body.ar_overdue_days < 0:
         _fail(400, "INVALID_INPUT", "ar_overdue_days must be >= 0")
+    if body.awaiting_status_days < 0:
+        _fail(400, "INVALID_INPUT", "awaiting_status_days must be >= 0")
     if body.copy_overrides:
         known_codes = {code for section in DEFAULT_COPY.values()
                        for code in section}
@@ -1647,6 +1754,7 @@ def _rules_to_dict(rules: MatchRuleSet) -> dict:
         "batch_amount_slack": rules.batch_amount_slack,
         "amount_decimals": rules.amount_decimals,
         "ar_overdue_days": rules.ar_overdue_days,
+        "awaiting_status_days": rules.awaiting_status_days,
     }
 
 
@@ -1666,6 +1774,40 @@ def get_customer_config(customer_key: str):
         }
 
 
+# a copy text can be a sentence; the audit keeps enough to recognise it
+_AUDIT_TEXT_MAX = 160
+
+
+def _flatten(value, prefix: str, out: dict) -> dict:
+    """Nested config -> {"weights.zone": 3, "field_map.amount.bank": ...}.
+    Lists stay whole (paid_statuses reads best as one value)."""
+    if isinstance(value, dict):
+        for k in sorted(value):
+            _flatten(value[k], f"{prefix}.{k}" if prefix else str(k), out)
+    else:
+        if isinstance(value, str) and len(value) > _AUDIT_TEXT_MAX:
+            value = value[:_AUDIT_TEXT_MAX - 1] + "…"
+        out[prefix] = value
+    return out
+
+
+def config_changes(before: dict, after: dict) -> list:
+    """[{field, from, to}] for every setting a save actually changed —
+    the config.rules_updated / config.sources_updated audit detail.
+    Settings are not financial content, so values are logged verbatim
+    (the taxonomy's no-PII rule concerns row data, not configuration)."""
+    a, b = _flatten(before, "", {}), _flatten(after, "", {})
+    return [{"field": k, "from": a.get(k), "to": b.get(k)}
+            for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)]
+
+
+def _audited_rules(rule_row) -> dict:
+    d = _rules_to_dict(_effective_rules(rule_row, None))
+    d.pop("copy_effective")   # derived from copy_overrides; one diff is enough
+    # a detached copy: the row's JSON values must not alias the snapshot
+    return json.loads(json.dumps(d, default=str))
+
+
 @router.put("/customers/{customer_key}/config")
 def put_customer_config(customer_key: str, body: RulesBody):
     """Save the customer's matching configuration (six tunables +
@@ -1677,6 +1819,7 @@ def put_customer_config(customer_key: str, body: RulesBody):
         customer, _sources, rule_row = _load_customer_context(
             session, customer_key)
         customer_id_var.set(customer_key)
+        before = _audited_rules(rule_row)
         if rule_row is None:
             rule_row = MatchRuleSetRow(customer_id=customer.id,
                                        name="default", is_default=True)
@@ -1705,12 +1848,17 @@ def put_customer_config(customer_key: str, body: RulesBody):
         rule_row.batch_amount_slack = body.batch_amount_slack
         rule_row.amount_decimals = body.amount_decimals
         rule_row.ar_overdue_days = body.ar_overdue_days
+        rule_row.awaiting_status_days = body.awaiting_status_days
         session.flush()
-        record_event(session, logger, event_type="config.rules_updated",
-                     customer_id=customer.id, entity_type="match_rule_set",
-                     entity_id=rule_row.id,
-                     details={"signals": len(body.field_map.exact_signals),
-                              "copy_overridden": bool(sparse)})
+        changes = config_changes(before, _audited_rules(rule_row))
+        # a save that changed nothing is not a configuration change
+        if changes:
+            record_event(session, logger, event_type="config.rules_updated",
+                         customer_id=customer.id, entity_type="match_rule_set",
+                         entity_id=rule_row.id,
+                         details={"changes": changes,
+                                  "signals": len(body.field_map.exact_signals),
+                                  "copy_overridden": bool(sparse)})
         session.commit()
     return get_customer_config(customer_key)
 
@@ -1773,6 +1921,8 @@ def put_customer_sources(customer_key: str, body: SourcesBody):
         customer, source_configs, _rule_row = _load_customer_context(
             session, customer_key)
         customer_id_var.set(customer_key)
+        before = {st: {"adapter": sc.adapter_key, "params": dict(sc.params or {})}
+                  for st, sc in source_configs.items()}
         for source_type, adapter_key in body.sources.items():
             sc = source_configs.get(source_type)
             if adapter_key is None:
@@ -1811,10 +1961,20 @@ def put_customer_sources(customer_key: str, body: SourcesBody):
                     _fail(400, "INVALID_INPUT",
                           f"no slot '{source_type}' to set params on")
                 sc.params = {**(sc.params or {}), **params}
-        record_event(session, logger, event_type="config.sources_updated",
-                     customer_id=customer.id,
-                     details={"sources": body.sources,
-                              "params_slots": sorted(body.params or {})})
+        session.flush()
+        after = {sc.source_type: {"adapter": sc.adapter_key,
+                                  "params": dict(sc.params or {})}
+                 for sc in session.execute(
+                     select(SourceConfig)
+                     .where(SourceConfig.customer_id == customer.id,
+                            SourceConfig.is_active.is_(True))).scalars()}
+        changes = config_changes(before, after)
+        if changes:
+            record_event(session, logger, event_type="config.sources_updated",
+                         customer_id=customer.id, entity_type="source_config",
+                         details={"changes": changes,
+                                  "sources": body.sources,
+                                  "params_slots": sorted(body.params or {})})
         session.commit()
         updated = {sc.source_type: sc.adapter_key for sc in session.execute(
             select(SourceConfig)
@@ -1854,7 +2014,7 @@ def create_customer(body: CustomerBody):
                                      adapter_key=adapter_key, params=params))
         session.add(MatchRuleSetRow(
             customer_id=customer.id, name="default", is_default=True,
-            paid_statuses=["PAYMENT MADE", "CO7 DONE"],
+            paid_statuses=["PAYMENT MADE"],
             weights={"advice_date": 4, "zone": 2, "co7_date": 1}))
         record_event(session, logger, event_type="customer.created",
                      customer_id=customer.id, entity_type="customer",

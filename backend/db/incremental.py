@@ -8,7 +8,10 @@ UNCHANGED recon matcher — it just receives different frames:
 
   bank side  = the new statement's credits + credits still OPEN as
                BANK_ONLY in the exception ledger, minus credits already
-               consumed by an OPEN/LOCKED match
+               consumed by an OPEN/LOCKED match and minus approved
+               non-IREPS receipts; the non-IREPS ones left (no match
+               signal, not marked IREPS by an analyst) ride along but are
+               never offered to the matcher (reconcile(unmatchable=...))
   bill side  = every bill of the customer not consumed by an OPEN/LOCKED
                match (OPEN keeps a bill claimed until a user rejects it)
 
@@ -28,15 +31,16 @@ from sqlalchemy.exc import IntegrityError
 from logging_setup import get_logger, run_id_var
 from recon.engine import exception_queue, reconcile
 from recon.gold import ensure_schema
-from recon.rules import MatchRuleSet
+from recon.matching.scoring import norm_text
+from recon.rules import FieldMapping, MatchRuleSet
 
-from .audit import record_event
+from .audit import actor_id, record_event
 from .base import SessionLocal
 from .gold import (BANK_MAP, BILLS_MAP, RECOVERIES_MAP, frame_from_gold,
                    lineage_frame, reported_by_file)
 from .reconcile_gold import statement_ids
-from .models import (ExceptionLedger, GoldBankTxn, GoldBill,
-                     GoldRecovery, MatchLedger, MatchLedgerBill, Run)
+from .models import (CreditSource, ExceptionLedger, GoldBankTxn, GoldBill,
+                     GoldRecovery, MatchLedger, MatchLedgerBill, Run, User)
 
 logger = get_logger(__name__)
 
@@ -65,9 +69,59 @@ class LedgerConsumed(Exception):
 # manual match is born LOCKED by USER, never awaiting review.
 MANUAL_CONFIDENCE = "MANUAL"
 
+# An analyst's decision on a credit's source (db/models.CreditSource) and
+# the resolved_by an approved non-IREPS receipt carries. FROZEN: stored.
+IREPS = "IREPS"
+NON_IREPS = "NON_IREPS"
+RESOLVED_NON_IREPS = "USER_NON_IREPS"
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# the optional note an analyst leaves with a decision (accept / reject /
+# unlock / reopen, a non-IREPS approve / reject, a manual match)
+NOTE_MAX = 500
+
+
+def clean_note(note: Optional[str]) -> Optional[str]:
+    """Blank -> None; over NOTE_MAX -> ValueError (400 INVALID_INPUT)."""
+    if note is None:
+        return None
+    note = note.strip() or None
+    if note and len(note) > NOTE_MAX:
+        raise ValueError(f"note is longer than {NOTE_MAX} characters")
+    return note
+
+
+def _stamp_decision(row: MatchLedger, note: Optional[str],
+                    when: Optional[datetime] = None) -> None:
+    """Record WHO made the latest decision on a match (the ambient signed-
+    in user, db/audit.current_actor), when, and the note they left — a
+    new decision replaces the previous note; the audit trail keeps each."""
+    row.decided_by_user_id = actor_id()
+    row.decided_at = when or utcnow()
+    row.decision_note = note
+
+
+def _clear_resolution(exc: ExceptionLedger) -> None:
+    exc.status = "OPEN"
+    exc.resolved_by = None
+    exc.resolved_by_run_id = None
+    exc.resolved_by_match_id = None
+    exc.resolved_by_user_id = None
+    exc.resolved_at = None
+
+
+def _resolve_by_user(exc: ExceptionLedger, resolved_by: str, when: datetime,
+                     match_id: Optional[str] = None) -> None:
+    exc.status = "RESOLVED"
+    exc.resolved_by = resolved_by
+    exc.resolved_by_run_id = None
+    exc.resolved_by_match_id = match_id
+    exc.resolved_by_user_id = actor_id()
+    exc.resolved_at = when
 
 
 def start_run(customer_id: int, params: dict) -> str:
@@ -157,12 +211,8 @@ def _resolve_exceptions_for_match(session, row: MatchLedger, resolved_by: str,
             eid = open_rows.get(gid)
             if eid is None:
                 continue
-            exc = session.get(ExceptionLedger, eid)
-            exc.status = "RESOLVED"
-            exc.resolved_at = now
-            exc.resolved_by = resolved_by
-            exc.resolved_by_match_id = row.id
-            exc.resolved_by_run_id = None
+            _resolve_by_user(session.get(ExceptionLedger, eid),
+                             resolved_by, now, row.id)
             n += 1
     return n
 
@@ -211,11 +261,37 @@ def _reopen_exceptions_for_match(session, row: MatchLedger,
     return n
 
 
+def _decisions(session, customer_id) -> Dict[str, str]:
+    """gold bank txn id -> IREPS | NON_IREPS, for credits an analyst
+    classified (the Analyst queue's Non-IREPS receipts tab)."""
+    return dict(session.execute(
+        select(CreditSource.gold_bank_txn_id, CreditSource.source)
+        .where(CreditSource.customer_id == customer_id)).all())
+
+
+def unmatchable_positions(bank_df, bank_ids, decided, rules: MatchRuleSet) -> set:
+    """Pool positions of the non-IREPS receipts: no value in the FIRST
+    exact signal's bank field — the very test the matcher uses to tag an
+    unmatched credit UNRECOGNISED_RECEIPT — unless an analyst marked the
+    credit IREPS. With no exact signal configured nothing can be told
+    apart, so nothing is ruled out."""
+    signals = (rules.field_map or FieldMapping()).exact_signals
+    if not signals or bank_df.empty:
+        return set()
+    col = signals[0].bank_field
+    if col not in bank_df.columns:
+        return set()
+    return {pos for pos in bank_df.index
+            if not norm_text(bank_df.at[pos, col])
+            and decided.get(bank_ids[int(pos)]) != IREPS}
+
+
 def build_pool(session, customer_id: int, statement_bronze_ids) -> dict:
     """Engine-shaped frames + positional gold-id lists for the matcher.
     `statement_bronze_ids`: one id or several — the new credits are the
     union of the statements' credits (each gold row once)."""
     consumed_txns, consumed_bills = _consumed(session, customer_id)
+    decided = _decisions(session, customer_id)
     open_bank_only = _open_exceptions(session, customer_id, "BANK_ONLY")
 
     txn_rows = list(session.execute(
@@ -232,7 +308,10 @@ def build_pool(session, customer_id: int, statement_bronze_ids) -> dict:
         select(GoldBankTxn)
         .where(GoldBankTxn.id.in_(list(open_bank_only)))).scalars()
         if r.id not in seen] if open_bank_only else []
-    txn_rows = [r for r in txn_rows + carried if r.id not in consumed_txns]
+    # an approved non-IREPS receipt is settled as a classification: it
+    # never re-enters a pool (nor re-opens as an exception)
+    txn_rows = [r for r in txn_rows + carried if r.id not in consumed_txns
+                and decided.get(r.id) != NON_IREPS]
     bank_df, bank_ids = frame_from_gold(txn_rows, BANK_MAP, "bank_txns",
                                         ensure=ensure_schema)
     if "used_in_recon" in bank_df.columns:
@@ -257,7 +336,32 @@ def build_pool(session, customer_id: int, statement_bronze_ids) -> dict:
 
     return {"bank_df": bank_df, "bank_ids": bank_ids,
             "bills_df": bills_df, "bill_ids": bill_ids,
-            "lineage_df": lineage_df, "recoveries_df": recoveries_df}
+            "lineage_df": lineage_df, "recoveries_df": recoveries_df,
+            "decided": decided}
+
+
+def coverage_start(session, customer_id: int, pool_bank_df=None):
+    """The first day the ledger has bank data for: the earliest value date
+    among credits a run has handled (a ledger match or exception) and this
+    run's pool. A statement ingested but never reconciled does not count —
+    its credits were never offered, so its days are not covered yet.
+    None when there is no credit at all."""
+    seen = select(GoldBankTxn.value_date).where(
+        GoldBankTxn.customer_id == customer_id,
+        GoldBankTxn.id.in_(
+            select(MatchLedger.gold_bank_txn_id)
+            .where(MatchLedger.customer_id == customer_id)
+            .union(select(ExceptionLedger.gold_bank_txn_id)
+                   .where(ExceptionLedger.customer_id == customer_id,
+                          ExceptionLedger.gold_bank_txn_id.isnot(None)))))
+    dates = [pd.Timestamp(d) for d in session.execute(
+        select(func.min(seen.subquery().c.value_date))).scalars() if d]
+    if pool_bank_df is not None and not pool_bank_df.empty \
+            and "value_date" in pool_bank_df.columns:
+        m = pd.to_datetime(pool_bank_df["value_date"]).min()
+        if pd.notna(m):
+            dates.append(m)
+    return min(dates).normalize() if dates else None
 
 
 def run_matching(session, customer_id: int, statement_bronze_ids,
@@ -266,6 +370,13 @@ def run_matching(session, customer_id: int, statement_bronze_ids,
     (out frames dict, bank_ids, bill_ids) — ids positional like the
     matcher's indices."""
     pool = build_pool(session, customer_id, statement_bronze_ids)
+    # non-IREPS receipts are kept apart: never scored against a bill, they
+    # land in bank_only as UNRECOGNISED_RECEIPT and in the Non-IREPS tab
+    unmatchable = unmatchable_positions(pool["bank_df"], pool["bank_ids"],
+                                        pool["decided"], rules)
+    # matching stays wide open (any open bill, however old); only which
+    # bills count as EXPECTED is floored at the bank data's first day
+    expected_from = coverage_start(session, customer_id, pool["bank_df"])
     out = reconcile(
         pool["bank_df"], pool["bills_df"], pool["lineage_df"],
         window_days=WIDE_OPEN_DAYS,          # pool replaces the window
@@ -283,7 +394,10 @@ def run_matching(session, customer_id: int, statement_bronze_ids,
         copy_overrides=rules.copy_overrides,
         batch_amount_slack=rules.batch_amount_slack,
         amount_decimals=rules.amount_decimals,
+        unmatchable=unmatchable,
+        expected_from=expected_from,
     )
+    out["expected_from"] = expected_from
     out["bank"] = pool["bank_df"]
     out["bank_all"] = pool["bank_df"]
     out["bills"] = pool["bills_df"]
@@ -395,6 +509,7 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
                 row.resolved_by = "RUN"
                 row.resolved_by_run_id = run_id
                 row.resolved_by_match_id = None
+                row.resolved_by_user_id = None
                 row.resolved_at = now
                 stats["exceptions_resolved"] += 1
 
@@ -436,7 +551,8 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
 
 
 def accept_match(match_ledger_id: str,
-                 gold_bill_id: Optional[str] = None) -> Optional[dict]:
+                 gold_bill_id: Optional[str] = None,
+                 note: Optional[str] = None) -> Optional[dict]:
     """OPEN -> LOCKED by user. Returns the new state or None if unknown.
 
     gold_bill_id lets the analyst OVERRIDE an ambiguous pick: it must be
@@ -444,6 +560,7 @@ def accept_match(match_ledger_id: str,
     candidate swaps the roles so the chosen bill becomes the settled one.
     Raises ValueError if the bill does not belong to this match.
     """
+    note = clean_note(note)
     with SessionLocal() as session:
         row = session.get(MatchLedger, match_ledger_id)
         if row is None:
@@ -468,6 +585,7 @@ def accept_match(match_ledger_id: str,
             row.status = "LOCKED"
             row.locked_by = "USER"
             row.locked_at = utcnow()
+            _stamp_decision(row, note, row.locked_at)
             # the credit and the settling bill(s) are now claimed for good:
             # any OPEN exception still carrying them is closed, by this
             # accept (see item 3.1 — the Exception queue must agree with
@@ -479,16 +597,19 @@ def accept_match(match_ledger_id: str,
                         entity_type="match_ledger", entity_id=row.id,
                         details={"confidence": row.confidence,
                                  "user_overrode_pick": overrode,
-                                 "exceptions_resolved": resolved})
+                                 "exceptions_resolved": resolved,
+                                 "note": note})
             session.commit()
         return {"id": row.id, "status": row.status, "locked_by": row.locked_by}
 
 
-def unlock_match(match_ledger_id: str) -> Optional[dict]:
+def unlock_match(match_ledger_id: str,
+                 note: Optional[str] = None) -> Optional[dict]:
     """LOCKED -> OPEN: reopen the decision (works for USER and AUTO_HIGH
     locks). Links and roles are preserved; pool math is unchanged (OPEN
     matches consume their credit/bills exactly like LOCKED ones), so this
     only returns the match to the review workload."""
+    note = clean_note(note)
     with SessionLocal() as session:
         row = session.get(MatchLedger, match_ledger_id)
         if row is None:
@@ -498,16 +619,18 @@ def unlock_match(match_ledger_id: str) -> Optional[dict]:
             row.status = "OPEN"
             row.locked_by = None
             row.locked_at = None
+            _stamp_decision(row, note)
             record_event(session, logger, event_type="ledger.match_unlocked",
                         customer_id=row.customer_id, run_id=row.run_id,
                         entity_type="match_ledger", entity_id=row.id,
                         details={"confidence": row.confidence,
-                                 "was_locked_by": was})
+                                 "was_locked_by": was, "note": note})
             session.commit()
         return {"id": row.id, "status": row.status, "locked_by": row.locked_by}
 
 
-def reopen_match(match_ledger_id: str) -> Optional[dict]:
+def reopen_match(match_ledger_id: str,
+                 note: Optional[str] = None) -> Optional[dict]:
     """REJECTED -> OPEN: undo a rejection. Unlike unlock_match this DOES
     change pool math — REJECTED is the only status that releases anything —
     so the credit and the picked bills are re-claimed, and the BANK_ONLY
@@ -517,6 +640,7 @@ def reopen_match(match_ledger_id: str) -> Optional[dict]:
     The MatchLedgerBill links and their picked/candidate roles were never
     touched by reject, so the pick structure restores itself.
     """
+    note = clean_note(note)
     with SessionLocal() as session:
         row = session.get(MatchLedger, match_ledger_id)
         if row is None:
@@ -543,6 +667,7 @@ def reopen_match(match_ledger_id: str) -> Optional[dict]:
             row.status = "OPEN"
             row.locked_by = None
             row.locked_at = None
+            _stamp_decision(row, note)
             # the credit and bills are consumed again, so OPEN exception
             # rows for them would be a lie (mirrors finalize_ledger's
             # resolve block; the reject re-opened them)
@@ -551,20 +676,24 @@ def reopen_match(match_ledger_id: str) -> Optional[dict]:
                         customer_id=row.customer_id, run_id=row.run_id,
                         entity_type="match_ledger", entity_id=row.id,
                         details={"confidence": row.confidence,
-                                 "exceptions_resolved": resolved})
+                                 "exceptions_resolved": resolved,
+                                 "note": note})
             session.commit()
         return {"id": row.id, "status": row.status, "locked_by": row.locked_by}
 
 
-def reject_match(match_ledger_id: str) -> Optional[dict]:
+def reject_match(match_ledger_id: str,
+                 note: Optional[str] = None) -> Optional[dict]:
     """OPEN -> REJECTED: releases the bills, and puts the credit back in
     the pool as an OPEN BANK_ONLY exception."""
+    note = clean_note(note)
     with SessionLocal() as session:
         row = session.get(MatchLedger, match_ledger_id)
         if row is None:
             return None
         if row.status == "OPEN":
             row.status = "REJECTED"
+            _stamp_decision(row, note)
             # a run-created match's bills come back via the next run's
             # pool; a MANUAL match has no run coming, so its bills are
             # re-opened as BILL_ONLY exceptions here
@@ -574,12 +703,13 @@ def reject_match(match_ledger_id: str) -> Optional[dict]:
                         customer_id=row.customer_id, run_id=row.run_id,
                         entity_type="match_ledger", entity_id=row.id,
                         details={"confidence": row.confidence,
-                                 "exceptions_reopened": reopened})
+                                 "exceptions_reopened": reopened,
+                                 "note": note})
             session.commit()
         return {"id": row.id, "status": row.status}
 
 
-MANUAL_NOTE_MAX = 500
+MANUAL_NOTE_MAX = NOTE_MAX
 
 
 def create_manual_match(customer_id: int, gold_bank_txn_id: str,
@@ -601,10 +731,7 @@ def create_manual_match(customer_id: int, gold_bank_txn_id: str,
     bill_ids = list(dict.fromkeys(gold_bill_ids))   # dedupe, keep order
     if not bill_ids:
         raise ValueError("a manual match needs at least one bill")
-    if note is not None:
-        note = note.strip() or None
-        if note and len(note) > MANUAL_NOTE_MAX:
-            raise ValueError(f"note is longer than {MANUAL_NOTE_MAX} characters")
+    note = clean_note(note)
     with SessionLocal() as session:
         txn = session.get(GoldBankTxn, gold_bank_txn_id)
         if txn is None or txn.customer_id != customer_id:
@@ -646,7 +773,8 @@ def create_manual_match(customer_id: int, gold_bank_txn_id: str,
             customer_id=customer_id, run_id=None, match_id="manual",
             seq=next_seq, gold_bank_txn_id=gold_bank_txn_id,
             confidence=MANUAL_CONFIDENCE, status="LOCKED",
-            locked_at=now, locked_by="USER", note=note, created_at=now)
+            locked_at=now, locked_by="USER", note=note, created_at=now,
+            decided_by_user_id=actor_id(), decided_at=now)
         session.add(row)
         session.flush()
         for b in bill_ids:
@@ -666,6 +794,241 @@ def create_manual_match(customer_id: int, gold_bank_txn_id: str,
         return {"id": row.id, "seq": row.seq, "status": row.status,
                 "locked_by": row.locked_by, "confidence": row.confidence,
                 "variance": variance, "exceptions_resolved": resolved}
+
+
+class ExceptionNotFound(Exception):
+    """No BANK_ONLY exception with that id."""
+
+
+def _engine_source(exc: Optional[ExceptionLedger], txn: Optional[GoldBankTxn],
+                   live_match: bool) -> str:
+    """The credit's source as the pages show it with NO analyst decision —
+    the reading db/overview.credit_sources serves (restated here because
+    overview imports this module): the engine's stored gap code on a
+    credit the ledger has seen, IREPS for a credit a live match holds,
+    else the zone rule."""
+    zoned = txn is not None and bool((txn.zone_guess or "").strip())
+    if exc is not None:
+        if exc.gap_type is not None:
+            return NON_IREPS if exc.gap_type == "UNRECOGNISED_RECEIPT" else IREPS
+        return IREPS if zoned else NON_IREPS
+    if live_match:
+        return IREPS
+    return IREPS if zoned else NON_IREPS
+
+
+def _source_was(row: Optional[CreditSource], exc, txn, live_match: bool) -> dict:
+    """{"was": IREPS|NON_IREPS, "was_auto": bool} — what the credit read as
+    BEFORE this change. With no decision recorded that is the engine's
+    reading (was_auto true); before 2026-09-23 it was logged as null."""
+    if row is not None:
+        return {"was": row.source, "was_auto": False}
+    return {"was": _engine_source(exc, txn, live_match), "was_auto": True}
+
+
+def decide_credit_source(exception_id: str, decision: str,
+                         note: Optional[str] = None) -> dict:
+    """The Non-IREPS receipts tab's decisions on a BANK_ONLY exception:
+
+      approve  it IS a non-IREPS receipt: CreditSource NON_IREPS, the
+               exception RESOLVED as USER_NON_IREPS; the credit never
+               re-enters a matching pool. Still counted as "Other
+               receipts", never as a resolved exception.
+      reject   it is IREPS money after all: CreditSource IREPS; the
+               exception stays OPEN, now in the IREPS queue, and later
+               runs offer the credit to the matcher.
+      undo     drop the decision; an approved row re-opens.
+
+    approve / reject need an OPEN row, undo a decided one — anything else
+    raises LedgerConflict (409); an unknown id ExceptionNotFound (404)."""
+    if decision not in ("approve", "reject", "undo"):
+        raise ValueError(f"unknown decision {decision!r}")
+    note = clean_note(note)
+    with SessionLocal() as session:
+        exc = session.get(ExceptionLedger, exception_id)
+        if exc is None or exc.exception_type != "BANK_ONLY":
+            raise ExceptionNotFound(exception_id)
+        txn_id = exc.gold_bank_txn_id
+        row = session.execute(
+            select(CreditSource).where(
+                CreditSource.customer_id == exc.customer_id,
+                CreditSource.gold_bank_txn_id == txn_id)).scalar_one_or_none()
+        now = utcnow()
+        was = _source_was(row, exc, session.get(GoldBankTxn, txn_id), False)
+        if decision == "undo":
+            if row is None:
+                raise LedgerConflict("no decision recorded for this credit")
+            session.delete(row)
+            if exc.status == "RESOLVED" and exc.resolved_by == RESOLVED_NON_IREPS:
+                _clear_resolution(exc)
+            event, details = "ledger.credit_source_undone", {**was, "note": note}
+        else:
+            if exc.status != "OPEN":
+                raise LedgerConflict("only an OPEN exception can be decided")
+            source = NON_IREPS if decision == "approve" else IREPS
+            if row is None:
+                row = CreditSource(customer_id=exc.customer_id,
+                                   gold_bank_txn_id=txn_id)
+                session.add(row)
+            row.source = source
+            row.decided_at = now
+            row.decided_by_user_id = actor_id()
+            row.note = note
+            if source == NON_IREPS:
+                _resolve_by_user(exc, RESOLVED_NON_IREPS, now)
+            event = ("ledger.non_ireps_approved" if source == NON_IREPS
+                     else "ledger.non_ireps_rejected")
+            details = {**was, "source": source, "note": note}
+        record_event(session, logger, event_type=event,
+                     customer_id=exc.customer_id, run_id=None,
+                     entity_type="exception_ledger", entity_id=exc.id,
+                     details=details)
+        session.commit()
+        return {"id": exc.id, "status": exc.status,
+                "resolved_by": exc.resolved_by,
+                "source_decision": None if decision == "undo" else row.source}
+
+
+class CreditNotFound(Exception):
+    """No credit with that id for the customer."""
+
+
+def set_credit_source(customer_id: int, gold_bank_txn_id: str,
+                      source: Optional[str]) -> dict:
+    """The Bank Transactions page's Source edit — the SAME decision the
+    Analyst queue's Non-IREPS tab records, from the credit's side:
+
+      NON_IREPS  = approve: CreditSource NON_IREPS and the credit's
+                   BANK_ONLY exception RESOLVED as USER_NON_IREPS. A
+                   credit no run has seen yet gets that resolved row now,
+                   so "Other receipts" counts it at once (and build_pool
+                   never pools it). Refused while a live match holds it.
+      IREPS      = reject: CreditSource IREPS; an approved exception
+                   re-opens (it is IREPS work again) and later runs offer
+                   the credit to the matcher even with no zone.
+      None       = auto: the decision is dropped (an approval re-opens)
+                   and the engine's own reading applies again.
+
+    Debits (used_in_recon false) are never reconciled: ValueError."""
+    if source not in (IREPS, NON_IREPS, None):
+        raise ValueError(f"source must be {IREPS}, {NON_IREPS} or null")
+    with SessionLocal() as session:
+        txn = session.get(GoldBankTxn, gold_bank_txn_id)
+        if txn is None or txn.customer_id != customer_id:
+            raise CreditNotFound(gold_bank_txn_id)
+        if not txn.used_in_recon:
+            raise ValueError("a debit is not reconciled and has no source")
+        holder = session.execute(
+            select(MatchLedger).where(
+                MatchLedger.customer_id == customer_id,
+                MatchLedger.gold_bank_txn_id == txn.id,
+                MatchLedger.status.in_(("OPEN", "LOCKED")))).scalars().first()
+        if source == NON_IREPS:
+            if holder is not None:
+                raise LedgerConflict(
+                    f"credit {txn.bank_ref} is matched by M-{holder.seq}; "
+                    "reject that match first")
+        row = session.execute(
+            select(CreditSource).where(
+                CreditSource.customer_id == customer_id,
+                CreditSource.gold_bank_txn_id == txn.id)).scalar_one_or_none()
+        # the credit's live exception row: the OPEN one, else its approval.
+        # A row some run or match resolved is history and never rewritten.
+        rows = list(session.execute(
+            select(ExceptionLedger).where(
+                ExceptionLedger.customer_id == customer_id,
+                ExceptionLedger.exception_type == "BANK_ONLY",
+                ExceptionLedger.gold_bank_txn_id == txn.id)).scalars())
+        exc = (next((e for e in rows if e.status == "OPEN"), None)
+               or next((e for e in rows if e.resolved_by == RESOLVED_NON_IREPS), None))
+        # any row the ledger holds for the credit carries the engine's code
+        was = _source_was(row, exc or (rows[0] if rows else None), txn,
+                          holder is not None)
+        now = utcnow()
+
+        def reopen_approval():
+            if exc is not None and exc.status == "RESOLVED" \
+                    and exc.resolved_by == RESOLVED_NON_IREPS:
+                _clear_resolution(exc)
+
+        if source is None:
+            if row is not None:
+                session.delete(row)
+            reopen_approval()
+        else:
+            if row is None:
+                row = CreditSource(customer_id=customer_id, gold_bank_txn_id=txn.id)
+                session.add(row)
+            row.source = source
+            row.decided_at = now
+            row.decided_by_user_id = actor_id()
+            row.note = None
+            if source == IREPS:
+                reopen_approval()
+            else:
+                if exc is None:
+                    exc = ExceptionLedger(
+                        customer_id=customer_id, exception_type="BANK_ONLY",
+                        gold_bank_txn_id=txn.id, first_seen_run_id=None,
+                        gap_type="UNRECOGNISED_RECEIPT",
+                        status="OPEN")   # column default applies only at INSERT
+                    session.add(exc)
+                if exc.status == "OPEN":
+                    _resolve_by_user(exc, RESOLVED_NON_IREPS, now)
+        session.flush()
+        record_event(session, logger, event_type="ledger.credit_source_set",
+                     customer_id=customer_id, run_id=None,
+                     entity_type="gold_bank_txn", entity_id=txn.id,
+                     details={**was, "source": source, "via": "bank"})
+        session.commit()
+        return {"gold_bank_txn_id": txn.id, "source_decision": source,
+                "exception_id": exc.id if exc is not None else None,
+                "exception_status": exc.status if exc is not None else None}
+
+
+def approve_non_ireps_bulk(customer_id: int, exception_ids: List[str]) -> dict:
+    """Approve many non-IREPS receipts in ONE transaction — the Non-IREPS
+    tab's "approve this whole group" (125 deposit-interest lines is a
+    normal day). Same effect per row as decide_credit_source("approve");
+    rows that are not OPEN BANK_ONLY rows of this customer are skipped and
+    counted, never half-applied. One audit event carries the count."""
+    ids = list(dict.fromkeys(exception_ids))
+    if not ids:
+        raise ValueError("no exceptions given")
+    with SessionLocal() as session:
+        rows = list(session.execute(
+            select(ExceptionLedger).where(
+                ExceptionLedger.id.in_(ids),
+                ExceptionLedger.customer_id == customer_id,
+                ExceptionLedger.exception_type == "BANK_ONLY")).scalars())
+        now = utcnow()
+        decided = {r.gold_bank_txn_id: r for r in session.execute(
+            select(CreditSource).where(
+                CreditSource.customer_id == customer_id,
+                CreditSource.gold_bank_txn_id.in_(
+                    [r.gold_bank_txn_id for r in rows]))).scalars()}
+        approved = 0
+        for exc in rows:
+            if exc.status != "OPEN":
+                continue
+            row = decided.get(exc.gold_bank_txn_id)
+            if row is None:
+                row = CreditSource(customer_id=customer_id,
+                                   gold_bank_txn_id=exc.gold_bank_txn_id)
+                session.add(row)
+            row.source = NON_IREPS
+            row.decided_at = now
+            row.decided_by_user_id = actor_id()
+            _resolve_by_user(exc, RESOLVED_NON_IREPS, now)
+            approved += 1
+        record_event(session, logger, event_type="ledger.non_ireps_approved",
+                     customer_id=customer_id, run_id=None,
+                     entity_type="exception_ledger", entity_id=None,
+                     details={"approved": approved, "requested": len(ids),
+                              "bulk": True})
+        session.commit()
+        return {"approved": approved, "requested": len(ids),
+                "skipped": len(ids) - approved}
 
 
 def _txn_info(t: Optional[GoldBankTxn]) -> Optional[dict]:
@@ -689,6 +1052,16 @@ def _bill_info(b: Optional[GoldBill]) -> Optional[dict]:
             "net_payable_amount": b.net_payable_amount,
             "zone": b.zone, "bill_status": b.bill_status,
             "due_date": due.isoformat() if due else None}
+
+
+def user_names(session, ids) -> Dict[int, str]:
+    """users.id -> display name, for the "who decided" fields. An id with
+    no users row (a test actor, a removed account) is simply absent."""
+    ids = {i for i in ids if i is not None}
+    if not ids:
+        return {}
+    return dict(session.execute(
+        select(User.id, User.name).where(User.id.in_(ids))).all())
 
 
 def ledger_view(customer_id: int) -> dict:
@@ -723,6 +1096,13 @@ def ledger_view(customer_id: int) -> dict:
         for l in link_rows:
             links_by_match.setdefault(l.match_ledger_id, []).append(l)
         seq_by_match = {m.id: m.seq for m in match_rows}
+        source_rows = {r.gold_bank_txn_id: r for r in session.execute(
+            select(CreditSource)
+            .where(CreditSource.customer_id == customer_id)).scalars()}
+        names = user_names(session,
+                           {m.decided_by_user_id for m in match_rows}
+                           | {e.resolved_by_user_id for e in exc_rows}
+                           | {r.decided_by_user_id for r in source_rows.values()})
 
         matches = [{
             "id": m.id, "run_id": m.run_id, "match_id": m.match_id,
@@ -732,6 +1112,11 @@ def ledger_view(customer_id: int) -> dict:
             "created_at": m.created_at.isoformat(),
             "locked_at": m.locked_at.isoformat() if m.locked_at else None,
             "note": m.note,
+            # the latest user decision: who (None = the system, e.g. an
+            # AUTO_HIGH lock, or a decision older than 2026-09-23), when, why
+            "decided_by": names.get(m.decided_by_user_id),
+            "decided_at": m.decided_at.isoformat() if m.decided_at else None,
+            "decision_note": m.decision_note,
             "txn": _txn_info(txns.get(m.gold_bank_txn_id)),
             "bills": [{"gold_bill_id": l.gold_bill_id, "role": l.role,
                        **(_bill_info(bills.get(l.gold_bill_id))
@@ -751,9 +1136,16 @@ def ledger_view(customer_id: int) -> dict:
             "resolved_by_match_seq": seq_by_match.get(e.resolved_by_match_id),
             "resolved_at": e.resolved_at.isoformat() if e.resolved_at else None,
             "gap_type": e.gap_type,
+            "resolved_by_user": names.get(e.resolved_by_user_id),
+            # an analyst's IREPS / NON_IREPS decision on the credit, if any
+            "source_decision": _src.source if _src else None,
+            "source_decided_by": names.get(_src.decided_by_user_id) if _src else None,
+            "source_note": _src.note if _src else None,
             "txn": _txn_info(txns.get(e.gold_bank_txn_id))
             if e.gold_bank_txn_id else None,
             "bill": _bill_info(bills.get(e.gold_bill_id))
             if e.gold_bill_id else None,
-        } for e in exc_rows]
+        } for e in exc_rows
+          for _src in [source_rows.get(e.gold_bank_txn_id)
+                       if e.gold_bank_txn_id else None]]
     return {"matches": matches, "exceptions": exceptions}

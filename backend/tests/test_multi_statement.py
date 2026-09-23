@@ -22,7 +22,7 @@ from db import SessionLocal, incremental, init_db, reconcile_gold  # noqa: E402
 from db.bronze import register_file  # noqa: E402
 from db.gold import reported_by_file  # noqa: E402
 from db.ingest import ingest_gold_frames  # noqa: E402
-from db.models import (AuditLog, BronzeFile, Customer, ExceptionLedger,  # noqa: E402
+from db.models import (AuditLog, BronzeFile, CreditSource, Customer, ExceptionLedger,  # noqa: E402
                        GoldBankTxn, GoldBill, GoldFileRow, GoldRecovery,
                        MatchLedger, MatchLedgerBill, MatchRuleSetRow, Run,
                        RunFrame, RunMatchBill, SilverRecord, SourceConfig)
@@ -65,7 +65,7 @@ def world(tmp_path):
         s.execute(delete(RunFrame).where(RunFrame.run_id.in_(run_ids)))
         s.execute(delete(MatchLedgerBill).where(MatchLedgerBill.match_ledger_id.in_(match_ids)))
         # AuditLog before Run: audit_log.run_id FKs runs (enforced on Postgres)
-        for model in (MatchLedger, ExceptionLedger, AuditLog, Run, GoldFileRow,
+        for model in (CreditSource, MatchLedger, ExceptionLedger, AuditLog, Run, GoldFileRow,
                       GoldRecovery, GoldBill, GoldBankTxn, SilverRecord, BronzeFile,
                       SourceConfig, MatchRuleSetRow):
             s.execute(delete(model).where(model.customer_id == pk))

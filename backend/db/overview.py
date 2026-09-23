@@ -11,9 +11,9 @@ from sqlalchemy import and_, exists, false, not_, or_, true
 from sqlalchemy import func, select
 
 from . import incremental
-from .models import (AuditLog, BronzeFile, ExceptionLedger, GoldBankTxn,
+from .models import (AuditLog, BronzeFile, CreditSource, ExceptionLedger, GoldBankTxn,
                      GoldBill, GoldLineageDoc, GoldRecovery, MatchLedger,
-                     MatchLedgerBill, Run)
+                     MatchLedgerBill, MatchRuleSetRow, Run)
 
 
 def _audit_entity_context(session, rows) -> dict:
@@ -57,9 +57,65 @@ def _audit_entity_context(session, rows) -> dict:
             }
 
     for rid in by_type.get("match_rule_set", set()):
-        out[("match_rule_set", rid)] = {
-            "label": f"rule set #{rid}", "context": None,
+        out[("match_rule_set", rid)] = {"label": "Matching config", "context": None}
+
+    txn_ids = set(by_type.get("gold_bank_txn", set()))
+    exc_ids = by_type.get("exception_ledger", set())
+    excs = {}
+    if exc_ids:
+        excs = {e.id: e for e in session.execute(
+            select(ExceptionLedger).where(ExceptionLedger.id.in_(exc_ids))).scalars()}
+        txn_ids |= {e.gold_bank_txn_id for e in excs.values() if e.gold_bank_txn_id}
+    txns = {t.id: t for t in session.execute(
+        select(GoldBankTxn).where(GoldBankTxn.id.in_(txn_ids))).scalars()} \
+        if txn_ids else {}
+    bill_ids = ({e.gold_bill_id for e in excs.values() if e.gold_bill_id}
+                | set(by_type.get("gold_bill", set())))
+    bills = {b.id: b for b in session.execute(
+        select(GoldBill).where(GoldBill.id.in_(bill_ids))).scalars()} \
+        if bill_ids else {}
+
+    def bill_label(b):
+        # a works-contract bill has no number ('-'): name it by its CO6
+        if b is None:
+            return "Bill"
+        num = (b.bill_number or "").strip()
+        if num and num != "-":
+            return f"Bill · {num}"
+        return f"Bill · CO6 {b.submission_ref}" if b.submission_ref else "Bill"
+
+    def credit_label(t):
+        return f"Credit · {t.bank_ref}" if t is not None and t.bank_ref else "Credit"
+
+    for tid in by_type.get("gold_bank_txn", set()):
+        t = txns.get(tid)
+        out[("gold_bank_txn", tid)] = {
+            "label": credit_label(t),
+            "context": {"bank_ref": t.bank_ref,
+                        "value_date": t.value_date.isoformat() if t.value_date else None}
+            if t is not None else None,
         }
+    for eid, e in excs.items():
+        if e.gold_bank_txn_id:
+            t = txns.get(e.gold_bank_txn_id)
+            label = credit_label(t)
+            ctx = {"bank_ref": t.bank_ref if t else None, "exception": "Credit with no bill"}
+        else:
+            b = bills.get(e.gold_bill_id)
+            num = b.bill_number if b is not None else None
+            label = bill_label(b)
+            ctx = {"bill_number": num, "exception": "Bill with no credit"}
+        out[("exception_ledger", eid)] = {"label": label, "context": ctx}
+
+    for bid in by_type.get("gold_bill", set()):
+        b = bills.get(bid)
+        num = b.bill_number if b is not None else None
+        out[("gold_bill", bid)] = {"label": bill_label(b),
+                                   "context": {"bill_number": num} if num else None}
+    for rid in by_type.get("run", set()):
+        out[("run", rid)] = {"label": f"Run · {rid[:8]}", "context": None}
+    for cid in by_type.get("customer", set()):
+        out[("customer", cid)] = {"label": "Customer", "context": None}
     return out
 
 
@@ -75,9 +131,13 @@ def audit_events(session, customer_pk: int, limit: int = 500) -> list:
         .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
         .limit(limit)).scalars())
     enrich = _audit_entity_context(session, rows)
+    names = incremental.user_names(session, {r.actor_user_id for r in rows})
     out = []
     for r in rows:
         e = enrich.get((r.entity_type, str(r.entity_id))) if r.entity_type else None
+        # a non-entity config event still names what it touched
+        if e is None and r.entity_type == "source_config":
+            e = {"label": "Source setup", "context": None}
         out.append({
             "id": r.id,
             "event_type": r.event_type,
@@ -89,6 +149,10 @@ def audit_events(session, customer_pk: int, limit: int = 500) -> list:
             "run_id": r.run_id,
             "details": r.details,
             "created_at": r.created_at.isoformat(),
+            # who: the signed-in user behind the event, None = the system
+            # (or an event older than 2026-09-23, before users were recorded)
+            "actor_user_id": r.actor_user_id,
+            "actor": names.get(r.actor_user_id),
         })
     return out
 
@@ -130,19 +194,61 @@ def _date_bounds(col, date_from, date_to, is_datetime=False):
 
 
 UNRECOGNISED = "UNRECOGNISED_RECEIPT"
+# credit_sources.source values (an analyst's decision, db/models.CreditSource)
+IREPS = incremental.IREPS
+NON_IREPS = incremental.NON_IREPS
+# exception_ledger.resolved_by for an approved non-IREPS receipt — a
+# classification, not a reconciliation: never counted as "resolved"
+RESOLVED_NON_IREPS = incremental.RESOLVED_NON_IREPS
 
 
-def unrecognised_clause():
-    """WHERE clause (needs GoldBankTxn joined) picking the BANK_ONLY
-    exceptions that are unrecognised receipts: the stored gap code, or —
-    for rows written before the code was stored — a blank zone_guess,
-    which is exactly what makes the default mapping assign the code.
-    An unrecognised receipt carries no match signal, can never pair with
-    a bill, and is therefore kept OUT of every match-rate denominator."""
+def decided_clause(source: str):
+    """WHERE clause (needs GoldBankTxn joined): an analyst decided this
+    credit's source is `source` (IREPS | NON_IREPS)."""
+    return exists(
+        select(CreditSource.id)
+        .where(CreditSource.gold_bank_txn_id == GoldBankTxn.id,
+               CreditSource.source == source)
+        .correlate(GoldBankTxn))
+
+
+def _engine_unrecognised():
+    """The engine's own reading, before any analyst decision: the stored
+    gap code, or — for rows written before the code was stored — a blank
+    zone_guess, which is exactly what makes the default mapping assign it."""
     return or_(ExceptionLedger.gap_type == UNRECOGNISED,
                and_(ExceptionLedger.gap_type.is_(None),
                     or_(GoldBankTxn.zone_guess.is_(None),
                         GoldBankTxn.zone_guess == "")))
+
+
+def unrecognised_clause():
+    """WHERE clause (needs GoldBankTxn joined) picking the BANK_ONLY
+    exceptions that are unrecognised (non-IREPS) receipts. An analyst's
+    decision wins either way (credit_sources); without one, the engine's
+    reading (_engine_unrecognised). An unrecognised receipt carries no
+    match signal, is never offered to the matcher (db/incremental
+    build_pool), and is therefore kept OUT of every match-rate
+    denominator."""
+    return and_(not_(decided_clause(IREPS)),
+                or_(decided_clause(NON_IREPS), _engine_unrecognised()))
+
+
+def non_ireps_clause():
+    """The exception rows that ARE the customer's non-IREPS receipts:
+    open ones, plus the ones an analyst approved (RESOLVED as
+    USER_NON_IREPS). Needs GoldBankTxn joined. "Other receipts" counts
+    these, so approving a receipt never moves it into the rate."""
+    return and_(unrecognised_clause(),
+                or_(ExceptionLedger.status == "OPEN",
+                    ExceptionLedger.resolved_by == RESOLVED_NON_IREPS))
+
+
+def not_non_ireps_resolution():
+    """Resolved exceptions minus the non-IREPS approvals — a
+    classification is not a reconciliation."""
+    return or_(ExceptionLedger.resolved_by.is_(None),
+               ExceptionLedger.resolved_by != RESOLVED_NON_IREPS)
 
 
 # Source-system statuses meaning "the bill is in flight but payment has
@@ -153,16 +259,27 @@ def unrecognised_clause():
 # the match-rate denominator — like an unrecognised receipt, for a
 # different reason. RETURNED is deliberately absent: money against a
 # RETURNED bill IS surprising and must stay visible in the rate.
-IN_FLIGHT_STATUSES = ("PASSED", "REGISTERED")
+# CO7 DONE joined 2026-09-22 when it stopped counting as paid: a credit
+# whose only same-amount bill has a payment order but no PAYMENT MADE yet
+# is the same status lag, not a matching failure.
+IN_FLIGHT_STATUSES = ("PASSED", "REGISTERED", "CO7 DONE")
+# RETURNED is deliberately NOT in flight: money against a bill IREPS
+# rejected is surprising and stays in the match rate. It gets its own
+# read-time reading instead (BILL_RETURNED below), because "no bill in
+# the export" would send an analyst looking for the wrong thing.
+RETURNED_STATUSES = ("RETURNED",)
 # IREPS rounds Net Amt to whole rupees, so the amount join carries ±1.
 IN_FLIGHT_AMOUNT_SLACK = 1.0
+# How long "the status lags the money" stays a fair excuse, counted from
+# the CREDIT's value date against the data's own last day. Per-customer
+# (MatchRuleSet.awaiting_status_days); this is the dataclass default.
+AWAITING_STATUS_DAYS = 7
 
 
-def awaiting_status_clause(customer_pk: int,
-                           statuses=IN_FLIGHT_STATUSES,
-                           slack: float = IN_FLIGHT_AMOUNT_SLACK):
+def same_amount_bill_clause(customer_pk: int, statuses,
+                            slack: float = IN_FLIGHT_AMOUNT_SLACK):
     """WHERE clause (needs GoldBankTxn joined) picking open BANK_ONLY
-    credits whose amount matches a bill still IN FLIGHT (statuses above).
+    credits whose amount matches a bill in one of `statuses`.
 
     The date guard keeps coincidences out: the bill must have been
     submitted on or before the credit's value date, because money cannot
@@ -180,6 +297,14 @@ def awaiting_status_clause(customer_pk: int,
                or_(bill_date.is_(None),
                    bill_date <= GoldBankTxn.value_date))
         .correlate(GoldBankTxn))
+
+
+def awaiting_status_clause(customer_pk: int,
+                           statuses=IN_FLIGHT_STATUSES,
+                           slack: float = IN_FLIGHT_AMOUNT_SLACK):
+    """The same clause for the IN-FLIGHT statuses — the credit could not
+    have matched yet, so it is excused from the match rate."""
+    return same_amount_bill_clause(customer_pk, statuses, slack)
 
 
 # How long a credit may be excused as "the bill export has not arrived
@@ -243,6 +368,36 @@ def awaiting_bill_data_clause(bills_through, as_of,
 # filter on. Frozen codes: they travel to the UI and back as filters.
 AWAITING_STATUS = "AWAITING_STATUS"
 AWAITING_BILL_DATA = "AWAITING_BILL_DATA"
+# an analyst rejected the non-IREPS reading of a credit with no match
+# signal: it is IREPS money whose bill is missing. Read-time too — the
+# stored gap code (from the engine) still says UNRECOGNISED_RECEIPT.
+MARKED_IREPS = "MARKED_IREPS"
+# a bill of this amount exists but was RETURNED — still real work, still
+# in the rate, but the analyst should look at the returned bill
+BILL_RETURNED = "BILL_RETURNED"
+# read-time codes that are NOT a credit-funnel bucket: the credit stays
+# RECOGNISED (it counts in the match rate), only its WORDING changes
+NOT_A_SCOPE = (MARKED_IREPS, BILL_RETURNED)
+
+
+def awaiting_window_clause(as_of, days: int):
+    """WHERE clause (needs GoldBankTxn joined): the credit is still young
+    enough to be excused — its value date is within `days` of the data's
+    own last day. With no data at all nothing is excused."""
+    if as_of is None:
+        return false()
+    return GoldBankTxn.value_date >= as_of - timedelta(days=days)
+
+
+def awaiting_status_days(session, customer_pk: int) -> int:
+    """The customer's excuse window, NULL meaning the dataclass default —
+    read here rather than threaded through every caller, because these are
+    read-time views and the customer's row is the only source that applies."""
+    v = session.execute(
+        select(MatchRuleSetRow.awaiting_status_days)
+        .where(MatchRuleSetRow.customer_id == customer_pk,
+               MatchRuleSetRow.is_default.is_(True))).scalar()
+    return AWAITING_STATUS_DAYS if v is None else v
 
 
 def gap_details(session, customer_pk: int) -> dict:
@@ -267,13 +422,67 @@ def gap_details(session, customer_pk: int) -> dict:
 
     # same order, same not_() guards as the denominator in overview()
     out = {i: UNRECOGNISED for i in ids(unrecognised_clause())}
+    # disjoint from the line above (unrecognised_clause excludes it); an
+    # awaiting reading below still wins — it says WHY there is no bill
+    out.update({i: MARKED_IREPS for i in ids(decided_clause(IREPS),
+                                             _engine_unrecognised())})
+    # ...and only while the credit is young enough to excuse (the status
+    # lag is a timing quirk for a few days, a process problem after that)
+    excuse = awaiting_window_clause(data_as_of, awaiting_status_days(session, customer_pk))
     out.update({i: AWAITING_STATUS for i in ids(
         not_(unrecognised_clause()),
-        awaiting_status_clause(customer_pk))})
+        awaiting_status_clause(customer_pk), excuse)})
     out.update({i: AWAITING_BILL_DATA for i in ids(
         not_(unrecognised_clause()),
-        not_(awaiting_status_clause(customer_pk)),
+        not_(and_(awaiting_status_clause(customer_pk), excuse)),
         awaiting_bill_data_clause(bills_through, data_as_of))})
+    # last: a same-amount bill exists but IREPS returned it. An in-flight
+    # bill (above) is the softer reading and wins when both exist.
+    out.update({i: BILL_RETURNED for i in ids(
+        not_(unrecognised_clause()),
+        not_(and_(awaiting_status_clause(customer_pk), excuse)),
+        not_(awaiting_bill_data_clause(bills_through, data_as_of)),
+        same_amount_bill_clause(customer_pk, RETURNED_STATUSES))})
+    return out
+
+
+GAP_BILLS_MAX = 5
+
+
+def gap_bills(session, customer_pk: int, gaps: dict) -> dict:
+    """``{exception_ledger.id: [bill, ...]}`` for the OPEN BANK_ONLY rows
+    whose read-time reading rests on a same-amount bill — AWAITING_STATUS
+    (an in-flight bill) and BILL_RETURNED (a returned one) — so the queue
+    can show WHICH bill and its current status, not just that one exists.
+    Same predicate as same_amount_bill_clause, joined instead of EXISTS.
+    Newest bill first, at most GAP_BILLS_MAX per credit (+ "more")."""
+    wanted = {AWAITING_STATUS: IN_FLIGHT_STATUSES, BILL_RETURNED: RETURNED_STATUSES}
+    out: dict = {}
+    for code, statuses in wanted.items():
+        ids = [i for i, c in gaps.items() if c == code]
+        if not ids:
+            continue
+        bill_date = func.coalesce(GoldBill.submission_date, GoldBill.bill_date)
+        rows = session.execute(
+            select(ExceptionLedger.id, GoldBill.id, GoldBill.bill_number,
+                   GoldBill.bill_status, GoldBill.submission_ref, bill_date)
+            .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
+            .join(GoldBill, and_(
+                GoldBill.customer_id == customer_pk,
+                func.upper(func.trim(GoldBill.bill_status)).in_(
+                    [st.upper() for st in statuses]),
+                GoldBill.net_payable_amount.isnot(None),
+                func.abs(GoldBill.net_payable_amount - GoldBankTxn.amount)
+                <= IN_FLIGHT_AMOUNT_SLACK,
+                or_(bill_date.is_(None), bill_date <= GoldBankTxn.value_date)))
+            .where(ExceptionLedger.id.in_(ids))
+            .order_by(ExceptionLedger.id, bill_date.desc())).all()
+        for eid, bid, num, status, ref, bdate in rows:
+            lst = out.setdefault(eid, [])
+            if len(lst) < GAP_BILLS_MAX:
+                lst.append({"gold_bill_id": bid, "bill_number": num,
+                            "bill_status": status, "submission_ref": ref,
+                            "bill_date": _as_date(bdate).isoformat() if bdate else None})
     return out
 
 
@@ -301,8 +510,57 @@ def credit_scopes(session, customer_pk: int) -> dict:
         for eid, tid in session.execute(
                 select(ExceptionLedger.id, ExceptionLedger.gold_bank_txn_id)
                 .where(ExceptionLedger.id.in_(list(by_exc)))):
-            if tid in out:
+            # MARKED_IREPS / BILL_RETURNED are wordings, not buckets:
+            # those credits stay RECOGNISED and count in the match rate
+            if tid in out and by_exc[eid] not in NOT_A_SCOPE:
                 out[tid] = by_exc[eid]
+    # approved non-IREPS receipts are RESOLVED, so gap_details (OPEN only)
+    # does not see them — they stay "Other receipts", the same rows
+    # overview() counts through non_ireps_clause
+    for tid in session.execute(
+            select(ExceptionLedger.gold_bank_txn_id)
+            .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
+            .where(ExceptionLedger.customer_id == customer_pk,
+                   ExceptionLedger.exception_type == "BANK_ONLY",
+                   ExceptionLedger.status == "RESOLVED",
+                   non_ireps_clause())).scalars():
+        if tid in out:
+            out[tid] = UNRECOGNISED
+    return out
+
+
+def credit_sources(session, customer_pk: int, scopes: dict | None = None) -> dict:
+    """``{gold_bank_txn_id: IREPS | NON_IREPS}`` for every credit — the
+    Bank Transactions page's Source column. A credit the ledger has seen
+    reads off credit_scopes (UNRECOGNISED_RECEIPT = NON_IREPS, every other
+    bucket is IREPS money), so the column always agrees with the Command
+    Center's "Other receipts". A credit no incremental run has seen yet
+    (no exception, no live match) has no ledger reading: the analyst's
+    decision, else the zone rule the engine applies, answers there."""
+    scopes = scopes if scopes is not None else credit_scopes(session, customer_pk)
+    seen = set(session.execute(
+        select(ExceptionLedger.gold_bank_txn_id)
+        .where(ExceptionLedger.customer_id == customer_pk,
+               ExceptionLedger.gold_bank_txn_id.isnot(None))).scalars())
+    seen |= set(session.execute(
+        select(MatchLedger.gold_bank_txn_id)
+        .where(MatchLedger.customer_id == customer_pk,
+               MatchLedger.status != "REJECTED")).scalars())
+    decided = dict(session.execute(
+        select(CreditSource.gold_bank_txn_id, CreditSource.source)
+        .where(CreditSource.customer_id == customer_pk)).all())
+    unseen = [t for t in scopes if t not in seen and t not in decided]
+    zone = dict(session.execute(
+        select(GoldBankTxn.id, GoldBankTxn.zone_guess)
+        .where(GoldBankTxn.id.in_(unseen))).all()) if unseen else {}
+    out = {}
+    for tid, scope in scopes.items():
+        if tid in seen:
+            out[tid] = NON_IREPS if scope == UNRECOGNISED else IREPS
+        elif tid in decided:
+            out[tid] = decided[tid]
+        else:
+            out[tid] = IREPS if (zone.get(tid) or "").strip() else NON_IREPS
     return out
 
 
@@ -444,7 +702,8 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
     if filtered:
         open_exc["BANK_ONLY"] = exc_count(exc_bank(ExceptionLedger.status == "OPEN"))
         open_exc["BILL_ONLY"] = exc_count(exc_bill(ExceptionLedger.status == "OPEN"))
-        resolved = (exc_count(exc_bank(ExceptionLedger.status == "RESOLVED"))
+        resolved = (exc_count(exc_bank(ExceptionLedger.status == "RESOLVED",
+                                       not_non_ireps_resolution()))
                     + exc_count(exc_bill(ExceptionLedger.status == "RESOLVED")))
     else:
         for etype, n in session.execute(
@@ -455,24 +714,26 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
             open_exc[etype] = n
         resolved = _count(session, ExceptionLedger,
                           ExceptionLedger.customer_id == customer_pk,
-                          ExceptionLedger.status == "RESOLVED")
+                          ExceptionLedger.status == "RESOLVED",
+                          not_non_ireps_resolution())
     # the unrecognised subset of open BANK_ONLY (same scope either way —
     # the join-based count equals the plain one when nothing is filtered)
     open_exc["UNRECOGNISED"] = exc_count(
         exc_bank(ExceptionLedger.status == "OPEN", unrecognised_clause()))
     # credits waiting on the SOURCE SYSTEM's status, not on a match: the
     # not_(unrecognised_clause()) keeps them from being subtracted twice
+    bills_through, data_as_of = coverage(session, customer_pk)
+    excuse = awaiting_window_clause(data_as_of, awaiting_status_days(session, customer_pk))
     awaiting_status_cl = (ExceptionLedger.status == "OPEN",
                           not_(unrecognised_clause()),
-                          awaiting_status_clause(customer_pk))
+                          awaiting_status_clause(customer_pk), excuse)
     awaiting_status_credits = exc_count(exc_bank(*awaiting_status_cl))
     # credits whose bill export has not arrived yet (see coverage()) —
     # the three buckets are mutually exclusive, so the denominator never
     # subtracts the same credit twice
-    bills_through, data_as_of = coverage(session, customer_pk)
     awaiting_bill_data_cl = (ExceptionLedger.status == "OPEN",
                              not_(unrecognised_clause()),
-                             not_(awaiting_status_clause(customer_pk)),
+                             not_(and_(awaiting_status_clause(customer_pk), excuse)),
                              awaiting_bill_data_clause(bills_through, data_as_of))
     awaiting_bill_data_credits = exc_count(exc_bank(*awaiting_bill_data_cl))
 
@@ -488,15 +749,13 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
     # customer matching on something other than zone splits correctly too.
     # Everything that is not an unrecognised receipt is in scope: matched,
     # awaiting, or a genuine gap.
-    out_of_scope_credits = open_exc["UNRECOGNISED"]
-    out_of_scope_value = session.execute(
-        select(func.coalesce(func.sum(GoldBankTxn.amount), 0.0))
-        .select_from(ExceptionLedger)
-        .join(GoldBankTxn, GoldBankTxn.id == ExceptionLedger.gold_bank_txn_id)
-        .where(ExceptionLedger.customer_id == customer_pk,
-               ExceptionLedger.exception_type == "BANK_ONLY",
-               ExceptionLedger.status == "OPEN",
-               unrecognised_clause(), *txn_cl, *bank_only_cl)).scalar() or 0.0
+    # open non-IREPS receipts AND the ones an analyst approved as such:
+    # approving one classifies it, it never moves it into the rate
+    out_of_scope_credits = exc_count(exc_bank(non_ireps_clause()))
+    out_of_scope_value = exc_bank_value(non_ireps_clause())
+    # the open-only part, which is what open BANK_ONLY has to shed
+    open_out_of_scope_value = exc_bank_value(ExceptionLedger.status == "OPEN",
+                                             unrecognised_clause())
     credits_value = session.execute(
         select(func.coalesce(func.sum(GoldBankTxn.amount), 0.0))
         .where(GoldBankTxn.customer_id == customer_pk,
@@ -535,7 +794,7 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
         "bank_only": in_scope_bank_only,
         "bill_only": open_exc["BILL_ONLY"],
         "count": in_scope_bank_only + open_exc["BILL_ONLY"],
-        "value": bank_open_value - out_of_scope_value - awaiting_value + bill_open_value,
+        "value": bank_open_value - open_out_of_scope_value - awaiting_value + bill_open_value,
         # what the tile names as not counted
         "awaiting": awaiting_count,
         "awaiting_value": awaiting_value,
@@ -579,7 +838,7 @@ def overview(session, customer_pk: int, date_from=None, date_to=None,
                    ExceptionLedger.status == "OPEN",
                    ExceptionLedger.exception_type == "BANK_ONLY",
                    not_(unrecognised_clause()),
-                   not_(awaiting_status_clause(customer_pk)),
+                   not_(and_(awaiting_status_clause(customer_pk), excuse)),
                    not_(awaiting_bill_data_clause(bills_through, data_as_of)),
                    *txn_cl, *bank_only_cl)):
         top.append({"id": e.id, "exception_type": "BANK_ONLY",
@@ -690,8 +949,14 @@ def ar_view(session, customer_pk: int,
     by the ledger, under review, or still owed (open BILL_ONLY) — plus
     KPIs and an aging analysis. Historic bills outside the recon working
     set are deliberately excluded; every row here is actionable.
-    overdue_days is per-customer config (MatchRuleSet.ar_overdue_days)."""
-    today = date.today()
+    overdue_days is per-customer config (MatchRuleSet.ar_overdue_days).
+
+    Ages run from the DATA's own last day (the latest credit value date),
+    not from the wall clock — the Command Center ages the same way. A
+    historical load would otherwise show every open bill as overdue purely
+    because the calendar has moved on since the statements were cut."""
+    _bills_through, data_as_of = coverage(session, customer_pk)
+    today = data_as_of or date.today()
     rows: list = []
 
     # --- settled / in-review: picked bills of non-REJECTED matches ------
@@ -707,6 +972,7 @@ def ar_view(session, customer_pk: int,
     for m, _l, _b, _t in ledger_rows:
         picked_per_match[m.id] = picked_per_match.get(m.id, 0) + 1
     received_txns: dict = {}
+    names = incremental.user_names(session, {m.decided_by_user_id for m, *_ in ledger_rows})
     for m, _link, bill, txn in ledger_rows:
         # "received" = SETTLED (LOCKED) credits only; a match still under
         # review is listed as IN_REVIEW below but is not money received
@@ -737,6 +1003,10 @@ def ar_view(session, customer_pk: int,
             "variance": variance,
             "match_ledger_id": m.id,
             "match_seq": m.seq,
+            # who settled it: the deciding user, "System" for an automatic
+            # HIGH lock, None for a decision older than user tracking
+            "decided_by": names.get(m.decided_by_user_id)
+            or ("System" if m.locked_by == "AUTO_HIGH" and m.decided_at is None else None),
             "exception_id": None,
             # the run that produced this row — the AR view's run filter
             "run_id": m.run_id,
@@ -769,6 +1039,7 @@ def ar_view(session, customer_pk: int,
                          if bill.net_payable_amount is not None else None),
             "match_ledger_id": None,
             "match_seq": None,
+            "decided_by": None,
             "exception_id": exc.id,
             "run_id": exc.first_seen_run_id,
         })
