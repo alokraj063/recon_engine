@@ -150,6 +150,7 @@ class MatchRuleSetRow(Base):
     batch_amount_slack: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     amount_decimals: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     ar_overdue_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    awaiting_status_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 # --- bronze / silver ---------------------------------------------------
@@ -448,6 +449,15 @@ class MatchLedger(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     # free text an analyst attaches to a MANUAL match (optional; never logged)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # the LATEST user decision on this row (accept / reject / unlock /
+    # reopen / manual create): who, when, and the optional note they left.
+    # users.id as a soft reference (no FK: a users row is deactivated,
+    # never deleted, and SQLite batch-recreating this table for an FK
+    # would drop the cross-schema edges). NULL = no user decision yet —
+    # an AUTO_HIGH lock, or a row from before this column existed.
+    decided_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    decision_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class MatchLedgerBill(Base):
@@ -477,7 +487,9 @@ class ExceptionLedger(Base):
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # HOW it was resolved: RUN (a later run matched it) | USER_ACCEPT (an
     # analyst accepted the review match that pairs it) | USER_MANUAL (an
-    # analyst paired it by hand) | USER_REOPEN (a rejection was undone).
+    # analyst paired it by hand) | USER_REOPEN (a rejection was undone) |
+    # USER_NON_IREPS (an analyst approved it as a non-IREPS receipt, see
+    # CreditSource — never counted as a reconciled exception).
     # resolved_by_run_id stays set for RUN only; the user kinds carry the
     # match instead.
     resolved_by: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
@@ -487,6 +499,36 @@ class ExceptionLedger(Base):
     # that re-reports the credit. NULL on pre-c3f8a1d27e64 rows — readers
     # derive it from the credit's zone_guess (db/overview.unrecognised_clause).
     gap_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # the user behind a USER_* resolution (users.id, soft reference as on
+    # match_ledger.decided_by_user_id); NULL for RUN and for older rows
+    resolved_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class CreditSource(Base):
+    """An analyst's decision on whether a credit is IREPS money — the
+    Analyst queue's Non-IREPS receipts tab. Absent = no decision, and the
+    engine's own reading applies (a credit with no match signal is
+    non-IREPS: db/overview.unrecognised_clause). One row per credit.
+
+      NON_IREPS  approved as a non-IREPS receipt: its BANK_ONLY exception
+                 is RESOLVED (resolved_by USER_NON_IREPS) and the credit
+                 never re-enters an incremental matching pool.
+      IREPS      rejected as non-IREPS: the credit is IREPS money after
+                 all, stays an OPEN exception in the IREPS queue and IS
+                 offered to the matcher from then on.
+
+    App schema: a user decision, not a fact any source reported."""
+    __tablename__ = "credit_sources"
+    __table_args__ = (UniqueConstraint("customer_id", "gold_bank_txn_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    gold_bank_txn_id: Mapped[str] = mapped_column(ForeignKey("gold.bank_txns.id"), index=True)
+    source: Mapped[str] = mapped_column(String(16))   # IREPS | NON_IREPS
+    decided_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # who decided (users.id, soft reference) and the optional note they left
+    decided_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class IngestConflict(Base):
@@ -533,3 +575,7 @@ class AuditLog(Base):
     entity_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     details: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    # the signed-in user whose request caused the event (users.id, soft
+    # reference); NULL = the system itself, or an event from before users
+    # were recorded. Stamped by record_event from db/audit.current_actor.
+    actor_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

@@ -130,16 +130,22 @@ def test_expected_bills_follows_mapping():
                    payment_advice_date=pd.NaT)
     exp = _expected_bills(bills, bank, 0, 5, mapping)
     assert len(exp) == 1 and exp["ExpectedBasis"].iloc[0] == "ADVICE_DATE"
-    # default mapping: no advice date; co7_due needs bill_status in the
-    # fallback_due_statuses ("CO7 DONE") AND CO7Date within lookback
+    # default mapping (fallback_due_statuses EMPTY since 2026-09-23): a
+    # payment order is not a promise of payment, so a CO7 DONE bill with
+    # no advice date is NOT expected
     co7_bills = bills.assign(bill_status="CO7 DONE")
-    exp_default = _expected_bills(co7_bills, bank, 0, 5, FieldMapping())
-    assert list(exp_default["ExpectedBasis"]) == ["PAYMENT_ORDER_NO_ADVICE"]
-    # a paid-but-not-CO7-DONE status never enters via the fallback date
-    assert _expected_bills(bills, bank, 0, 5, FieldMapping()).empty
+    assert _expected_bills(co7_bills, bank, 0, 5, FieldMapping()).empty
+    # the branch still works for a customer that configures it
+    exp_co7 = _expected_bills(co7_bills, bank, 0, 5,
+                              FieldMapping(fallback_due_statuses=("CO7 DONE",)))
+    assert list(exp_co7["ExpectedBasis"]) == ["PAYMENT_ORDER_NO_ADVICE"]
+    # a status outside the configured set never enters via the fallback date
+    assert _expected_bills(bills, bank, 0, 5,
+                           FieldMapping(fallback_due_statuses=("CO7 DONE",))).empty
     # fallback disabled -> nothing expected even for CO7 DONE bills
     exp_nofb = _expected_bills(
-        co7_bills, bank, 0, 5, FieldMapping(bill_date_fallback=None))
+        co7_bills, bank, 0, 5,
+        FieldMapping(bill_date_fallback=None, fallback_due_statuses=("CO7 DONE",)))
     assert exp_nofb.empty
     # custom fallback_due_statuses widen the branch
     exp_custom = _expected_bills(
@@ -166,7 +172,7 @@ def test_medium_review_flag_names_the_fallback_date():
     only; ... both unconfirmed' wording, contradicting the evidence."""
     out = reconcile(
         _bank(zone_guess="ECR", value_date=datetime(2026, 3, 16)),
-        _bills(zone="ECR", bill_status="CO7 DONE", payment_advice_date=pd.NaT,
+        _bills(zone="ECR", bill_status="PAYMENT MADE", payment_advice_date=pd.NaT,
                payment_order_date=pd.Timestamp("2026-03-15")))
     m = out["matched"]
     assert len(m) == 1

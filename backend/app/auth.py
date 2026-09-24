@@ -39,11 +39,12 @@ from threading import Lock
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from db import SessionLocal
-from db.audit import record_event
+from db.audit import record_event, set_actor
 from db.models import User, utcnow
 from logging_setup import get_logger
 from passwords import hash_password, normalize_email, verify_password
@@ -114,7 +115,15 @@ def _unauthenticated() -> HTTPException:
                                  "detail": "Sign in to continue."})
 
 
-def require_user(request: Request) -> AuthUser:
+def _load_active_user(user_id: int) -> Optional[AuthUser]:
+    with SessionLocal() as session:
+        row = session.get(User, user_id)
+        if row is None or not row.is_active:
+            return None
+        return AuthUser(id=row.id, email=row.email, name=row.name)
+
+
+async def require_user(request: Request) -> AuthUser:
     """The whole gate. Attached ONCE, to the /api router in app/routes.py,
     so every route it carries is protected together and a route added
     later is protected by default rather than by remembering to.
@@ -122,17 +131,24 @@ def require_user(request: Request) -> AuthUser:
     Public by construction, because they are not on that router:
     /api/health (registered on `app` in main.py, so the ALB health check
     needs no credential) and /api/auth/* (this module's own router).
+
+    ASYNC on purpose: it also names the actor for the audit trail
+    (db/audit.set_actor). A sync dependency runs in a worker thread whose
+    context changes never reach the route; an async one runs in the
+    request's own task, so the actor flows into the route handler — and
+    from there, copied by anyio, into a sync route's worker thread. The
+    user lookup itself is blocking SQLAlchemy, so it goes to the threadpool.
     """
     user_id = request.session.get(SESSION_KEY)
     if not user_id:
         raise _unauthenticated()
-    with SessionLocal() as session:
-        row = session.get(User, user_id)
-        if row is None or not row.is_active:
-            # deleted or deactivated since the cookie was issued
-            request.session.clear()
-            raise _unauthenticated()
-        return AuthUser(id=row.id, email=row.email, name=row.name)
+    user = await run_in_threadpool(_load_active_user, user_id)
+    if user is None:
+        # deleted or deactivated since the cookie was issued
+        request.session.clear()
+        raise _unauthenticated()
+    set_actor(user.id)
+    return user
 
 
 # --- throttle ----------------------------------------------------------
@@ -236,7 +252,7 @@ def login(body: LoginRequest, request: Request) -> UserOut:
         row.last_login_at = utcnow()
         _clear_failures(email)
         record_event(session, logger, event_type="auth.login_succeeded",
-                     entity_type="user", entity_id=row.id)
+                     entity_type="user", entity_id=row.id, actor_user_id=row.id)
         session.commit()
         return UserOut(id=row.id, email=row.email, name=row.name)
 
@@ -250,7 +266,8 @@ def logout(request: Request) -> dict:
     if user_id:
         with SessionLocal() as session:
             record_event(session, logger, event_type="auth.logout",
-                         entity_type="user", entity_id=user_id)
+                         entity_type="user", entity_id=user_id,
+                         actor_user_id=user_id)
             session.commit()
     return {"status": "signed_out"}
 

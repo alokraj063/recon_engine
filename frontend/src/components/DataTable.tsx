@@ -16,6 +16,7 @@ import { ColumnFilter } from './filters/ColumnFilter'
 import { FilterChips, type FilterChip } from './filters/FilterChips'
 import { buildOptions, facetKey } from './filters/facets'
 import { EmptyState, MoreRows, TextLink, useProgressiveRows } from './ui'
+import { helpFor } from '../columnHelp'
 
 interface Props {
   rows: Row[]
@@ -29,6 +30,11 @@ interface Props {
   externalChips?: FilterChip[]
   /** renders an extra <tr> under a row when it is expanded */
   renderDetail?: (row: Row) => React.ReactNode
+  /** initial sort, e.g. newest first on a date column */
+  initialSort?: { id: string; desc: boolean }[]
+  /** fill the page's remaining height: the tools + chips stay put and
+   *  only the rows scroll (styles.css "fill mode") */
+  fill?: boolean
   /** denominator for the row counter when the caller pre-filters `rows`
    *  (defaults to rows.length) */
   totalRows?: number
@@ -48,8 +54,9 @@ interface Props {
  * so the global search and the row counter see the narrowed set.
  */
 export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, externalChips,
-                            renderDetail, totalRows, emptyNote, initialFilters }: Props) {
-  const [sorting, setSorting] = useState<SortingState>([])
+                            renderDetail, totalRows, emptyNote, initialFilters,
+                            initialSort, fill }: Props) {
+  const [sorting, setSorting] = useState<SortingState>(() => initialSort ?? [])
   const [globalFilter, setGlobalFilter] = useState('')
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
     Object.fromEntries((initialHidden ?? []).map((c) => [c, false])),
@@ -122,7 +129,7 @@ export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, e
   const allCount = totalRows ?? rows.length
 
   return (
-    <div className="dt">
+    <div className={`dt${fill ? ' is-fill' : ''}`}>
       <div className="dt-tools">
         {toolbar}
         <label className="dt-search">
@@ -183,9 +190,12 @@ export function DataTable({ rows, columns, numericIds, initialHidden, toolbar, e
                 {renderDetail && <th style={{ width: 24 }} />}
                 {hg.headers.map((h) => {
                   const facet = facetCols.find((c) => c.id === h.column.id)
+                  const help = helpFor(h.column.id)
                   return (
-                    <th key={h.id} onClick={h.column.getToggleSortingHandler()}>
-                      {flexRender(h.column.columnDef.header, h.getContext())}
+                    <th key={h.id} onClick={h.column.getToggleSortingHandler()} title={help}>
+                      <span className={help ? 'has-help' : undefined}>
+                        {flexRender(h.column.columnDef.header, h.getContext())}
+                      </span>
                       {facet && (
                         <ColumnFilter label={facet.label} options={options[facet.id] ?? []}
                                       value={colFilters[facet.id] ?? []}

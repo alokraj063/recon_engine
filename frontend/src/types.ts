@@ -91,6 +91,9 @@ export interface ReconMeta {
   }
   customer?: string
   mode?: 'snapshot' | 'incremental'
+  /** incremental: the first day bills count as expected — the earliest
+   *  credit the ledger has seen (db/incremental.coverage_start) */
+  expected_from?: string | null
   ingest?: IngestStats
   ledger?: LedgerStats
   statement_bronze_id?: number
@@ -167,6 +170,8 @@ export interface LedgerBillInfo {
   role: 'picked' | 'candidate'
   bill_number: string | null
   submission_ref?: string | null
+  /** advice -> order -> submission date (db/incremental._bill_info) */
+  due_date?: string | null
   net_payable_amount: number | null
   zone: string | null
   bill_status: string | null
@@ -187,12 +192,19 @@ export interface LedgerMatch {
   locked_at: string | null
   /** analyst's free-text note (MANUAL matches only; optional) */
   note?: string | null
+  /** the latest user decision: who (null = the system, e.g. an AUTO_HIGH
+   *  lock, or a decision from before users were recorded), when, and the
+   *  optional note left with it */
+  decided_by?: string | null
+  decided_at?: string | null
+  decision_note?: string | null
   txn: LedgerTxnInfo | null
   bills: LedgerBillInfo[]
 }
 
 /** How an exception_ledger row was closed (frozen codes). */
-export type ExceptionResolvedBy = 'RUN' | 'USER_ACCEPT' | 'USER_MANUAL' | 'USER_REOPEN'
+export type ExceptionResolvedBy =
+  'RUN' | 'USER_ACCEPT' | 'USER_MANUAL' | 'USER_REOPEN' | 'USER_NON_IREPS'
 
 export interface LedgerException {
   id: string
@@ -220,11 +232,30 @@ export interface LedgerException {
    *  text a run stamps into `action`). Absent = no copy for that code. */
   gap_label?: string | null
   gap_action?: string | null
+  /** BANK_ONLY: an analyst's decision on the credit (Non-IREPS receipts
+   *  tab) — NON_IREPS = approved, IREPS = rejected; null = none */
+  source_decision?: 'IREPS' | 'NON_IREPS' | null
+  /** who made that decision, and the note they left */
+  source_decided_by?: string | null
+  source_note?: string | null
+  /** the user behind a USER_* resolution (null = a run, or older rows) */
+  resolved_by_user?: string | null
+  /** AWAITING_STATUS / BILL_RETURNED: the same-amount bill(s) the reading
+   *  rests on, newest first, with their CURRENT status */
+  gap_bills?: GapBill[] | null
   txn?: LedgerTxnInfo | null
   bill?: (Omit<LedgerBillInfo, 'gold_bill_id' | 'role'> & {
     /** advice -> order -> submission date (db/incremental._bill_info) */
     due_date?: string | null
   }) | null
+}
+
+export interface GapBill {
+  gold_bill_id: string
+  bill_number: string | null
+  bill_status: string | null
+  submission_ref: string | null
+  bill_date: string | null
 }
 
 export interface LedgerViewData {
@@ -406,6 +437,8 @@ export interface ArRow {
   variance: number | null
   match_ledger_id: string | null
   match_seq: number | null
+  /** who settled it: user name, "System" (auto HIGH lock), null = not recorded */
+  decided_by?: string | null
   exception_id: string | null
   /** run that produced the row: the match's run for settled / in-review,
    *  the exception's first-seen run for outstanding */
@@ -442,6 +475,10 @@ export interface AuditEventRow {
   run_id: string | null
   details: Record<string, unknown> | null
   created_at: string
+  /** the signed-in user behind the event; null = the system, or an event
+   *  from before users were recorded (actor_user_id null too) */
+  actor?: string | null
+  actor_user_id?: number | null
 }
 
 // --- per-customer configuration ---------------------------------------
@@ -507,6 +544,8 @@ export interface CustomerRules {
   batch_amount_slack: number
   amount_decimals: number
   ar_overdue_days: number
+  /** days a credit is excused while its bill's status lags (Awaiting data) */
+  awaiting_status_days: number
 }
 
 export interface CustomerConfig {

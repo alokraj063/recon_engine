@@ -9,9 +9,9 @@ bank. Those are what get scored here.
 
 import pandas as pd
 
-# Statuses that can have produced a credit. CO7 DONE is in because the
-# payment order goes out before the export refreshes to PAYMENT MADE.
-PAID_STATUSES = frozenset({"PAYMENT MADE", "CO7 DONE"})
+# Statuses that can have produced a credit. CO7 DONE was here until
+# 2026-09-22 and was removed: a payment order does not guarantee payment.
+PAID_STATUSES = frozenset({"PAYMENT MADE"})
 
 # Advice date means "IREPS instructed the bank to pay on this day", so it
 # lines up with the credit exactly and outweighs a zone match on its own.

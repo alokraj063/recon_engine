@@ -82,6 +82,16 @@ function describe(e: AuditEventRow, finalized: Map<string, Record<string, unknow
       return { ...base, icon: RotateCcw, tone: 'info', title: `${label} reopened`, detail: bill }
     case 'ledger.match_created_manual':
       return { ...base, icon: Link2, tone: 'ok', title: `${label} matched manually`, detail: bill }
+    case 'ledger.non_ireps_approved':
+      return { ...base, icon: Check, tone: 'ok', title: 'Non-IREPS receipt approved' }
+    case 'ledger.non_ireps_rejected':
+      return { ...base, icon: RotateCcw, tone: 'info', title: 'Receipt marked as IREPS' }
+    case 'ledger.credit_source_undone':
+      return { ...base, icon: RotateCcw, tone: 'info', title: 'Source decision undone' }
+    case 'ledger.credit_source_set': {
+      const to = d.source === 'NON_IREPS' ? 'Non-IREPS' : d.source === 'IREPS' ? 'IREPS' : 'auto'
+      return { ...base, icon: Settings, tone: 'info', title: `Credit source set to ${to}` }
+    }
     case 'config.rules_updated':
       return { ...base, icon: Settings, tone: 'info', title: 'Matching config updated' }
     case 'config.sources_updated':
@@ -118,7 +128,13 @@ export function RecentActivity({ customerId, refreshKey, onOpenAudit }: {
         for (const r of rows) {
           if (r.event_type === 'ledger.finalized' && r.run_id && r.details) finalized.set(r.run_id, r.details)
         }
-        setItems(rows.map((r) => describe(r, finalized)).filter((i): i is Item => i !== null).slice(0, 25))
+        setItems(rows.map((r) => {
+          const item = describe(r, finalized)
+          // who did it, when a signed-in user did
+          return item && r.actor
+            ? { ...item, detail: [item.detail, `by ${r.actor}`].filter(Boolean).join(' · ') }
+            : item
+        }).filter((i): i is Item => i !== null).slice(0, 25))
       })
       .catch(() => { setItems([]); setFailed(true) })
   }, [customerId, refreshKey])

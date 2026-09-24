@@ -395,25 +395,34 @@ def match_bank_to_billstatus(
     mapping=None,
     batch_amount_slack=0.5,
     amount_decimals=2,
+    unmatchable=None,
 ):
     """
     Returns (results, unmatched_bank).
 
     results is a list of MatchResult. unmatched_bank is a DataFrame of
     credits with no match, tagged with gap_type.
+
+    `unmatchable` (bank_df index labels) are credits the CALLER has ruled
+    out of matching — the incremental pool's non-IREPS receipts. They are
+    never scored and go straight to unmatched_bank, tagged like any other
+    unmatched credit. None (every existing caller) changes nothing.
     """
     mapping = mapping or FieldMapping()
     candidates = _eligible_bills(bill_df, paid_statuses, mapping)
     amt_index = _build_amount_index(candidates, mapping, amount_decimals)
+    ruled_out = set(unmatchable or ())
+    scored_bank = (bank_df.drop(index=[i for i in bank_df.index if i in ruled_out])
+                   if ruled_out else bank_df)
 
     pairs, no_candidate = _score_all_pairs(
-        bank_df, candidates, amt_index, date_tolerance_days, amount_tolerance,
+        scored_bank, candidates, amt_index, date_tolerance_days, amount_tolerance,
         weights, mapping, amount_decimals)
     top_score, tied, top_pairs = _ceilings(pairs)
     results, used_bills, used_bank = _assign(
         bank_df, candidates, pairs, top_score, tied, top_pairs, mapping)
 
-    leftover = [i for i in bank_df.index if i not in used_bank and i not in no_candidate]
+    leftover = [i for i in scored_bank.index if i not in used_bank and i not in no_candidate]
     if allow_batched:
         batched, leftover = _batched_pass(
             bank_df, candidates, leftover, used_bills,
@@ -421,7 +430,8 @@ def match_bank_to_billstatus(
             batch_amount_slack, amount_decimals)
         results.extend(batched)
 
-    unmatched = bank_df.loc[sorted(set(leftover) | set(no_candidate))].copy()
+    unmatched = bank_df.loc[sorted(set(leftover) | set(no_candidate)
+                                   | (ruled_out & set(bank_df.index)))].copy()
     if not unmatched.empty:
         # presence of the FIRST exact signal's bank field decides which
         # gap code the credit gets (source-neutral codes since 2026-09-01;

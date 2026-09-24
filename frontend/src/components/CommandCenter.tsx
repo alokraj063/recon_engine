@@ -9,23 +9,13 @@ import type { View } from './Sidebar'
 import type { LedgerIntent } from './LedgerView'
 import type { GoldIntent } from './GoldTable'
 import {
-  DEFAULT_DATE_FILTER, DateFilter, resolveWindow, windowLabel,
-  type DateFilterValue,
+  DateFilter, SAVED_FILTER_KEY as FILTER_KEY, loadSavedDateFilter as loadFilter,
+  resolveWindow, windowLabel, type DateFilterValue,
 } from './DateFilter'
 import { RecentActivity } from './RecentActivity'
 import {
   CustomerSelect, Dot, Notice, PageHeader, PartitionBar, RefreshButton, TextLink as Link, ToolSep,
 } from './ui'
-
-const FILTER_KEY = (customer: string) => `recon.cc.filter.${customer}`
-
-function loadFilter(customer: string): DateFilterValue {
-  try {
-    const raw = localStorage.getItem(FILTER_KEY(customer))
-    if (raw) return { ...DEFAULT_DATE_FILTER, ...JSON.parse(raw) }
-  } catch { /* fall through */ }
-  return DEFAULT_DATE_FILTER
-}
 
 interface Props {
   customers: CustomerInfo[]
@@ -43,7 +33,7 @@ interface Props {
    plain filter values, so each one arrives as a removable chip there —
    the analyst sees WHY the table is narrowed. `[]` clears a filter. */
 const Q_SETTLED: LedgerIntent = { section: 'matches', matchStatus: ['LOCKED'] }
-const Q_REVIEW: LedgerIntent = { section: 'matches', matchStatus: ['OPEN'] }
+const Q_REVIEW: LedgerIntent = { section: 'review', matchStatus: [] }
 const Q_ALL_MATCHES: LedgerIntent = { section: 'matches', matchStatus: [] }
 /* Open exceptions are the work that needs an analyst (db/overview.
    open_in_scope): other receipts can never match a bill and credits
@@ -51,26 +41,22 @@ const Q_ALL_MATCHES: LedgerIntent = { section: 'matches', matchStatus: [] }
    elsewhere ("other receipts", "awaiting data") and never here. excGap
    is always set so a gap chip left over from an earlier arrival cannot
    narrow these. */
-const Q_OPEN_EXC: LedgerIntent = {
-  section: 'exceptions', excStatus: ['OPEN'], excType: [], excGap: [], excOpenWork: true,
-}
+const Q_OPEN_EXC: LedgerIntent = { section: 'exceptions', excStatus: ['OPEN'], excType: [], excGap: [] }
 /** the unmatched credits — the credit half of Open exceptions */
 const Q_UNMATCHED: LedgerIntent = {
-  section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
-  excGap: ['SIGNAL_BILL_NOT_FOUND'], excOpenWork: false,
+  section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'], excGap: [],
 }
 /** the IREPS credits the rate excuses: bill still in flight, or its
- *  export not ingested yet */
-const Q_AWAITING: LedgerIntent = {
-  section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
-  excGap: ['AWAITING_STATUS', 'AWAITING_BILL_DATA'], excOpenWork: false,
-}
+ *  export not ingested yet — the Awaiting data tab */
+const Q_AWAITING: LedgerIntent = { section: 'awaiting', excStatus: ['OPEN'], excType: [], excGap: [] }
+/** other receipts: open AND approved ones, the same rows the figure counts */
+const Q_NON_IREPS: LedgerIntent = { section: 'non_ireps', excStatus: [], excType: [], excGap: [] }
 const Q_RESOLVED_EXC: LedgerIntent = {
-  section: 'exceptions', excStatus: ['RESOLVED'], excType: [], excGap: [], excOpenWork: false,
+  section: 'exceptions', excStatus: ['RESOLVED'], excType: [], excGap: [],
 }
 /** open exceptions of ONE side — "N credits" / "M bills" */
 const qExcSide = (side: string): LedgerIntent =>
-  ({ section: 'exceptions', excStatus: ['OPEN'], excType: [side], excGap: [], excOpenWork: true })
+  ({ section: 'exceptions', excStatus: ['OPEN'], excType: [side], excGap: [] })
 /* Open bank-only exceptions narrowed to ONE gap code (LedgerView.gapOf).
    Each figure below owns a distinct code, so a link opens exactly the
    credits it counted. Two of the four are stored on the exception
@@ -79,8 +65,8 @@ const qExcSide = (side: string): LedgerIntent =>
    as `gap_detail` — without that they collapse into
    SIGNAL_BILL_NOT_FOUND and all three land on the same table. */
 const qExcGap = (gap: string): LedgerIntent =>
-  ({ section: 'exceptions', excStatus: ['OPEN'], excType: ['BANK_ONLY'],
-     excGap: [gap], excOpenWork: false })
+  ({ section: gap.startsWith('AWAITING_') ? 'awaiting' : 'exceptions',
+     excStatus: ['OPEN'], excType: ['BANK_ONLY'], excGap: [gap] })
 
 /* The same, for figures whose rows live in the gold bank table. The
    credit funnel levels are the read-time `credit_scope` column
@@ -94,6 +80,7 @@ const G_IN_SCOPE: GoldIntent = {
 const G_RECOGNISED: GoldIntent = { frame: 'bank', filters: { credit_scope: ['RECOGNISED'] } }
 /** every bill in the window — the Gold pool figure */
 const G_BILLS: GoldIntent = { frame: 'bills', filters: {} }
+
 
 /** The match-rate ring (inline SVG, no deps). */
 function RateRing({ rate }: { rate: number | null }) {
@@ -342,7 +329,7 @@ export function CommandCenter({
               <PartitionBar parts={partition} unit={['credit', 'credits']} />
 
               <p className="cc-received-foot">
-                <Link quiet onClick={() => openQueue(qExcGap('UNRECOGNISED_RECEIPT'))}
+                <Link quiet onClick={() => openQueue(Q_NON_IREPS)}
                       title="Receipts with no match signal (interest, sweeps, non-IREPS payers). Excluded from the match rate.">
                   +{n(outOfScope)} other receipts
                 </Link>
@@ -427,7 +414,9 @@ export function CommandCenter({
                 <table className="ui-table">
                   <thead>
                     <tr>
-                      <th>Type</th><th>Reference</th><th>Zone</th><th>Date</th>
+                      {/* no Type column: the dot on the reference says
+                          credit or bill, and Amount has to fit */}
+                      <th>Reference</th><th>Zone</th><th>Date</th>
                       <th className="num">Age</th><th className="num">Amount</th>
                     </tr>
                   </thead>
@@ -438,12 +427,11 @@ export function CommandCenter({
                       return (
                         <tr key={e.id} onClick={open} tabIndex={0}
                             onKeyDown={(k) => { if (k.key === 'Enter') open() }}>
-                          <td>
-                            <span className={`ui-type type-${e.exception_type}`}>
-                              {e.exception_type === 'BANK_ONLY' ? 'Credit' : 'Bill'}
-                            </span>
+                          <td className="mono"
+                              title={e.exception_type === 'BANK_ONLY' ? 'Credit' : 'Bill'}>
+                            <span className={`side-dot type-${e.exception_type}`} aria-hidden />
+                            {e.ref ?? '—'}
                           </td>
-                          <td className="mono">{e.ref ?? '—'}</td>
                           <td>{e.zone ?? '—'}</td>
                           <td className="nowrap">{e.date ? fmtDay(e.date) : '—'}</td>
                           <td className="num">

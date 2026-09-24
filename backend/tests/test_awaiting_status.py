@@ -163,3 +163,73 @@ def test_paid_bill_never_counts_as_awaiting(world):  # noqa: F811
         ov = overview.overview(s, pk)
     assert ov["awaiting_status_credits"] == 0
     assert ov["recognised_credits"] == 2 and ov["match_rate"] == 0.5
+
+
+def test_returned_bill_gets_its_own_reading(world):  # noqa: F811
+    """A credit whose same-amount bill was RETURNED is still real work —
+    it stays in the match rate and in the Exceptions tab — but it reads
+    BILL_RETURNED, not "no bill in the export": the bill exists."""
+    pk, bz, client, key = world["pk"], world["bz"], world["client"], world["key"]
+    _ingest(pk, {"bills": bills([
+        ("R1", 4000.0, "RETURNED", "2026-03-10"),     # returned, same amount
+        ("P1", 6000.0, "REGISTERED", "2026-03-10"),   # in flight, softer reading
+    ])}, {"bills": bz["bills"]})
+    _ingest(pk, {"bank_txns": credits([("C1", 4000.0, "NR"), ("C2", 6000.0, "NR"),
+                                       ("C3", 9000.0, "NR")])},
+            {"bank_txns": bz["a"]})
+    _reconcile(client, key, bz["a"])
+
+    ledger = client.get("/api/ledger", params={"customer_id": key}).json()
+    by_ref = {e["txn"]["bank_ref"]: e for e in ledger["exceptions"] if e["txn"]}
+    assert by_ref["C1"]["gap_detail"] == "BILL_RETURNED"
+    assert "RETURNED" in (by_ref["C1"]["gap_action"] or "")
+    assert by_ref["C2"]["gap_detail"] == "AWAITING_STATUS"      # in flight wins
+    assert by_ref["C3"]["gap_detail"] is None                   # plain missing bill
+
+    with SessionLocal() as s:
+        ov = overview.overview(s, pk)
+        scopes = overview.credit_scopes(s, pk)
+        c1 = s.execute(select(GoldBankTxn.id).where(
+            GoldBankTxn.customer_id == pk, GoldBankTxn.bank_ref == "C1")).scalar_one()
+    # a returned bill's credit is RECOGNISED: it counts in the rate and in
+    # the Open exceptions tile, unlike the awaiting one
+    assert scopes[c1] == "RECOGNISED"
+    assert ov["open_in_scope"]["bank_only"] == 2                # C1 + C3
+    assert ov["recognised_credits"] == 2 and ov["settled_credits"] == 0
+
+
+def test_awaiting_status_expires_after_the_configured_days(world):  # noqa: F811
+    """"The status lags the money" is a fair excuse for a few days, not
+    forever: past awaiting_status_days (from the credit's value date to the
+    data's own last day) the credit counts as an ordinary exception."""
+    from db.models import MatchRuleSetRow
+    pk, bz, client, key = world["pk"], world["bz"], world["client"], world["key"]
+    _ingest(pk, {"bills": bills([("T1", 5000.0, "PASSED", "2026-03-01")])},
+            {"bills": bz["bills"]})
+    # C1 is valued 10 days before the newest credit C2, so with a 7-day
+    # window its excuse has run out while C2's has not
+    old = credits([("C1", 5000.0, "NR")])
+    old.loc[0, "value_date"] = pd.Timestamp("2026-03-08")
+    _ingest(pk, {"bank_txns": old}, {"bank_txns": bz["a"]})
+    _ingest(pk, {"bank_txns": credits([("C2", 8000.0, "NR")])}, {"bank_txns": bz["b"]})
+    r = client.post("/api/reconcile", json={
+        "customer_id": key, "statement_bronze_ids": [bz["a"], bz["b"]],
+        "mode": "incremental"})
+    assert r.status_code == 200, r.text
+
+    with SessionLocal() as s:
+        ov = overview.overview(s, pk)
+    assert ov["open_in_scope"]["awaiting"] == 0        # C1's excuse expired
+    assert ov["open_in_scope"]["bank_only"] == 2       # both are plain gaps now
+    assert ov["recognised_credits"] == 2
+
+    # widen the window past the gap and C1 is excused again
+    with SessionLocal() as s:
+        row = s.execute(select(MatchRuleSetRow).where(
+            MatchRuleSetRow.customer_id == pk,
+            MatchRuleSetRow.is_default.is_(True))).scalar_one()
+        row.awaiting_status_days = 30
+        s.commit()
+        ov = overview.overview(s, pk)
+    assert ov["open_in_scope"]["awaiting"] == 1
+    assert ov["open_in_scope"]["bank_only"] == 1

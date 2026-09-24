@@ -1,7 +1,8 @@
 import type { Candidate, Cell, Row } from '../types'
-import { fmtCell, inr } from '../format'
+import { fmtCell, fmtDay, inr } from '../format'
 import { BillLineage } from './BillLineage'
 import { DetailField } from './BillTrailDetail'
+import { CandidateCompare, type CompareField } from './CandidateCompare'
 
 /**
  * The evidence behind a match decision, shared by the Exception queue's
@@ -51,14 +52,6 @@ export const REVIEW_SIGNALS: Array<[string, string]> = [
   ['tied_candidates', 'Tied at top score'],
 ]
 
-export const REVIEW_BANK: Array<[string, string]> = [
-  ['bank_ref', 'Bank ref'],
-  ['bank_narrative', 'Narrative'],
-  ['amount', 'Amount'],
-  ['value_date', 'Value date'],
-  ['zone', 'Zone from narrative'],
-]
-
 // matched-frame rows use the un-renamed bank columns
 const MATCHED_BANK: Array<[string, string]> = [
   ['bank_ref', 'Bank ref'],
@@ -91,45 +84,32 @@ const MATCHED_AMOUNTS: Array<[string, string]> = [
   ['recovery_count', 'Recovery lines'],
 ]
 
-export function CandidateCard({ cand, runId, onAccept, busy, neutralPick, pickReason }: {
-  cand: Candidate; runId?: string | null
-  onAccept?: () => void; busy?: boolean
-  /** an undated AMBIGUOUS tie: the engine's pick really was arbitrary,
-   *  so no card may look endorsed — every candidate renders neutrally */
-  neutralPick?: boolean
-  /** why this card is the pick (AMBIGUOUS ties broken by date: "closest
-   *  date"); shown after PICKED so the endorsement explains itself */
-  pickReason?: string
-}) {
-  const showPicked = cand.Picked && !neutralPick
+/** CANDIDATE_LABELS as comparison fields: amount and zone are compared
+ *  with the credit, the date gap marks the closest bill. */
+const CANDIDATE_FIELDS: CompareField[] = CANDIDATE_LABELS
+  // the bill number is each column's title; the export row is an IREPS
+  // file position that tells an analyst nothing about which bill is paid
+  .filter(([key]) => key !== 'bill_number' && key !== 'data_row')
+  .map(([key, label]) => ({
+    key, label,
+    refKey: key === 'net_payable_amount' ? 'amount' : key === 'zone' ? 'zone' : undefined,
+    best: key === 'DateGapDays' ? 'min' as const : undefined,
+  }))
+
+const truthy = (v: Cell) => v === true || v === '✓'
+
+/** The credit under review: amount · ref · value date · zone on one line,
+ *  the full narrative on the line below it. */
+function CreditStrip({ row }: { row: Row }) {
+  const narrative = typeof row.bank_narrative === 'string' ? row.bank_narrative : ''
   return (
-    <div className={`candidate-card${showPicked ? ' picked' : ''}`}>
-      <div className="candidate-head">
-        {showPicked
-          ? <span className="chip chip-picked">PICKED{pickReason ? ` · ${pickReason}` : ''}</span>
-          : <span className="chip">candidate</span>}
-        <span className="side-tag tag-bill">IREPS BILL</span>
-        {onAccept && (
-          <button className="btn-accept" disabled={busy} onClick={onAccept}>
-            Accept this bill
-          </button>
-        )}
-      </div>
-      <div className="detail-grid">
-        {CANDIDATE_LABELS.map(([k, l]) => {
-          const v = fmtCell(k, (cand[k] ?? null) as Cell)
-          return (
-            <div key={k}>
-              <div className="dt-label">{l}</div>
-              <div className={`dt-value${k === 'net_payable_amount' ? ' match-key' : ''}`}>
-                {v === '—' ? <span className="empty-cell">—</span> : v}
-              </div>
-            </div>
-          )
-        })}
-        <BillLineage runId={runId} billNumber={cand.bill_number}
-                     fallbackRow={cand as Row} />
-      </div>
+    <div className="rv-credit">
+      <span className="side-tag tag-bank">CREDIT</span>
+      <span className="rv-credit-amt">{inr(row.amount as number | null)}</span>
+      <span className="rv-credit-meta">{String(row.bank_ref ?? '—')}</span>
+      <span className="rv-credit-meta">{fmtDay(typeof row.value_date === 'string' ? row.value_date : null)}</span>
+      {row.zone ? <span className="rv-credit-meta">{String(row.zone)}</span> : null}
+      {narrative && <span className="rv-credit-narr">{narrative}</span>}
     </div>
   )
 }
@@ -190,61 +170,81 @@ function MatchPairs({ bank, bill }: {
  *  lets each candidate card pull its full lineage timeline. */
 export function ReviewEvidence({ row, runId, onAcceptBill, busy }: {
   row: Row; runId?: string | null
-  /** present only where a decision can be made (Analyst queue, OPEN
-   *  match): renders an accept button on each candidate card */
-  onAcceptBill?: (billNumber: Cell) => void
+  /** present only where a decision can be made (an OPEN match): renders
+   *  an accept button (and "+ note") on each candidate column */
+  onAcceptBill?: (billNumber: Cell, note?: string) => void
   busy?: boolean
 }) {
   const cands = Array.isArray(row.Candidates) ? (row.Candidates as Candidate[]) : []
   const picked = cands.find((c) => c.Picked) ?? cands[0] ?? null
-  // AMBIGUOUS ties are broken by the bill date closest to the credit, so
-  // the pick IS a recommendation and the cards arrive pick-first, then
-  // closest-dated. Only an undated tie (flag says "arbitrarily") is still
-  // rendered neutrally — there the engine explicitly recommends nothing.
   const flag = typeof row.flag === 'string' ? row.flag : ''
   const ambiguous = flag.startsWith('AMBIGUOUS')
-  const arbitrary = ambiguous && flag.includes('arbitrarily')
-  const pickReason = ambiguous && !arbitrary ? 'closest date' : undefined
+  // An AMBIGUOUS pick is a recommendation only when the bill dates actually
+  // separated the bills. An undated tie ("arbitrarily") or a tie at the SAME
+  // gap (0d; others 0d, 0d) was decided by row order — no bill may look
+  // endorsed, and the reason must say the data cannot tell them apart.
+  const gaps = new Set(cands.map((c) => String(c.DateGapDays ?? '')))
+  const tied = ambiguous && (flag.includes('arbitrarily') || gaps.size <= 1)
+  const n = cands.length
+  const reason = ambiguous
+    ? tied
+      ? `${n} bills share this amount and score the same. Nothing in the data tells them apart — confirm which bill this credit pays.`
+      : `${n} bills share this amount. Bill ${String(picked?.bill_number ?? '—')} has the date closest to the credit.`
+    : flag.replace(/^[A-Z_]+\s*[-—:]\s*/, '')
+  const chip = (ok: boolean, text: string) => (
+    <span className={`rv-chip ${ok ? 'ok' : 'bad'}`}>{ok ? '✓' : '✗'} {text}</span>
+  )
+  const gap = row.date_gap_days
   return (
-    <>
-      <div className="side-panel side-bank">
-        <span className="side-tag tag-bank">BANK STATEMENT</span>
-        {REVIEW_BANK.map(([k, l]) => (
-          <DetailField key={k} row={row} k={k} label={l}
-                       valueClass={k === 'amount' ? 'match-key' : undefined} />
-        ))}
+    <div className="rv">
+      <CreditStrip row={row} />
+      <div className="rv-reason">
+        <p className="rv-reason-text">{reason}</p>
+        <div className="rv-chips">
+          {chip(true, 'Amount')}
+          {chip(truthy(row.zone_check as Cell), 'Zone')}
+          {chip(truthy(row.date_check as Cell),
+                `Date${gap !== null && gap !== undefined && gap !== '' ? ` · ${String(gap)}d gap` : ''}`)}
+        </div>
       </div>
-      <div className="detail-section">Review reason</div>
-      <MatchPairs
-        bank={{ amount: row.amount as Cell, zone: row.zone as Cell,
-                value_date: row.value_date as Cell,
-                zone_check: row.zone_check as Cell, date_check: row.date_check as Cell,
-                date_gap_days: row.date_gap_days as Cell,
-                date_source: row.date_source as Cell }}
-        bill={picked && {
-          net_payable_amount: picked.net_payable_amount as Cell,
-          zone: picked.zone as Cell,
-          payment_advice_date: picked.payment_advice_date as Cell,
-          payment_order_date: picked.payment_order_date as Cell,
-        }}
-      />
-      {REVIEW_SIGNALS.map(([k, l]) => (
-        <DetailField key={k} row={row} k={k} label={l} />
-      ))}
+      {/* one credit vs one bill: which signal failed. An ambiguous match
+          agrees on every signal — the comparison below is the evidence */}
+      {!ambiguous && picked && (
+        <MatchPairs
+          bank={{ amount: row.amount as Cell, zone: row.zone as Cell,
+                  value_date: row.value_date as Cell,
+                  zone_check: row.zone_check as Cell, date_check: row.date_check as Cell,
+                  date_gap_days: row.date_gap_days as Cell,
+                  date_source: row.date_source as Cell }}
+          bill={{
+            net_payable_amount: picked.net_payable_amount as Cell,
+            zone: picked.zone as Cell,
+            payment_advice_date: picked.payment_advice_date as Cell,
+            payment_order_date: picked.payment_order_date as Cell,
+          }}
+        />
+      )}
       <div className="detail-section">
-        Candidate bills ({cands.length})
+        Candidate bills ({n})
         {onAcceptBill && ' — select one to accept'}
       </div>
-      <div className="candidate-list">
-        {cands.map((c, i) => (
-          <CandidateCard key={i} cand={c} runId={runId} busy={busy}
-                         neutralPick={arbitrary} pickReason={pickReason}
-                         onAccept={onAcceptBill
-                           ? () => onAcceptBill(c.bill_number as Cell)
-                           : undefined} />
-        ))}
-      </div>
-    </>
+      <CandidateCompare
+        busy={busy}
+        fields={CANDIDATE_FIELDS}
+        credit={{ amount: row.amount as Cell, zone: row.zone as Cell }}
+        columns={cands.map((c, i) => ({
+          key: String(i),
+          title: String(c.bill_number ?? `Bill ${i + 1}`),
+          picked: !!c.Picked && !tied,
+          pickNote: ambiguous ? 'closest date' : undefined,
+          values: c,
+          onAccept: onAcceptBill
+            ? (note?: string) => onAcceptBill(c.bill_number as Cell, note)
+            : undefined,
+          footer: <BillLineage runId={runId} billNumber={c.bill_number}
+                               fallbackRow={c as Row} />,
+        }))} />
+    </div>
   )
 }
 

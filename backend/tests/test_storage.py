@@ -246,7 +246,10 @@ def world(s3_storage, tmp_path):
 def _load_matching_pair(pk, bz):
     credit = ensure_schema(pd.DataFrame([{
         "bank_ref": "T1", "value_date": pd.Timestamp("2026-03-18"),
-        "amount": 5000.0, "used_in_recon": True}]), "bank_txns")
+        "amount": 5000.0, "used_in_recon": True,
+        # a zone makes it IREPS money: a credit with no match signal is a
+        # non-IREPS receipt and an incremental run never matches it
+        "zone_guess": "NR"}]), "bank_txns")
     credit["row_seq"] = range(len(credit))
     bill = ensure_schema(pd.DataFrame([{
         "bill_number": "INV-1", "submission_ref": "CO6-1",

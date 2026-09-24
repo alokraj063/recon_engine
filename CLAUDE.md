@@ -227,18 +227,41 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
                LOCKED/USER, optional `note` ≤500 chars; every join on
                MatchLedger.run_id must tolerate NULL),
                exception_ledger (`resolved_by` = RUN | USER_ACCEPT |
-               USER_MANUAL | USER_REOPEN + `resolved_by_match_id`;
-               first_seen_run_id nullable for the same reason),
+               USER_MANUAL | USER_REOPEN | USER_NON_IREPS +
+               `resolved_by_match_id`; first_seen_run_id nullable for the
+               same reason; USER_NON_IREPS is a classification, never
+               counted as a resolved exception),
+               credit_sources (app schema, one row per credit: an
+               analyst's IREPS | NON_IREPS decision from the Analyst
+               queue's Non-IREPS tab — see "Non-IREPS receipts" below),
                ingest_conflicts,
                audit_log (general-purpose event stream, app schema — NOT a
                replacement for match_ledger/exception_ledger/ingest_conflicts,
-               which stay the detailed domain-specific trails for their own concerns)
+               which stay the detailed domain-specific trails for their own concerns;
+               `actor_user_id` = the signed-in user behind the event, NULL =
+               system or pre-d8a4f2c6e1b9). WHO DECIDED (d8a4f2c6e1b9):
+               match_ledger.decided_by_user_id/decided_at/decision_note (the
+               LATEST user decision + its optional note — `note` stays the
+               MANUAL match's creation note), exception_ledger.
+               resolved_by_user_id (USER_* resolutions only), credit_sources.
+               decided_by_user_id/note. All soft references to users.id (no
+               FK: an FK would make SQLite batch-recreate the ledger tables
+               and drop their cross-schema edges; users are deactivated,
+               never deleted)
   storage.py   LocalStorage (data/bronze/ content-addressed by sha256, data/runs/) —
                S3-swappable seam. Note: data/bronze/ (blob dir) and data/bronze.db
                (bronze-schema DB file) are unrelated, don't confuse them.
   audit.py     record_event(session, logger, ...) — the ONLY place a log line and
                its audit_log row get written; never commits, rides the caller's
-               existing transaction, so a rollback erases both together
+               existing transaction, so a rollback erases both together. The
+               ACTOR is ambient: `current_actor` ContextVar, set by app/auth.py
+               require_user — which is ASYNC for exactly this reason (a sync
+               dependency runs in a worker thread whose context never reaches
+               the route; an async one sets it in the request task, and anyio
+               copies it into a sync route's thread). record_event stamps it;
+               db/incremental reads actor_id() for the ledger's who-columns.
+               Nothing threads a user parameter. tests/conftest.py's override
+               is async + set_actor too, so API tests stamp TEST_USER_ID (0)
   bronze.py    register_file — dedup by (customer, sha256)
   silver.py    one JSON row per parsed source row, deduped per bronze file.
                WRITE-ONLY on purpose: silver is the audit trail of what each
@@ -291,7 +314,11 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
                ingestion.completed audit row), old rows lacking by_frame fall
                back to the flat line
   incremental.py  Phase-6 runs: pool = new credits + open exceptions vs all
-               unconsumed bills; UNCHANGED matcher; match_ledger (HIGH auto-LOCKs),
+               unconsumed bills, minus approved non-IREPS receipts; the
+               pool's other non-IREPS credits (no first-exact-signal value,
+               not marked IREPS — unmatchable_positions) ride along but are
+               never scored (reconcile(unmatchable=...), default None = no
+               change for every other caller); UNCHANGED matcher otherwise; match_ledger (HIGH auto-LOCKs),
                exception lifecycle OPEN -> RESOLVED; one running run per customer
                (partial unique index -> 409 RUN_IN_PROGRESS). User decisions
                also move the exception ledger: accept_match / reopen_match
@@ -437,18 +464,37 @@ backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/inge
                top_exceptions excludes both too;
                open_exceptions/open_value stay all-inclusive),
                GET /api/ledger also hands each OPEN BANK_ONLY exception its
-               read-time gap_detail (db/overview.gap_details — the AWAITING_*
-               codes are never stored) + gap_label/gap_action resolved
+               read-time gap_detail (db/overview.gap_details — AWAITING_STATUS
+               / AWAITING_BILL_DATA / MARKED_IREPS / BILL_RETURNED are
+               never stored) + gap_label/gap_action resolved
                through the customer's copy_overrides, and each bill its
                due_date (advice -> order -> submission); GET /api/gold/bank
                adds a read-time credit_scope column (db/overview.
                credit_scopes: RECOGNISED | AWAITING_STATUS |
                AWAITING_BILL_DATA | UNRECOGNISED_RECEIPT) so funnel figures
-               can open the table filtered to their own credits,
+               can open the table filtered to their own credits, and a
+               read-time `source` (IREPS | NON_IREPS | DEBIT for
+               used_in_recon=false rows, db/overview.
+               credit_sources — read off credit_scope, zone rule for a
+               credit no run has seen; the page's "Source" column, derived
+               from zone in run scope) + `gold_bank_txn_id`/`source_decided`,
+               POST /api/exceptions/{id}/
+               non-ireps/approve|reject|undo (404 EXCEPTION_NOT_FOUND,
+               409 EXCEPTION_CONFLICT), PUT /api/bank/{gold_bank_txn_id}/
+               source {customer_id, source: IREPS|NON_IREPS|null} — the
+               SAME decision made from the credit (Bank Transactions'
+               editable Source cell, Current scope only; incremental.
+               set_credit_source): NON_IREPS = approve (a credit no run has
+               seen gets a RESOLVED USER_NON_IREPS row at once so every
+               count agrees; 409 CREDIT_MATCHED while a live match holds
+               it), IREPS = reject (an approval re-opens), null = auto;
+               debits 400,
                GET /api/customers/{key}/operating-units (distinct gold
                bills units + counts), GET /api/ar, GET /api/audit,
                GET /api/ledger/workbook (customer ledger export),
-               POST /api/matches/{id}/accept|reject|unlock|reopen,
+               POST /api/matches/{id}/accept|reject|unlock|reopen (each takes
+               an optional JSON {note} ≤500 chars — incremental.clean_note,
+               blank -> None, longer -> 400; accept also gold_bill_id),
                POST /api/matches/manual (customer_id, gold_bank_txn_id,
                gold_bill_ids[], note -> 409 ALREADY_CONSUMED / 400
                INVALID_INPUT); GET /api/runs/{id}/workbook appends the
@@ -475,7 +521,13 @@ backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/inge
                fields against GOLD_COLUMNS and copy sections/codes against
                COPY_SECTIONS/DEFAULT_COPY -> 400, stores copy SPARSELY — only
                entries differing from defaults — normalizes field_map via
-               FieldMapping.from_dict, audits config.rules_updated),
+               FieldMapping.from_dict, audits config.rules_updated with
+               details.changes = [{field, from, to}] per setting the save
+               actually changed (routes.config_changes over flattened dotted
+               paths, e.g. weights.zone; a save that changes nothing logs
+               NOTHING) — settings are not financial content, so values are
+               logged; PUT /sources logs config.sources_updated the same way,
+               per slot <slot>.adapter / <slot>.params.<k>),
                PUT /api/customers/{key}/sources (adapter per slot; lineage
                slots are 0..N — name a new lineage_<key> slot to ADD it, null
                to REMOVE (deactivate; singletons refuse); optional per-slot
@@ -520,12 +572,18 @@ counts + {kept id: [deleted ids]}), `run.started`/`run.start_conflict`/`run.succ
 `run.failed`/`run.selfcheck_failed`/`run.parse_failed`, `ledger.finalized`
 (summary, not per-match), `ledger.match_accepted`/`ledger.match_rejected`/
 `ledger.match_unlocked` (LOCKED -> OPEN undo; details carry was_locked_by),
+`ledger.non_ireps_approved`/`ledger.non_ireps_rejected`/`ledger.credit_source_undone`/
+`ledger.credit_source_set` (Bank Transactions edit; details was/source/via),
 `http.request`, `http.unhandled_exception`, `pipeline.selfcheck`,
 `auth.login_succeeded`/`auth.login_failed` (WARNING; `details.reason` is a code —
 `NO_SUCH_USER`/`INACTIVE`/`BAD_PASSWORD` — and an email address NEVER appears in a
 log line or an audit row, it is PII like any other)/`auth.logout`,
 `auth.admin_seeded`/`auth.admin_seed_rejected`/`auth.ephemeral_session_secret`
-(WARNING — no SESSION_SECRET set). High-volume
+(WARNING — no SESSION_SECRET set). Decision events (`ledger.match_*`,
+`ledger.non_ireps_*`, `ledger.credit_source_*`) carry the analyst's optional
+`note` — user-written free text, deliberately kept because the Audit trail
+shows it; source events carry `was` + `was_auto` (the engine's reading when
+no analyst had decided — before 2026-09-23 that was logged as null). High-volume
 operations log one aggregate summary (the same `stats` dict already returned
 to API callers), never one line per row/match. No PII/financial content in
 log lines or `details` — counts, ids, field *names* only (e.g. `gold.ingest_conflict`
@@ -583,7 +641,32 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                words plus an action; guidance that still matters goes in a
                tooltip or a one-line field hint; no internal jargon (gold /
                bronze / silver, payload, durable) and no "you/YOUR" or
-               rhetorical asides in user-visible text. Big tables draw
+               rhetorical asides in user-visible text.
+               ONE SCROLL CONTAINER (2026-09-23): `.content` is the only
+               scroller (height 100vh, overflow-y auto) — the window never
+               scrolls. A page whose job is one big table wears
+               `ui-page is-fill`, its table card `ui-card is-fill`, and the
+               scroller inside it `dt is-fill` (DataTable's `fill` prop) or
+               `ledger-wrap is-fill`: header, figures, tabs and filters stay
+               put while only rows scroll, and a taller window shows more
+               rows with no code change (min-height 260px on the card means
+               a very short window scrolls the page instead of crushing the
+               table). Analyst queue / AR / Audit / Data pages / Matched /
+               Exception queue are fill pages; Command Center, Ingest,
+               Reconcile, Summary and Architecture scroll normally.
+               Density: a match row is ONE line and uses the SAME spine
+               as the exception tables (2026-09-23) — Match · Status ·
+               Reference · Zone · Date (the CREDIT's value date: sort +
+               range filter; the run time is on hover) · Amount (once; ⚠
+               only when the bills do not total the credit) · Bill (a
+               number-less works-contract bill shows "CO6 <ref>") ·
+               Confidence · Decided by · Run (only when rows differ), a ledger table's last column
+               is sticky-right so a decision button never hides behind a
+               horizontal scroll, the Run column shows only when the rows
+               differ on it, and `FramePreset.clamp` (bank `narrative`)
+               clamps a long free-text cell to two lines with the full
+               value on hover — one narrative used to make a row 8 lines
+               tall. Big tables draw
                progressively (ui.tsx useProgressiveRows + MoreRows: 150
                rows, then the next batch as the table's foot scrolls into
                view; sort/filter/counts still see every row) — DataTable,
@@ -649,9 +732,12 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                is "Initiate Reconciliation": a Statements card (select
                all, name, credit period, credits) and a Mode card
                (Incremental marked recommended) beside a sticky Run
-               summary with the primary button;
-               MatchingConfigPanel opens as a full-width card from the
-               "Matching config" head button (sticky save bar naming
+               summary with the primary button; its "Matching rules" row
+               links to Settings;
+               MatchingConfigPanel lives on the SETTINGS page (Platform ›
+               Settings, SettingsView: tabs Matching config | Source setup
+               — a read-out of each slot's format, changed on Ingest; moved
+               off Reconcile 2026-09-23) (sticky save bar naming
                unsaved changes) — edits the customer's full rule set incl.
                field_map, the new scalar knobs and the "Terminology &
                guidance" copy editors (edits accumulate in copy_overrides;
@@ -698,23 +784,66 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                "Workspace": Analyst queue (LedgerView renamed in UI
                ONLY — /api/ledger and DB names unchanged; opens on four
                quick views — To review / Open exceptions (needs action) /
-               Awaiting data / Settled — each an ordinary LedgerIntent
+               Awaiting data / Settled / Non-IREPS — each an ordinary LedgerIntent
                applied through the same applyIntent as a Command Center
-               arrival, so it lands as chips; the figures count within an
-               arrival's date window, so they equal the Command Center's; then ONE card with Matches |
-               Exceptions tabs (intent.section picks the tab; with none,
-               the tab with work — matches to review first); hosts the same
-               MatchDecision + ManualMatchPicker, shows MANUAL matches as
+               arrival, so it lands as chips; the figures count within the
+               Command Center's date window, so they equal the Command
+               Center's. That window is the queue's DEFAULT on every
+               visit, whether arriving by a link or the sidebar: LedgerView
+               reads the filter the Command Center saved for the customer
+               (DateFilter.loadSavedDateFilter, localStorage
+               recon.cc.filter.<customer>) and applies it to every tab as
+               the removable Credit date / Date chip; a link's intent
+               overrides it, and clearing the chip lasts for that visit; then ONE card with Matches |
+               To review | Exceptions | Awaiting data | Non-IREPS receipts
+               tabs (intent.section picks the tab; with none, Matches —
+               the first tab). To review = OPEN matches, Matches
+               = the decided ones (LOCKED / REJECTED): a split by status,
+               sharing one match filter set; a tab switched by hand drops
+               the Status filter, and a focused match opens the tab its
+               status puts it in. The three exception tabs
+               are LedgerView.excBucket's partition — Exceptions = IREPS
+               work (every BILL_ONLY + unmatched IREPS credits, equal to
+               open_in_scope), Awaiting data = AWAITING_*, Non-IREPS =
+               UNRECOGNISED_RECEIPT or an approval; an analyst's IREPS
+               decision always wins. They share one filter set; a tab
+               switched by hand drops the gap filter. Non-IREPS rows offer
+               Approve / Reject (Undo after approve; a rejected row shows
+               "Marked as IREPS · Undo" in its detail) and never offer a
+               manual match, nor appear as picker candidates; hosts the same
+               MatchDecision + ManualMatchPicker. DECISIONS (2026-09-23):
+               Accept / Reject / Approve stay ONE click; a "+ note" link
+               beside them opens ui.tsx DecisionDialog (the app's only
+               modal, portalled to <body> — its hosts are sticky cells)
+               with the same actions plus an optional note. Unlock and
+               Reopen ALWAYS confirm through it ("goes back to To review").
+               Under a match's status: who decided + when (DecidedBy;
+               "System" for an AUTO_HIGH lock), a note icon, the note in
+               the expanded row; "Resolved by" names the user. Ambiguous
+               candidates render SIDE BY SIDE (components/CandidateCompare:
+               a column per bill, the credit as a reference column, fields
+               where the bills DIFFER listed first, highlighted and named
+               in a "Differs on" line, identical fields folded, ✓ where a
+               bill agrees with the credit, "closest" on the date gap) —
+               used by ReviewEvidence and PickList, so the Exception queue
+               shows it too. Awaiting data has a "Bill status" column: the
+               CURRENT status + number of the same-amount bill behind an
+               AWAITING_STATUS reading (db/overview.gap_bills, served as
+               gap_bills on /api/ledger; same predicate as
+               same_amount_bill_clause), "No bill yet" for
+               AWAITING_BILL_DATA. The queue also shows MANUAL matches as
                "Matched by user" with their note, exceptions carry a
                "Resolved by" column — the Exceptions table uses the Command
                Center's "Largest open exceptions" spine, one column each
                (Type · Status · Ref · Zone · Date · Amount · Gap · First
                seen · Resolved by), rows expand to the gap_action advice +
                narrative, and its filter row mirrors Matches (chips + "N of
-               M"); exception filters are Status / Type / Gap (gapOf — keep
-               it in step with db/overview.unrecognised_clause) / Date /
-               Scope "Needs action" (excOpenWork: hides UNRECOGNISED_RECEIPT
-               and AWAITING_* — the rows open_in_scope leaves out) — and "⬇ Export ledger" downloads
+               M"); the Non-IREPS tab shows the credit's
+               Narrative where the other tabs show Zone (a non-IREPS
+               receipt has no zone by definition); exception filters are Status / Type / Gap (gapOf — keep
+               it in step with db/overview.unrecognised_clause) / Date
+               (the old Scope "Needs action" filter is gone — the tabs are
+               that split) — and "⬇ Export ledger" downloads
                /api/ledger/workbook; a Run column +
                a RunFilter (components/RunFilter.tsx: mode + run-date range
                + ticked runs, EMPTY = every run, the opposite of RunPicker's
@@ -748,7 +877,18 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                stream with client-side category/actor/window filters and a
                by-record timeline; its stat strip's figures set those
                filters, and events show a readable name — EVENT_NAME,
-               extend it with the taxonomy below — over the raw code). "Platform": Architecture
+               extend it with the taxonomy below — over the raw code; a
+               User column (served `actor`; System / "Not recorded" for
+               older human events) with its own filter; the Record column
+               speaks business terms — "Match M-42", "Credit · <ref>",
+               "Bill · <no>", "File · <name>", "Matching config", "Source
+               setup" (ENTITY_NAME + db/overview._audit_entity_context),
+               never a table name; details render as labelled pairs and a
+               config change as "Field: old → new"). HEADER TOOLTIPS:
+               columnHelp.ts COLUMN_HELP (data keys + `ui:` keys) feeds
+               DataTable headers and ui.tsx HelpLabel (Analyst queue, AR,
+               Audit, comparison) — a described header has a dotted
+               underline. AR's settled rows carry "Decided by". "Platform": Settings, Architecture
                (ArchitectureView — the real six-layer stack described in
                frontend/src/architecture.ts with live KPIs from /api/
                overview; keep its statements factually in sync with this
@@ -791,16 +931,18 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
 
 - **The golden master is the refactor gate.** `tests/test_golden.py` diffs the engine's output on the sample documents byte-for-byte against committed CSVs. Any engine/parser/adapter change must keep it green, or regenerate the snapshots explicitly and say why. (Regenerated once on 2026-08-31 for the lineage canonicalization: `bills_enriched`/`queue` dropped the raw RN_*/CR_* columns, `matched`/`queue`/`bills_enriched` gained `Invoice_Date`/`Bill_Reg_Date`, and CRN integer quantities lost a spurious float artifact — verified as a pure drop/add with `scripts/verify_lineage_canonicalization.py`.)
 - **Both sides are sources of truth**, so exceptions run in both directions: `BANK_ONLY` (credit with no bill) and `BILL_ONLY` (advised bill with no credit). The queue deliberately mixes both; bank rows lack bill fields and vice versa by design.
+- **A read-time gap code can change the WORDING without changing the bucket.** `db/overview.gap_details` hands each OPEN BANK_ONLY row a reading: `AWAITING_STATUS` / `AWAITING_BILL_DATA` (excused from the rate), `MARKED_IREPS` (an analyst's reject) and, since 2026-09-23, `BILL_RETURNED` — a bill of that amount exists but the source RETURNED it. RETURNED is deliberately NOT an in-flight status (money against a rejected bill IS surprising), so such a credit stays RECOGNISED, in the rate and in the Open exceptions tile; only its sentence changes, because "no bill in the export" sent analysts looking for a bill that was sitting there returned. `NOT_A_SCOPE` (MARKED_IREPS, BILL_RETURNED) is what keeps `credit_scopes` from treating a wording as a funnel bucket; `same_amount_bill_clause(statuses)` is shared by the awaiting and returned readings.
 - **Every credit is counted exactly once in the Command Center funnel.** Other receipts (`UNRECOGNISED_RECEIPT` — no match signal: interest, sweeps, non-IREPS payers) can never match a bill, so they sit outside the match rate AND outside the Open exceptions tile / Largest open exceptions; they appear once, as "Other receipts". Credits awaiting source status or bill data are IREPS money that could not have matched *yet* — excused from the rate AND left out of the Open exceptions tile / Largest open exceptions (named there as "awaiting data" instead; they stay OPEN rows in the ledger, and re-enter the tile on their own once the awaiting-bill-data cap expires). Received's IREPS credits = settled + in review + unmatched + awaiting data, and Open exceptions = unmatched + bill-only. Every figure's drill-down must select the same rows the server counted: `db/overview` clauses, `gap_details`/`credit_scopes` and the frontend's `gapOf` are one definition, so change them together.
-- **Snapshot vs incremental runs.** Snapshot (default) reconciles one statement against one export, results per run. Incremental accumulates: gold rows are **ingestion-owned** (written once per file, entity-upserted across files), the pool carries open exceptions forward, and matches are durable in `match_ledger` — HIGH confidence auto-LOCKs, review confidences stay OPEN until a user accepts/rejects. A LOCKED match's credit and bills never re-enter any pool; rejecting releases both sides. The wide-open expected-window in incremental mode intentionally reports the whole open-bill backlog once — rows persist as OPEN exceptions, not duplicated per run.
+- **Non-IREPS receipts are kept apart from matching.** A credit with no value in the first exact signal's bank field (no zone, under the default mapping) is a non-IREPS receipt: an incremental run never scores it, even when a bill has its amount — it goes straight to the ledger as an OPEN `UNRECOGNISED_RECEIPT`. (Before 2026-09-22 such a credit could still pair on amount alone; the dev ledger had never done so.) The Analyst queue's Non-IREPS tab decides each: **approve** = `credit_sources` NON_IREPS + the exception RESOLVED as `USER_NON_IREPS` (still counted in "Other receipts" via `db/overview.non_ireps_clause`, never as "resolved", never pooled again); **reject** = `credit_sources` IREPS — the row stays OPEN, reads as the read-time gap `MARKED_IREPS`, counts in the rate and Open exceptions, and later runs DO offer it to the matcher; **undo** drops the decision. `unrecognised_clause` applies the decision first, so every figure, `gap_details`, `credit_scopes`/`credit_sources` and the frontend's `excBucket` move together. Snapshot runs are untouched (legacy semantics, golden-gated).
+- **Snapshot vs incremental runs.** Snapshot (default) reconciles one statement against one export, results per run. Incremental accumulates: gold rows are **ingestion-owned** (written once per file, entity-upserted across files), the pool carries open exceptions forward, and matches are durable in `match_ledger` — HIGH confidence auto-LOCKs, review confidences stay OPEN until a user accepts/rejects. A LOCKED match's credit and bills never re-enter any pool; rejecting releases both sides. Incremental MATCHING is wide open (any unconsumed bill, however old), but which bills count as EXPECTED (BILL_ONLY) is floored since 2026-09-22 at `incremental.coverage_start` — the earliest credit value date the ledger has handled (a match or exception) or this run's pool; a statement ingested but never reconciled does not count. Before that, the wide-open window reported every advised bill since the first export as unpaid (1,836 of 1,839 open BILL_ONLY on the 18–21 Aug load were due before the first loaded credit, back to May). `reconcile(expected_from=...)` carries the floor (None = unchanged for snapshot/CLI/golden); the run payload echoes it as `meta.expected_from`, and the Summary relabels an incremental run's "Bank credits in statement" / "Bills expected in window" rows at DISPLAY time only (SummaryDashboard.displayCategory — the stored Category strings stay frozen). Rows persist as OPEN exceptions, not duplicated per run; a floor that moves later (older statements reconciled) makes their bills expected then.
 - **A gold row is an ENTITY, so "owns" ≠ "reported".** The entity upsert keeps one row per bill/credit/doc, stamped with the bronze file that FIRST inserted it. A later export that re-reports 34 known bills therefore inserts nothing and owns nothing — before `gold.file_rows` it vanished from the UI entirely ("I ingested a file and the Bills page still shows the old data"), and a bank statement whose credits had all arrived on an earlier one could not even be picked to reconcile. Ingest now records one sighting per row carried; anything that means "this upload's rows" (gold browse filter, `gold_files` counts, statement picker, snapshot/incremental bank pools) goes through `db/gold.py reported_by_file`, which falls back to plain ownership for files ingested before the table existed. Recovery LINES are the one deliberate exception: they ride with a NEW bill only, so a re-export contributes no recovery rows and its recoveries tab is legitimately empty.
 - **Amount is a filter, not a signal.** Pairs are only scored if amounts already agree (indexed on `round(net_payable_amount, 2)`); zone and date break ties. Confidence labels are derived from the raw signals, not by reversing the score. Signal weights are per-customer config, but labels stay signal-derived.
 - **A credit whose best pairing was claimed by another credit is not allowed to settle for a worse one** — it falls to the exception queue. A missing match you can investigate beats a wrong match you cannot see.
 - **The Bills + lineage tab serves the grouped frame** (`engine.group_bill_attempts`): one row per bill, RETURNED resubmissions combined (representative = settled attempt if any, else latest by submission_date asc / data_row desc), full journey in the `Attempts` list column. Matching and the raw Bills tab always use ungrouped frames.
 - **Settlement is stamped onto bills_enriched** in `reconcile()` (`SettledInStatement` + `Settled_*` columns, `match_id`/`Settled_MatchId` = `m{n}`); the display gate to HIGH-only lives in the frontend (`SourceTable` injects the `Settled='SETTLED'` token).
 - **Weak matches are copied into the queue as `MATCH_REVIEW`** (`AMBIGUOUS`/`LOW`/`AMOUNT_ONLY`/`BATCHED`). They stay in the matched frame — bills remain claimed — with structured `Candidates` (API) and flat `CandidateSummary` (Excel).
-- **`window_days` (default 0)** bounds which bills are "expected" in a snapshot statement; money cannot arrive before IREPS advises the bank. Incremental mode ignores it (the open pool replaces the window).
-- **`paid_statuses`** default `{"PAYMENT MADE", "CO7 DONE"}` — CO7 DONE counts because the payment order goes out before the export refreshes. Now a real config: `MatchRuleSet.paid_statuses`, per-customer row in `match_rule_sets`, threaded through `reconcile()` to the matcher.
+- **`window_days` (default 0)** bounds which bills are "expected" in a snapshot statement; money cannot arrive before IREPS advises the bank. Incremental mode ignores it (the open pool replaces the window, floored at coverage_start for expected bills — see above).
+- **`paid_statuses`** default `{"PAYMENT MADE"}` only. CO7 DONE was in it until 2026-09-22 and was REMOVED on request — a payment order does not guarantee payment, so a CO7 DONE bill can never be matched (migration a7c3e91d5b24 stripped it from every stored `match_rule_sets` row). A credit whose only same-amount bill is CO7 DONE is read as `AWAITING_STATUS` (db/overview `IN_FLIGHT_STATUSES` = PASSED, REGISTERED, CO7 DONE), not as a matching failure. Separate and UNCHANGED: `FieldMapping.fallback_due_statuses` still makes a CO7 DONE bill with a payment order but no advice an EXPECTED bill (`PAYMENT_ORDER_NO_ADVICE`, "monitor only") — that reports it, it never lets it settle. The golden snapshots predate this and must be regenerated once sample documents are available. Now a real config: `MatchRuleSet.paid_statuses`, per-customer row in `match_rule_sets`, threaded through `reconcile()` to the matcher.
 - **Matching fields are per-customer config** (`FieldMapping` in `rules.py`, stored as JSON in `match_rule_sets.field_map`, edited in the UI's Matching config view). Only *signals* are configurable — display columns, gap_type literals, and the legacy-named MatchResult columns (`zone_from_narrative`/`bill_zone`/`zone_check` carry the FIRST exact signal's values; `date_source` stays `"advice"`/`"co7"` meaning primary/fallback) are gold-canonical and hardcoded. Two traps: (1) `engine.reconcile()` is called directly by `db/reconcile_gold.py` and `db/incremental.py` — the golden gate does NOT cover those two call sites, so any new rule knob must be threaded there by hand (`meta.rules_effective` is the guard); (2) with zero exact signals `all([])` is vacuously True — `exact_ok = bool(mapping.exact_signals) and all(checks)` guards it (regression-tested in `tests/test_field_mapping.py`). A NULL/`{}` `field_map` row means defaults; the default mapping is byte-identical to the historical hardcoded behavior under the golden gate.
 - **Advisory copy is per-customer config, codes are not.** `MatchRuleSet.copy_overrides` swaps the human text mapped onto `gap_type`/`ExpectedBasis`/review-confidence codes (`engine.DEFAULT_COPY` + `resolve_copy`); the codes themselves (`NON_IREPS_OR_UNRECOGNISED`, `CO7_ISSUED_NO_ADVICE`, `"advice"`/`"co7"`, `LineageStatus` values, MatchedVia literals, the confidence labels incl. `MANUAL` — a user-made match, LOCKED from birth, deliberately NOT in `REVIEW_CONFIDENCE`) are FROZEN — they live in golden CSVs, persisted payloads, ledger rows and the frontend. Never rename a code; change its display text (or add a `labels` entry) instead.
 - **Display paths read canonical ROLES, not the field_map — by design.** `exception_queue` (`amount`=net_payable_amount, `value_date`=payment_advice_date), `summarise`'s bank-side `amount`, and the AR view's advice→order→submission aging chain are deliberately hardcoded to the canonical columns. A custom `field_map` may only point at columns that still MEAN the canonical role; a new source's adapter must map onto the roles, not around them.

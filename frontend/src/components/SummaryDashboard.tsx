@@ -1,7 +1,7 @@
 import { CheckCircle2, ShieldAlert } from 'lucide-react'
 import type { ReconMeta, SummaryRow } from '../types'
 import { findAmount, sumAmount, sumCounts } from '../combineRuns'
-import { inr, inrCompact, n, pct, plural } from '../format'
+import { fmtDay, inr, inrCompact, n, pct, plural } from '../format'
 import { IngestStatsSummary } from './IngestStatsSummary'
 import { Card, Notice, Stat, StatStrip } from './ui'
 
@@ -24,7 +24,21 @@ interface Props {
   onOpen?: (view: 'matched' | 'exceptions' | 'bank') => void
 }
 
-function SummaryTable({ summary }: { summary: SummaryRow[] }) {
+/** Display names for an INCREMENTAL run's summary rows. The stored
+ *  Category strings are frozen (golden CSVs, workbooks); only what the
+ *  table shows changes: an incremental run's "statement" is its pool
+ *  (new credits + carried open ones), and its expected bills start at
+ *  the first day of bank data, not at a statement window. */
+function displayCategory(cat: string, meta: ReconMeta): string {
+  if (meta.mode !== 'incremental') return cat
+  if (cat === 'Bank credits in statement') return 'Credits in this run (new + carried)'
+  if (cat === 'Bills expected in window') {
+    return meta.expected_from ? `Bills expected (from ${fmtDay(meta.expected_from)})` : 'Bills expected'
+  }
+  return cat
+}
+
+function SummaryTable({ summary, meta }: { summary: SummaryRow[]; meta: ReconMeta }) {
   return (
     <table className="ledger summary-table">
       <thead>
@@ -37,7 +51,7 @@ function SummaryTable({ summary }: { summary: SummaryRow[] }) {
       <tbody>
         {summary.map((r, i) => (
           <tr key={i} className={r.indent ? 'indent' : 'major'}>
-            <td>{r.Category}</td>
+            <td>{displayCategory(r.Category, meta)}</td>
             <td className="num">{r.Count ?? '—'}</td>
             <td className="num">{inr(r.Amount)}</td>
           </tr>
@@ -125,11 +139,11 @@ export function SummaryDashboard({ runs, aggregate, onOpen }: Props) {
         <div className="ui-stack">
           {multi ? runs.map((r) => (
             <Card key={r.runId} title={r.label} sub={r.meta.mode ? `${r.meta.mode} run` : undefined} ruled>
-              <SummaryTable summary={r.summary} />
+              <SummaryTable summary={r.summary} meta={r.meta} />
             </Card>
           )) : (
             <Card title="Breakdown" ruled>
-              <SummaryTable summary={runs[0].summary} />
+              <SummaryTable summary={runs[0].summary} meta={runs[0].meta} />
             </Card>
           )}
         </div>

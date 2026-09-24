@@ -1,12 +1,16 @@
 import { useCallback, useState } from 'react'
+import { MessageSquareText } from 'lucide-react'
 import { acceptMatch, rejectMatch, reopenMatch, unlockMatch } from '../api'
 import { ApiError, type LedgerBillInfo, type LedgerMatch } from '../types'
-import { inr } from '../format'
+import { fmtWhen } from '../format'
+import { DecisionDialog } from './ui'
+import { CandidateCompare, type CompareField } from './CandidateCompare'
 
 /** The subset of a ledger match a decision needs. Both hosts pass the
  *  LIVE row from /api/ledger — the Analyst queue's own list, or the
  *  overlay the Exception queue fetches over its frozen run frame. */
 export type DecidableMatch = Pick<LedgerMatch, 'id' | 'status' | 'locked_by' | 'bills'>
+  & Partial<Pick<LedgerMatch, 'seq' | 'txn'>>
 
 export type DecisionAction = 'accept' | 'reject' | 'unlock' | 'reopen'
 
@@ -25,13 +29,14 @@ export function useMatchDecision(
   onError: (message: string) => void,
 ) {
   const [busy, setBusy] = useState<Record<string, boolean>>({})
-  const decide = useCallback(async (id: string, action: DecisionAction, goldBillId?: string) => {
+  const decide = useCallback(async (id: string, action: DecisionAction,
+                                    goldBillId?: string, note?: string) => {
     setBusy((b) => ({ ...b, [id]: true }))
     try {
-      const res: DecisionResult = action === 'accept' ? await acceptMatch(id, goldBillId)
-        : action === 'unlock' ? await unlockMatch(id)
-        : action === 'reopen' ? await reopenMatch(id)
-        : await rejectMatch(id)
+      const res: DecisionResult = action === 'accept' ? await acceptMatch(id, goldBillId, note)
+        : action === 'unlock' ? await unlockMatch(id, note)
+        : action === 'reopen' ? await reopenMatch(id, note)
+        : await rejectMatch(id, note)
       onDecided(id, res)
     } catch (e) {
       onError(e instanceof ApiError ? e.message : String(e))
@@ -44,53 +49,125 @@ export function useMatchDecision(
 
 export type Decide = ReturnType<typeof useMatchDecision>['decide']
 
+const matchName = (m: DecidableMatch) => (m.seq !== null && m.seq !== undefined ? `M-${m.seq}` : 'this match')
+
 /** Accept / Reject (OPEN), Unlock (LOCKED), Reopen (REJECTED) — the
- *  same buttons wherever a durable match is shown. */
+ *  same buttons wherever a durable match is shown. Accept and Reject are
+ *  one click; "+ note" opens the same decision with a note. Unlock and
+ *  Reopen always confirm first: they move a settled decision back into
+ *  review, which should never happen by a stray click. */
 export function MatchDecision({ match, busy, decide }: {
   match: DecidableMatch
   busy: boolean
   decide: Decide
 }) {
-  if (match.status === 'OPEN') {
-    return (
-      <span className="decide">
-        <button className="btn-accept" disabled={busy}
-                onClick={() => decide(match.id, 'accept')}>
-          Accept
-        </button>
-        <button className="btn-reject" disabled={busy}
-                onClick={() => decide(match.id, 'reject')}>
-          Reject
-        </button>
-      </span>
-    )
-  }
-  if (match.status === 'LOCKED') {
-    return (
-      <span className="decide">
-        <button className="btn-open"
-                title="Reopen for review"
-                disabled={busy}
-                onClick={() => decide(match.id, 'unlock')}>
-          Unlock
-        </button>
-      </span>
-    )
+  const [dialog, setDialog] = useState<'note' | 'unlock' | 'reopen' | null>(null)
+  const close = () => setDialog(null)
+  const name = matchName(match)
+  const act = (action: DecisionAction) => async (note: string) => {
+    close()
+    await decide(match.id, action, undefined, note)
   }
   return (
     <span className="decide">
-      <button className="btn-reopen"
-              title="Undo rejection and return the match to review"
-              disabled={busy}
-              onClick={() => decide(match.id, 'reopen')}>
-        Reopen
-      </button>
+      {match.status === 'OPEN' && (
+        <>
+          <button className="btn-accept" disabled={busy} title="Lock the match"
+                  onClick={() => decide(match.id, 'accept')}>
+            Accept
+          </button>
+          <button className="btn-reject" disabled={busy} title="Release the bills; the credit reopens"
+                  onClick={() => decide(match.id, 'reject')}>
+            Reject
+          </button>
+          <button type="button" className="decide-note" disabled={busy}
+                  title="Accept or reject with a note" onClick={() => setDialog('note')}>
+            + note
+          </button>
+        </>
+      )}
+      {match.status === 'LOCKED' && (
+        <button className="btn-open" title="Return the match to review" disabled={busy}
+                onClick={() => setDialog('unlock')}>
+          Unlock
+        </button>
+      )}
+      {match.status === 'REJECTED' && (
+        <button className="btn-reopen" title="Undo the rejection and return the match to review"
+                disabled={busy} onClick={() => setDialog('reopen')}>
+          Reopen
+        </button>
+      )}
+      {dialog === 'note' && (
+        <DecisionDialog title={`Decide ${name}`} busy={busy} onClose={close}
+          message="Accept locks the matcher's pick. Reject releases the bills and reopens the credit."
+          actions={[{ label: 'Reject', tone: 'danger', run: act('reject') },
+                    { label: 'Accept', tone: 'primary', run: act('accept') }]} />
+      )}
+      {dialog === 'unlock' && (
+        <DecisionDialog title={`Unlock ${name}?`} busy={busy} onClose={close}
+          notePlaceholder="Reason (optional)"
+          message={<>The match goes back to <b>To review</b>. Its credit and bills stay held
+                    until someone accepts or rejects it.</>}
+          actions={[{ label: 'Unlock', tone: 'primary', run: act('unlock') }]} />
+      )}
+      {dialog === 'reopen' && (
+        <DecisionDialog title={`Reopen ${name}?`} busy={busy} onClose={close}
+          notePlaceholder="Reason (optional)"
+          message={<>The match goes back to <b>To review</b> and claims its credit and bills
+                    again.</>}
+          actions={[{ label: 'Reopen', tone: 'primary', run: act('reopen') }]} />
+      )}
     </span>
   )
 }
 
-/** "Pick the settling bill" — one accept button per bill the match
- *  knows (picked + candidates); accepting locks the credit to THAT bill. */
+/** Who decided a match (the Decided by column; the time on hover) —
+ *  System for an automatic lock. */
+export function DecidedBy({ match }: { match: LedgerMatch }) {
+  if (!match.decided_at && !match.locked_by) return null
+  const who = match.decided_by
+    ?? (match.locked_by === 'AUTO_HIGH' && !match.decided_at ? 'System' : null)
+  const when = match.decided_at ?? match.locked_at
+  if (!who && !when) return null
+  return (
+    <span title={when ? fmtWhen(when) : undefined}>
+      {who ?? 'User'}
+      {match.decision_note && (
+        <span className="decision-note-ic" title={match.decision_note} aria-label="Has a note">
+          <MessageSquareText size={12} strokeWidth={2} />
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** The note left with the latest decision, for a row's expanded detail. */
+export function DecisionNote({ match }: { match: LedgerMatch }) {
+  if (!match.decision_note) return null
+  return (
+    <div className="decision-note-block">
+      <div className="dt-label">
+        Decision note{match.decided_by ? ` · ${match.decided_by}` : ''}
+        {match.decided_at ? ` · ${fmtWhen(match.decided_at)}` : ''}
+      </div>
+      <p className="decision-note-text">{match.decision_note}</p>
+    </div>
+  )
+}
+
+/** the ledger's own bill fields, for a match with no engine evidence */
+const LEDGER_BILL_FIELDS: CompareField[] = [
+  { key: 'net_payable_amount', label: 'Net payable', refKey: 'amount' },
+  { key: 'zone', label: 'Zone', refKey: 'zone' },
+  { key: 'bill_status', label: 'Status' },
+  { key: 'submission_ref', label: 'Submission ref' },
+  { key: 'due_date', label: 'Due date' },
+]
+
+/** "Pick the settling bill" from the ledger's own bill fields — the
+ *  comparison view for a match whose run evidence is not a review row;
+ *  accepting locks the credit to THAT bill. */
 export function PickList({ match, busy, decide }: {
   match: DecidableMatch
   busy: boolean
@@ -99,30 +176,23 @@ export function PickList({ match, busy, decide }: {
   if (match.status !== 'OPEN' || match.bills.length === 0) return null
   return (
     <>
-      <div className="detail-section">
-        Select the bill to accept
-      </div>
-      <div className="pick-list">
-        {match.bills.map((b: LedgerBillInfo) => (
-          <span key={b.gold_bill_id} className="pick-row">
-            <span className="chip chip-bill">
-              {b.bill_number ?? b.gold_bill_id.slice(0, 8)}
-              {' · '}{inr(b.net_payable_amount)}
-              {b.zone ? ` · ${b.zone}` : ''}
-            </span>
-            {b.role === 'picked' && <span className="chip-note">matcher's pick</span>}
-            <button className="btn-accept" disabled={busy}
-                    onClick={() => decide(match.id, 'accept', b.gold_bill_id)}>
-              Accept this bill
-            </button>
-          </span>
-        ))}
-      </div>
+      <div className="detail-section">Select the bill to accept</div>
+      <CandidateCompare
+        busy={busy}
+        fields={LEDGER_BILL_FIELDS}
+        credit={match.txn ? { amount: match.txn.amount, zone: match.txn.zone } : undefined}
+        columns={match.bills.map((b: LedgerBillInfo) => ({
+          key: b.gold_bill_id,
+          title: b.bill_number ?? b.gold_bill_id.slice(0, 8),
+          picked: b.role === 'picked',
+          values: b as unknown as Record<string, string | number | null>,
+          onAccept: (note?: string) => decide(match.id, 'accept', b.gold_bill_id, note),
+        }))} />
     </>
   )
 }
 
-/** Find the ledger bill a ReviewEvidence candidate card refers to (cards
+/** Find the ledger bill a ReviewEvidence candidate refers to (candidates
  *  carry bill numbers, the API wants gold ids). */
 export function billByNumber(match: DecidableMatch, billNumber: unknown): LedgerBillInfo | undefined {
   return match.bills.find((x) => String(x.bill_number) === String(billNumber))

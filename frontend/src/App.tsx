@@ -21,6 +21,7 @@ import { IngestForm } from './components/IngestForm'
 import { LedgerView, type LedgerIntent } from './components/LedgerView'
 import { MatchedTable } from './components/MatchedTable'
 import { ReconcileForm } from './components/ReconcileForm'
+import { SettingsView } from './components/SettingsView'
 import { RunPicker, runLabel } from './components/RunPicker'
 import { Sidebar, type View } from './components/Sidebar'
 import {
@@ -42,7 +43,7 @@ const GOLD_VIEWS: Record<string, GoldFrameName> = {
 
 const VIEW_TITLES: Record<
   Exclude<View, 'command' | 'ingest' | 'reconcile' | 'ledger' | 'ar' | 'audit'
-    | 'architecture' | 'gold_bank' | 'gold_bills' | 'gold_recoveries'
+    | 'architecture' | 'settings' | 'gold_bank' | 'gold_bills' | 'gold_recoveries'
     | 'gold_lineage'>,
   string
 > = {
@@ -77,7 +78,7 @@ const PICKER_VIEWS = new Set<View>([...FILTERED_VIEWS, ...FRAME_VIEWS])
 const payloadCache = new Map<string, ReconResponse>()
 
 const VALID_VIEWS = new Set<View>([
-  'command', 'ingest', 'reconcile', 'ledger', 'ar', 'audit', 'architecture',
+  'command', 'ingest', 'reconcile', 'ledger', 'ar', 'audit', 'architecture', 'settings',
   'summary', 'matched', 'exceptions', 'bank', 'bills', 'bills_enriched',
   'recoveries', 'gold_bank', 'gold_bills', 'gold_recoveries', 'gold_lineage',
 ])
@@ -142,6 +143,7 @@ const PAGE_TITLES: Record<string, string> = {
   ar: 'AR Reconciliation',
   audit: 'Audit trail',
   architecture: 'Architecture',
+  settings: 'Settings',
 }
 
 export default function App() {
@@ -559,6 +561,7 @@ export default function App() {
               onCustomerChange={setCustomerId}
               onReconcile={onReconcile}
               onGoToIngest={() => setView('ingest')}
+              onGoToSettings={() => setView('settings')}
               refreshKey={ingestEpoch}
             />
             {error && <div className="ui-page-after"><ErrorBanner error={error} /></div>}
@@ -589,6 +592,15 @@ export default function App() {
           />
         )}
 
+        {view === 'settings' && (
+          <SettingsView
+            customers={customers}
+            customerId={customerId}
+            onCustomerChange={setCustomerId}
+            onGoToIngest={() => setView('ingest')}
+          />
+        )}
+
         {view === 'architecture' && (
           <ArchitectureView customerId={customerId} onNavigate={setView} />
         )}
@@ -608,9 +620,9 @@ export default function App() {
 
         {goldFrame && dataPage && (
           <>
-            <section className="ui-page">
+            <section className="ui-page is-fill">
               {dataHead(dataPage, false)}
-              <section className="ui-card">
+              <section className="ui-card is-fill">
                 <GoldTable key={`${customerId}:${goldFrame}:${ingestEpoch}`}
                            customerId={customerId} frame={goldFrame}
                            intent={goldIntent} onIntentHandled={clearGoldIntent} />
@@ -705,12 +717,12 @@ export default function App() {
               />
             )}
             {view === 'matched' && (
-              <section className="ui-card">
+              <section className="ui-card is-fill">
                 <MatchedTable rows={matchedRows} emptyNote={matchedEmptyNote} />
               </section>
             )}
             {view === 'exceptions' && (
-              <section className="ui-card">
+              <section className="ui-card is-fill">
                 <ExceptionQueue
                   rows={exceptionRows}
                   emptyNote={exceptionsEmptyNote}

@@ -121,7 +121,7 @@ export const ARCHITECTURE_LAYERS: LayerSpec[] = [
       'change is gated by a golden master: six output frames byte-compared against committed snapshots.',
     components: [
       { name: 'Three-pass matcher', detail: 'Score all → assign best-first → subset-sum batches', code: 'matching/matcher.py' },
-      { name: 'Field mapping', detail: 'Per-customer signals, tolerances, eligibility', code: 'rules.py · ⚙ Matching config' },
+      { name: 'Field mapping', detail: 'Per-customer signals, tolerances, eligibility', code: 'rules.py · Settings › Matching config' },
       { name: 'Two-sided exceptions', detail: 'BANK_ONLY and BILL_ONLY — both sides are truth', code: 'engine.py' },
       { name: 'Golden-master gate', detail: 'Byte-exact CSV diff on the sample documents', code: 'tests/test_golden.py' },
     ],

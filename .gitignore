@@ -35,3 +35,6 @@ backend/data/
 
 # local AWS deployment scripts / IAM policies (not versioned here)
 deploy/
+
+# local copies of backend/data taken before a wipe / re-ingest
+data_backup_*/

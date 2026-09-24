@@ -71,6 +71,7 @@ function buildColumns(rows: Row[]): ColumnDef<Row>[] {
 export function MatchedTable({ rows, emptyNote }: { rows: Row[]; emptyNote?: React.ReactNode }) {
   return (
     <DataTable
+      fill
       rows={rows}
       columns={buildColumns(rows)}
       numericIds={AMOUNT_COLS}

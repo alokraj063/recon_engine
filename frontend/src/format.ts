@@ -82,6 +82,8 @@ export function fmtCell(col: string, v: Cell): string {
   }
   if (typeof v === 'boolean') return v ? '✓' : '✗'
   if (typeof v === 'number') return AMOUNT_COLS.has(col) ? inr(v) : String(v)
+  if (col === 'source' && v === 'NON_IREPS') return 'Non-IREPS'
+  if (col === 'source' && v === 'DEBIT') return 'Debit'
   return stripFloatArtifact(String(v))
 }
 
