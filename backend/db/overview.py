@@ -116,6 +116,12 @@ def _audit_entity_context(session, rows) -> dict:
         out[("run", rid)] = {"label": f"Run · {rid[:8]}", "context": None}
     for cid in by_type.get("customer", set()):
         out[("customer", cid)] = {"label": "Customer", "context": None}
+    user_ids = {int(i) for i in by_type.get("user", set()) if str(i).isdigit()}
+    if user_ids:
+        names = incremental.user_names(session, user_ids)
+        for uid in user_ids:
+            name = names.get(uid) or f"#{uid}"
+            out[("user", str(uid))] = {"label": f"User · {name}", "context": None}
     return out
 
 
@@ -127,7 +133,12 @@ def audit_events(session, customer_pk: int, limit: int = 500) -> list:
     read time (see _audit_entity_context)."""
     rows = list(session.execute(
         select(AuditLog)
-        .where(AuditLog.customer_id == customer_pk)
+        .where(or_(AuditLog.customer_id == customer_pk,
+                   # account changes belong to no customer but change who
+                   # can reach every customer's data, so every feed shows them
+                   and_(AuditLog.customer_id.is_(None),
+                        or_(AuditLog.event_type.like("user.%"),
+                            AuditLog.event_type == "auth.admin_seeded"))))
         .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
         .limit(limit)).scalars())
     enrich = _audit_entity_context(session, rows)
@@ -138,6 +149,8 @@ def audit_events(session, customer_pk: int, limit: int = 500) -> list:
         # a non-entity config event still names what it touched
         if e is None and r.entity_type == "source_config":
             e = {"label": "Source setup", "context": None}
+        if e is None and r.entity_type == "zone_directory":
+            e = {"label": "Zone directory", "context": None}
         out.append({
             "id": r.id,
             "event_type": r.event_type,

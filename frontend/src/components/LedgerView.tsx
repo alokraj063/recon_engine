@@ -10,7 +10,7 @@ import { receiptKind, receiptKindLabel } from '../receiptKinds'
 import {
   ApiError,
   type LedgerException, type LedgerMatch, type LedgerViewData, type Row,
-  type RunListItem,
+  type RunListItem, type ZoneInfo,
 } from '../types'
 import { fmtDay, fmtWhen, inDayRange, inr, inrCompact, n, plural } from '../format'
 import { BillLineage } from './BillLineage'
@@ -239,6 +239,17 @@ export function gapOf(e: LedgerException): string | null {
   return e.txn?.zone ? 'SIGNAL_BILL_NOT_FOUND' : 'UNRECOGNISED_RECEIPT'
 }
 
+/** A row's segment cell: the directory's segment, the zone's full name
+ *  on hover ("NR · Northern Railway · NORTH"). */
+function SegmentCell({ z }: { z?: ZoneInfo | null }) {
+  return (
+    <td title={z ? [z.code, z.name, z.region].filter(Boolean).join(' · ') : undefined}>
+      {z?.segment ?? '—'}
+    </td>
+  )
+}
+const segOf = (row: { zone_info?: ZoneInfo | null }) => row.zone_info?.segment ?? null
+
 /** One exception's side-neutral cells — the same Ref / Zone / Date /
  *  Amount spine as the Command Center's "Largest open exceptions". */
 function excCells(e: LedgerException) {
@@ -269,6 +280,7 @@ export function LedgerView({
   const [excFilter, setExcFilter] = useState<string[]>(['OPEN'])
   const [excTypeFilter, setExcTypeFilter] = useState<string[]>([])
   const [excGapFilter, setExcGapFilter] = useState<string[]>([])
+  const [excSegFilter, setExcSegFilter] = useState<string[]>([])
   // a non-IREPS decision in flight (exception id) + its error
   const [deciding, setDeciding] = useState<string | null>(null)
   // Non-IREPS tab: which narrative kinds are shown ([] = all), and
@@ -284,6 +296,7 @@ export function LedgerView({
   const [windowFrom, setWindowFrom] = useState(savedWindow.from)
   const [windowTo, setWindowTo] = useState(savedWindow.to)
   const [confFilter, setConfFilter] = useState<string[]>([])
+  const [segFilter, setSegFilter] = useState<string[]>([])
   const [matchStatusFilter, setMatchStatusFilter] = useState<string[]>([])
   const [sortAsc, setSortAsc] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
@@ -430,6 +443,7 @@ export function LedgerView({
     (e) => (excFilter.length === 0 || excFilter.includes(e.status))
       && (excTypeFilter.length === 0 || excTypeFilter.includes(e.exception_type))
       && (excGapFilter.length === 0 || excGapFilter.includes(facetKey(gapOf(e))))
+      && (excSegFilter.length === 0 || excSegFilter.includes(facetKey(segOf(e))))
       && (!(windowFrom || windowTo) || inDayRange(excDay(e), windowFrom, windowTo))
       && (!runSet || (!!e.first_seen_run_id && runSet.has(e.first_seen_run_id))
           || (!!e.resolved_by_run_id && runSet.has(e.resolved_by_run_id))),
@@ -443,7 +457,7 @@ export function LedgerView({
     : rows.filter((e) => kindFilter.includes(receiptKind(e.txn?.narrative).key)))
   const excTabs = useMemo(() => byBucket(filteredExc),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, excFilter, excTypeFilter, excGapFilter, windowFrom, windowTo, runSet])
+    [data, excFilter, excTypeFilter, excGapFilter, excSegFilter, windowFrom, windowTo, runSet])
   const allByTab = useMemo(() => byBucket(allExceptions),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [data])
@@ -457,6 +471,7 @@ export function LedgerView({
   const visibleMatches = useMemo(() => {
     const rows = (data?.matches ?? []).filter((m) => {
       if (confFilter.length && !confFilter.includes(m.confidence)) return false
+      if (segFilter.length && !segFilter.includes(facetKey(segOf(m)))) return false
       if (matchStatusFilter.length && !matchStatusFilter.includes(m.status)) return false
       // a MANUAL match belongs to no run: a run filter hides it
       if (runSet && (!m.run_id || !runSet.has(m.run_id))) return false
@@ -470,7 +485,7 @@ export function LedgerView({
     return rows.sort((a, b) => sortAsc
       ? key(a).localeCompare(key(b))
       : key(b).localeCompare(key(a)))
-  }, [data, confFilter, matchStatusFilter, runSet, dateFrom, dateTo, windowFrom, windowTo, sortAsc])
+  }, [data, confFilter, segFilter, matchStatusFilter, runSet, dateFrom, dateTo, windowFrom, windowTo, sortAsc])
 
   const windowOn = !!(windowFrom || windowTo)
   const windowValues = windowOn ? [`${windowFrom || '…'} → ${windowTo || '…'}`] : []
@@ -483,6 +498,8 @@ export function LedgerView({
     { key: 'credit-date', label: 'Credit date', values: windowValues, onRemove: clearWindow },
     { key: 'confidence', label: 'Confidence', values: confFilter,
       onRemove: (v) => setConfFilter(v === undefined ? [] : confFilter.filter((x) => x !== v)) },
+    { key: 'segment', label: 'Segment', values: segFilter,
+      onRemove: (v) => setSegFilter(v === undefined ? [] : segFilter.filter((x) => x !== v)) },
     { key: 'status', label: 'Status', values: matchStatusFilter, format: titleCase,
       onRemove: (v) => setMatchStatusFilter(v === undefined ? [] : matchStatusFilter.filter((x) => x !== v)) },
   ]
@@ -493,6 +510,8 @@ export function LedgerView({
       onRemove: (v) => setExcTypeFilter(v === undefined ? [] : excTypeFilter.filter((x) => x !== v)) },
     { key: 'exc-gap', label: 'Gap', values: excGapFilter, format: deSnake,
       onRemove: (v) => setExcGapFilter(v === undefined ? [] : excGapFilter.filter((x) => x !== v)) },
+    { key: 'exc-segment', label: 'Segment', values: excSegFilter,
+      onRemove: (v) => setExcSegFilter(v === undefined ? [] : excSegFilter.filter((x) => x !== v)) },
     { key: 'exc-date', label: 'Date', values: windowValues, onRemove: clearWindow },
     { key: 'exc-kind', label: 'Kind', values: kindFilter, format: receiptKindLabel,
       onRemove: (v) => setKindFilter(v === undefined ? [] : kindFilter.filter((x) => x !== v)) },
@@ -507,12 +526,12 @@ export function LedgerView({
   const tabAllMatches = allMatches.filter((m) => inMatchTab(m, matchTab))
   // the Run column earns its place only when the rows differ on it
   const showRun = new Set(tabMatches.map((m) => m.run_id)).size > 1
-  const matchCols = showRun ? 11 : 10
+  const matchCols = showRun ? 12 : 11
   const drawnMatches = useProgressiveRows(tabMatches)
   const excTab: ExcTab = isMatchTab(activeTab) ? 'exceptions' : activeTab
   const exceptions = excTab === 'non_ireps' ? byKind(excTabs[excTab]) : excTabs[excTab]
   // the Non-IREPS tab drops the Gap column (every row carries the same one)
-  const excCols = excTab === 'non_ireps' ? 9 : excTab === 'awaiting' ? 11 : 10
+  const excCols = excTab === 'non_ireps' ? 9 : excTab === 'awaiting' ? 12 : 11
   // what a bulk approval would cover: the OPEN rows the filters leave
   const bulkRows = excTab === 'non_ireps'
     ? exceptions.filter((e) => e.status === 'OPEN') : []
@@ -551,7 +570,7 @@ export function LedgerView({
   const shown = isMatchTab(activeTab) ? tabMatches.length : exceptions.length
   const total = isMatchTab(activeTab) ? tabAllMatches.length : tabAll.length
   const clearExc = () => {
-    setExcFilter([]); setExcTypeFilter([]); setExcGapFilter([]); clearWindow()
+    setExcFilter([]); setExcTypeFilter([]); setExcGapFilter([]); setExcSegFilter([]); clearWindow()
     setKindFilter([]); setRunFilter(EMPTY_RUN_FILTER)
   }
   const approveShown = async (rows: LedgerException[]) => {
@@ -570,6 +589,8 @@ export function LedgerView({
   // tab), so a tab switched by hand drops the gap filter
   const openTab = (t: QueueTab) => {
     if (t !== activeTab && !isMatchTab(t)) setExcGapFilter([])
+    // a non-IREPS receipt has no zone, so no segment either
+    if (t === 'non_ireps') setExcSegFilter([])
     // the status filter would empty the other match tab (OPEN is the
     // whole of To review, never in Matches)
     if (isMatchTab(t) && t !== activeTab) setMatchStatusFilter([])
@@ -588,7 +609,7 @@ export function LedgerView({
     }
   }
   const clearMatches = () => {
-    setConfFilter([]); setMatchStatusFilter([]); setDateFrom(''); setDateTo(''); clearWindow()
+    setConfFilter([]); setSegFilter([]); setMatchStatusFilter([]); setDateFrom(''); setDateTo(''); clearWindow()
     setRunFilter(EMPTY_RUN_FILTER)
   }
 
@@ -719,6 +740,11 @@ export function LedgerView({
                   </th>
                   <th><HelpLabel k="bank_ref">Reference</HelpLabel></th>
                   <th><HelpLabel k="zone">Zone</HelpLabel></th>
+                  <th>
+                    <HelpLabel k="ui:segment">Segment</HelpLabel>
+                    <ColumnFilter label="Segment" value={segFilter} onApply={setSegFilter}
+                                  options={buildOptions(tabAllMatches, segOf)} />
+                  </th>
                   <th className="th-sort" onClick={() => setSortAsc((v) => !v)}>
                     <HelpLabel k="value_date">Date</HelpLabel> {sortAsc ? '▲' : '▼'}
                     <DateRangeFilter from={dateFrom} to={dateTo}
@@ -774,6 +800,7 @@ export function LedgerView({
                       <td><span className={`stamp stamp-${m.status}`}>{m.status}</span></td>
                       <td><span className="party-ref">{m.txn?.bank_ref ?? '—'}</span></td>
                       <td>{m.txn?.zone ?? '—'}</td>
+                      <SegmentCell z={m.zone_info} />
                       <td className="nowrap">{m.txn?.value_date ? fmtDay(m.txn.value_date) : '—'}</td>
                       <td className="num" title={variance ? `Bills total ${inr(billTotal)} · variance ${inr(variance)}` : undefined}>
                         {inr(m.txn?.amount ?? null)}
@@ -875,6 +902,7 @@ export function LedgerView({
                             excFilter.length ? `status ${excFilter.map(titleCase).join(' / ').toLowerCase()}` : null,
                             excTypeFilter.length ? `type ${excTypeFilter.map(typeLabel).join(' / ').toLowerCase()}` : null,
                             excGapFilter.length ? `gap ${excGapFilter.map(deSnake).join(' / ').toLowerCase()}` : null,
+                            excSegFilter.length ? `segment ${excSegFilter.join(' / ')}` : null,
                           ].filter(Boolean).join(' · ') || 'these filters'}${runSet ? ' for the selected runs' : ''}`}>
                 <TextLink onClick={clearExc}>Clear filters</TextLink>
               </EmptyState>
@@ -908,6 +936,13 @@ export function LedgerView({
                                       options={buildOptions(tabAll, (e) => receiptKind(e.txn?.narrative).key)} />
                       )}
                     </th>
+                    {excTab !== 'non_ireps' && (
+                      <th>
+                        <HelpLabel k="ui:segment">Segment</HelpLabel>
+                        <ColumnFilter label="Segment" value={excSegFilter} onApply={setExcSegFilter}
+                                      options={buildOptions(tabAll, segOf)} />
+                      </th>
+                    )}
                     <th><HelpLabel k="ui:date">Date</HelpLabel></th>
                     <th className="th-num"><HelpLabel k="amount">Amount</HelpLabel></th>
                     {excTab !== 'non_ireps' && (
@@ -956,6 +991,7 @@ export function LedgerView({
                       ) : (
                         <td>{c.zone ?? '—'}</td>
                       )}
+                      {excTab !== 'non_ireps' && <SegmentCell z={e.zone_info} />}
                       <td className="nowrap" title={c.date ?? undefined}>{c.date ? fmtDay(c.date) : '—'}</td>
                       <td className="num">{inr(c.amount)}</td>
                       {excTab !== 'non_ireps' && <td className="exc-gap">{c.gap ?? '—'}</td>}

@@ -5,6 +5,8 @@ import {
   type AuthUser,
   type AuditEventRow,
   type CustomerConfig,
+  type ZoneDirectory,
+  type ZoneEntry,
   type CustomerInfo,
   type CustomerRules,
   type FrameName,
@@ -233,6 +235,15 @@ export async function saveCustomerSources(
   sources: Record<string, string | null>,
 ): Promise<{ key: string; sources: Record<string, string> }> {
   return sendJson('PUT', `/api/customers/${encodeURIComponent(key)}/sources`, { sources })
+}
+
+export async function fetchZoneDirectory(key: string): Promise<ZoneDirectory> {
+  return getJson(`/api/customers/${encodeURIComponent(key)}/zones`)
+}
+
+/** null resets the customer to the built-in directory */
+export async function saveZoneDirectory(key: string, zones: ZoneEntry[] | null): Promise<ZoneDirectory> {
+  return sendJson('PUT', `/api/customers/${encodeURIComponent(key)}/zones`, { zones })
 }
 
 export async function createCustomer(key: string, name: string): Promise<CustomerInfo> {

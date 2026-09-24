@@ -127,7 +127,7 @@ export function MatchDecision({ match, busy, decide }: {
 export function DecidedBy({ match }: { match: LedgerMatch }) {
   if (!match.decided_at && !match.locked_by) return null
   const who = match.decided_by
-    ?? (match.locked_by === 'AUTO_HIGH' && !match.decided_at ? 'System' : null)
+    ?? (match.locked_by?.startsWith('AUTO_') && !match.decided_at ? 'System' : null)
   const when = match.decided_at ?? match.locked_at
   if (!who && !when) return null
   return (

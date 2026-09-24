@@ -100,6 +100,7 @@ export const COLUMN_HELP: Record<string, string> = {
   'ui:reference': 'Bank reference for a credit; bill number for a bill.',
   'ui:date': 'Credit value date, or the bill’s due date.',
   'ui:gap': 'Why the item has no counterpart yet.',
+  'ui:segment': 'Business segment of the zone (e.g. TSG, OE). Set in Settings › Zones.',
   'ui:bill_status': 'Current IREPS status of the same-amount bill the credit is waiting on.',
   'ui:first_seen': 'Run that first reported the exception.',
   'ui:resolved_by': 'How the exception was closed, and by whom.',

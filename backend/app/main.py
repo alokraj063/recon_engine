@@ -45,7 +45,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Recon Engine API", version=recon.__version__,
+app = FastAPI(title="Recon Alpha API", version=recon.__version__,
               lifespan=lifespan)
 
 # The session cookie every /api route is gated on (app/auth.py). Signed,

@@ -333,6 +333,29 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
                the response carries `variance` — and the pool machinery
                excludes it from every later run via _consumed with zero
                engine change.
+               rescore_provisional(session, customer, run_id, rules) runs
+               BEFORE run_matching (both routes call it, stats merged into
+               the run's `ledger` stats): an OPEN review match (AMBIGUOUS |
+               LOW | AMOUNT_ONLY | BATCHED) with run_id set and NO analyst
+               decision on it (decided_by_user_id NULL) is released and its
+               credit re-scored, through the same matcher (_engine_reconcile
+               is the ONE incremental engine call), against every bill no
+               other OPEN/LOCKED match holds. Only a HIGH result acts: the
+               old row goes REJECTED (locked_by AUTO_SUPERSEDED, decision_note
+               "Superseded by M-n"), the new one is written like any HIGH
+               (auto-LOCKED, run_id = this run, match_id "s{k}") and the
+               bills' OPEN BILL_ONLY rows RESOLVE by RUN. Never swaps one
+               review for another (no churn), never touches a match an
+               analyst has decided, and skips (provisional_kept_conflict) a
+               HIGH that would take a bill another still-standing weak match
+               holds. Why it exists: IREPS lists a bill days after its
+               money, and an OPEN match used to claim its credit + bills
+               forever, so a weak pairing made while the right bill was
+               missing (M-81: an NER credit on an SR bill of the same
+               amount) could never be replaced. The superseded match's own
+               bills are simply free again; the run's matching reports them.
+               The run's frozen frames do not contain the replacement (it
+               happens before matching) — the ledger and audit trail do.
   ledger_export.py  ledger -> DataFrames for Excel, composed at DOWNLOAD
                time (a manual match belongs to no run and decisions happen
                after a run's workbook was written): run_ledger_frames(run)
@@ -572,6 +595,8 @@ counts + {kept id: [deleted ids]}), `run.started`/`run.start_conflict`/`run.succ
 `run.failed`/`run.selfcheck_failed`/`run.parse_failed`, `ledger.finalized`
 (summary, not per-match), `ledger.match_accepted`/`ledger.match_rejected`/
 `ledger.match_unlocked` (LOCKED -> OPEN undo; details carry was_locked_by),
+`ledger.match_superseded` (rescore_provisional replaced an untouched review match
+with a HIGH one; details was_confidence/superseded_by_seq/exceptions_resolved),
 `ledger.non_ireps_approved`/`ledger.non_ireps_rejected`/`ledger.credit_source_undone`/
 `ledger.credit_source_set` (Bank Transactions edit; details was/source/via),
 `http.request`, `http.unhandled_exception`, `pipeline.selfcheck`,
@@ -579,7 +604,17 @@ counts + {kept id: [deleted ids]}), `run.started`/`run.start_conflict`/`run.succ
 `NO_SUCH_USER`/`INACTIVE`/`BAD_PASSWORD` — and an email address NEVER appears in a
 log line or an audit row, it is PII like any other)/`auth.logout`,
 `auth.admin_seeded`/`auth.admin_seed_rejected`/`auth.ephemeral_session_secret`
-(WARNING — no SESSION_SECRET set). Decision events (`ledger.match_*`,
+(WARNING — no SESSION_SECRET set). PLATFORM SETTINGS ARE FULLY AUDITED:
+`config.rules_updated`/`config.sources_updated` carry `details.changes`
+[{field, from, to}], compared in FULL and only shortened (160 chars) for the
+record; `customer.created` carries its starting config the same way (from
+null); account changes — `auth.admin_seeded` (now an audit row too, via
+"seed") and scripts/create_user.py's `user.created`/`user.updated`
+(`changed_fields` NAMES only: password, name, is_active — a display name can
+be the email)/`user.activated`/`user.deactivated` (via "cli", no-op toggles
+log nothing) — have NULL customer_id and entity `user`, and
+db/overview.audit_events shows them in EVERY customer's feed, since they
+change who can reach every customer. Decision events (`ledger.match_*`,
 `ledger.non_ireps_*`, `ledger.credit_source_*`) carry the analyst's optional
 `note` — user-written free text, deliberately kept because the Audit trail
 shows it; source events carry `was` + `was_auto` (the engine's reading when
@@ -744,9 +779,12 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                the server stores only diffs from defaults) via GET/PUT
                /config, dropdowns fed by /api/gold/schema; there is NO
                per-run tunables panel — the UI sends no tunables so the
-               saved config governs) -> results. The "Reconciliation
-               result" nav items and the Data pages' run scope are NEVER
-               disabled: opened with nothing loaded, App auto-loads the
+               saved config governs) -> results. There is NO "Reconciliation
+               result" sidebar group (removed 2026-09-24 on request): the
+               run's Summary / Matched / Exception queue pages are reached
+               by finishing a reconcile (App opens Summary) or a run link,
+               and link to each other from the Summary. Those pages and
+               the Data pages' run scope are NEVER disabled: opened with nothing loaded, App auto-loads the
                customer's latest succeeded run (one attempt per run id,
                never while a hash-named selection is still restoring), and
                the header's RunPicker (mode + run-date range + checkbox
@@ -948,6 +986,7 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
 - **Display paths read canonical ROLES, not the field_map — by design.** `exception_queue` (`amount`=net_payable_amount, `value_date`=payment_advice_date), `summarise`'s bank-side `amount`, and the AR view's advice→order→submission aging chain are deliberately hardcoded to the canonical columns. A custom `field_map` may only point at columns that still MEAN the canonical role; a new source's adapter must map onto the roles, not around them.
 - **IREPS data is dirty in specific ways** the code already handles — don't regress: four spellings of "nothing here" (`None`, `nan`, `"nan"`, `"----"`) via `scoring.norm_text`; int/str ID drift via `lineage._key`; quantities like `"3 Set"` (why `gold_lineage_docs.receipt_qty` is a String); recovery amounts packed several to a cell (summed); Net Amt rounded to whole rupees (₹1 slack).
 - **Bill Status is a plain table** (one header row, one row per bill — see `parsers/bill_status.py`), columns located by header TEXT never by position, and the set of columns is assumed to keep changing: only `REQUIRED_HEADERS` (Bill Number, CO6 No, Status, Net Amt) are load-bearing, a dropped known column NA-fills, and an ADDED column is extracted under its own header text and rides to gold `extras` untouched — nothing here knows what a new IREPS column means, and guessing its dtype would be an invention. Silver stays source-native and single-cell: `RecoveryDetails` is the raw `'<head>: <amt> <head>: <amt> ...'` string IREPS writes, never split in the parser. The IREPS bills adapter's `to_gold()` (`sources/ireps_bills.py`) is where that string becomes the structured `recoveries`/`recovery_count`/`recovery_sum`/`net_check`/`recovery_check` gold fields and the long-format `recoveries` gold frame — Silver→Gold derivation belongs in the adapter, not the parser. `----` is IREPS's "CO7 not issued yet" placeholder on `CO7No`/`CO7Date` only; other placeholder tokens (`NA`, `-`, blank) on date columns are absorbed by `pd.to_datetime(errors="coerce")` rather than an enumerated list. Identifier columns (`ContractNo`, `BillNumber`, `CO6No`, `CO7No`) are never coerced to numeric — a bill number is not an amount, and some rows legitimately carry non-numeric placeholders (`BillNumber="-"`) that downstream code already treats as "no bill number" (`engine.group_bill_attempts.UNGROUPABLE_KEYS`, `db/ingest._BLANK_KEYS`) without the parser needing to null them. `Sheet`/`DataRow` are Silver bookkeeping fields (not literal IREPS columns) — `data_row` in particular is a real dependency of `group_bill_attempts`' resubmission tie-break, not decoration. `header_row`/`unparsed_header` (artifacts of a pre-2026-08 block-per-bill export this parser no longer reads) come back NA via `ensure_schema` — nothing feeds them any more. The IREPS bills adapter's `selfcheck()` raises when a workbook yields ZERO bill rows — an upload that isn't this format fails loud instead of ingesting an empty layer.
+- **Zone -> segment is per-customer reference data, not code.** `db/zones.py` holds the zone directory (code -> name / region / segment TSG|OE, + aliases because the data spells codes several ways: IREPS writes NFR for NEFR, SCoR and SCOR both occur, DLW/DMW are BLW/PLW's old names). Stored on `match_rule_sets.zone_directory` (NULL = `DEFAULT_ZONE_DIRECTORY`, the list supplied 2026-09-24 plus ER as EAST/TSG; MTPK deliberately unmapped), edited in Settings › Zones via GET/PUT `/api/customers/{key}/zones` (audited `config.zones_updated`, per-field `zone_directory.<code>.<field>` diffs). DISPLAY-ONLY: the matcher never reads it; `/api/ledger` hands every match (credit's zone, else its bill's) and exception its `zone_info`, which the Analyst queue shows as the Segment column (not on the Non-IREPS tab). The bank-side EXTRACTION codes are still hardcoded in the parser — see the next item.
 - **Zone extraction** tests longer railway zone codes first so `NER` isn't read as `ER` (`bank_hsbc.ZONE_CODES` order matters).
 - **Bank self-check is fail-loud**: the HSBC adapter's `selfcheck` ties parsed credits to the totals printed on the statement's last page and raises `SelfCheckError` on mismatch; everything downstream depends on that parse.
 - **Money is Float end-to-end** (golden parity). Moving to Numeric/Decimal is a deliberate future migration that requires re-baselining the golden master — do not change it casually.

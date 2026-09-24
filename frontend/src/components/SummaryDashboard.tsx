@@ -185,6 +185,9 @@ export function SummaryDashboard({ runs, aggregate, onOpen }: Props) {
                   <div><dt>Auto-locked (HIGH)</dt><dd>{n(ledger.auto_locked)}</dd></div>
                   <div><dt>Exceptions opened</dt><dd>{n(ledger.exceptions_opened)}</dd></div>
                   <div><dt>Exceptions resolved</dt><dd>{n(ledger.exceptions_resolved)}</dd></div>
+                  {!!ledger.provisional_superseded && (
+                    <div><dt>Review matches replaced</dt><dd>{n(ledger.provisional_superseded)}</dd></div>
+                  )}
                 </dl>
               </Card>
             )}

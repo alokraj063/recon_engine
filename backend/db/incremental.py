@@ -29,7 +29,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from logging_setup import get_logger, run_id_var
-from recon.engine import exception_queue, reconcile
+from recon.engine import REVIEW_CONFIDENCE, exception_queue, reconcile
 from recon.gold import ensure_schema
 from recon.matching.scoring import norm_text
 from recon.rules import FieldMapping, MatchRuleSet
@@ -159,19 +159,21 @@ def start_run(customer_id: int, params: dict) -> str:
     return run_id
 
 
-def _consumed(session, customer_id) -> Tuple[set, set]:
-    """(bank txn ids, bill ids) consumed by an OPEN or LOCKED match."""
-    active = select(MatchLedger.id).where(
-        MatchLedger.customer_id == customer_id,
-        MatchLedger.status.in_(("OPEN", "LOCKED")))
-    txns = set(session.execute(
-        select(MatchLedger.gold_bank_txn_id).where(
+def _consumed(session, customer_id, release=frozenset()) -> Tuple[set, set]:
+    """(bank txn ids, bill ids) consumed by an OPEN or LOCKED match.
+    `release`: match_ledger ids to treat as not consumed (rescore_provisional
+    frees the weak matches it is about to re-judge)."""
+    active_rows = [(mid, txn) for mid, txn in session.execute(
+        select(MatchLedger.id, MatchLedger.gold_bank_txn_id).where(
             MatchLedger.customer_id == customer_id,
-            MatchLedger.status.in_(("OPEN", "LOCKED")))).scalars())
+            MatchLedger.status.in_(("OPEN", "LOCKED"))))
+        if mid not in release]
+    txns = {txn for _mid, txn in active_rows}
+    active = [mid for mid, _txn in active_rows]
     bills = set(session.execute(
         select(MatchLedgerBill.gold_bill_id)
         .where(MatchLedgerBill.match_ledger_id.in_(active),
-               MatchLedgerBill.role == "picked")).scalars())
+               MatchLedgerBill.role == "picked")).scalars()) if active else set()
     return txns, bills
 
 
@@ -286,11 +288,15 @@ def unmatchable_positions(bank_df, bank_ids, decided, rules: MatchRuleSet) -> se
             and decided.get(bank_ids[int(pos)]) != IREPS}
 
 
-def build_pool(session, customer_id: int, statement_bronze_ids) -> dict:
+def build_pool(session, customer_id: int, statement_bronze_ids,
+               release=frozenset()) -> dict:
     """Engine-shaped frames + positional gold-id lists for the matcher.
     `statement_bronze_ids`: one id or several — the new credits are the
-    union of the statements' credits (each gold row once)."""
-    consumed_txns, consumed_bills = _consumed(session, customer_id)
+    union of the statements' credits (each gold row once).
+    `release`: OPEN match ids rescore_provisional is re-judging — their
+    credits join the pool (LAST, so a fresh credit wins every tie the
+    matcher breaks by position) and their bills count as free."""
+    consumed_txns, consumed_bills = _consumed(session, customer_id, release)
     decided = _decisions(session, customer_id)
     open_bank_only = _open_exceptions(session, customer_id, "BANK_ONLY")
 
@@ -310,7 +316,17 @@ def build_pool(session, customer_id: int, statement_bronze_ids) -> dict:
         if r.id not in seen] if open_bank_only else []
     # an approved non-IREPS receipt is settled as a classification: it
     # never re-enters a pool (nor re-opens as an exception)
-    txn_rows = [r for r in txn_rows + carried if r.id not in consumed_txns
+    released = []
+    if release:
+        released = list(session.execute(
+            select(GoldBankTxn).where(GoldBankTxn.id.in_(
+                select(MatchLedger.gold_bank_txn_id)
+                .where(MatchLedger.id.in_(list(release)))))
+            .order_by(GoldBankTxn.bronze_file_id, GoldBankTxn.row_seq)).scalars())
+    released_ids = {t.id for t in released}
+    txn_rows = [r for r in [r for r in txn_rows + carried
+                            if r.id not in released_ids] + released
+                if r.id not in consumed_txns
                 and decided.get(r.id) != NON_IREPS]
     bank_df, bank_ids = frame_from_gold(txn_rows, BANK_MAP, "bank_txns",
                                         ensure=ensure_schema)
@@ -364,21 +380,13 @@ def coverage_start(session, customer_id: int, pool_bank_df=None):
     return min(dates).normalize() if dates else None
 
 
-def run_matching(session, customer_id: int, statement_bronze_ids,
-                 rules: MatchRuleSet) -> Tuple[dict, List[str], List[str]]:
-    """Reconcile the pool through the unchanged engine. Returns
-    (out frames dict, bank_ids, bill_ids) — ids positional like the
-    matcher's indices."""
-    pool = build_pool(session, customer_id, statement_bronze_ids)
-    # non-IREPS receipts are kept apart: never scored against a bill, they
-    # land in bank_only as UNRECOGNISED_RECEIPT and in the Non-IREPS tab
-    unmatchable = unmatchable_positions(pool["bank_df"], pool["bank_ids"],
-                                        pool["decided"], rules)
-    # matching stays wide open (any open bill, however old); only which
-    # bills count as EXPECTED is floored at the bank data's first day
-    expected_from = coverage_start(session, customer_id, pool["bank_df"])
-    out = reconcile(
-        pool["bank_df"], pool["bills_df"], pool["lineage_df"],
+def _engine_reconcile(bank_df, bills_df, lineage_df, rules: MatchRuleSet,
+                      unmatchable, expected_from) -> dict:
+    """The ONE incremental call into the engine — run_matching and
+    rescore_provisional both go through it, so a new rule knob is threaded
+    here once."""
+    return reconcile(
+        bank_df, bills_df, lineage_df,
         window_days=WIDE_OPEN_DAYS,          # pool replaces the window
         co7_lookback_days=WIDE_OPEN_DAYS,
         date_tolerance_days=rules.date_tolerance_days,
@@ -397,6 +405,24 @@ def run_matching(session, customer_id: int, statement_bronze_ids,
         unmatchable=unmatchable,
         expected_from=expected_from,
     )
+
+
+def run_matching(session, customer_id: int, statement_bronze_ids,
+                 rules: MatchRuleSet) -> Tuple[dict, List[str], List[str]]:
+    """Reconcile the pool through the unchanged engine. Returns
+    (out frames dict, bank_ids, bill_ids) — ids positional like the
+    matcher's indices."""
+    pool = build_pool(session, customer_id, statement_bronze_ids)
+    # non-IREPS receipts are kept apart: never scored against a bill, they
+    # land in bank_only as UNRECOGNISED_RECEIPT and in the Non-IREPS tab
+    unmatchable = unmatchable_positions(pool["bank_df"], pool["bank_ids"],
+                                        pool["decided"], rules)
+    # matching stays wide open (any open bill, however old); only which
+    # bills count as EXPECTED is floored at the bank data's first day
+    expected_from = coverage_start(session, customer_id, pool["bank_df"])
+    out = _engine_reconcile(pool["bank_df"], pool["bills_df"],
+                            pool["lineage_df"], rules, unmatchable,
+                            expected_from)
     out["expected_from"] = expected_from
     out["bank"] = pool["bank_df"]
     out["bank_all"] = pool["bank_df"]
@@ -436,6 +462,46 @@ def _matched_txn_ids(out, bank_ids) -> Dict[int, str]:
     return result
 
 
+def _write_match(session, customer_id: int, run_id: str, r, gold_txn: str,
+                 bill_ids: List[str], seq: int, now: datetime,
+                 match_id: Optional[str] = None) -> Tuple[MatchLedger, List[dict]]:
+    """One engine `matched` row -> a match_ledger row + its bill links
+    (HIGH auto-LOCKs, every review confidence stays OPEN). Shared by
+    finalize_ledger and rescore_provisional so a match is written one way."""
+    status = "LOCKED" if r.confidence == "HIGH" else "OPEN"
+    mid = match_id or r.match_id
+    ledger = MatchLedger(
+        customer_id=customer_id, run_id=run_id, match_id=mid,
+        seq=seq,
+        gold_bank_txn_id=gold_txn, confidence=r.confidence,
+        status=status,
+        locked_at=now if status == "LOCKED" else None,
+        locked_by="AUTO_HIGH" if status == "LOCKED" else None,
+    )
+    session.add(ledger)
+    session.flush()
+    links: List[dict] = []
+    picked = {int(x) for x in r.bill_indices}
+    for pos in picked:
+        session.add(MatchLedgerBill(match_ledger_id=ledger.id,
+                                    gold_bill_id=bill_ids[pos],
+                                    role="picked"))
+        links.append({"match_id": mid,
+                      "gold_bill_id": bill_ids[pos], "role": "picked"})
+    # in the matcher's order (closest-dated first), not set order,
+    # so the ledger lists candidates the way the review cards do
+    for pos in [int(x) for x in r.candidate_indices]:
+        if pos in picked:
+            continue
+        session.add(MatchLedgerBill(match_ledger_id=ledger.id,
+                                    gold_bill_id=bill_ids[pos],
+                                    role="candidate"))
+        links.append({"match_id": mid,
+                      "gold_bill_id": bill_ids[pos],
+                      "role": "candidate"})
+    return ledger, links
+
+
 def finalize_ledger(session, customer_id: int, run_id: str, out,
                     bank_ids: List[str], bill_ids: List[str]
                     ) -> Tuple[dict, List[dict], Dict[str, str]]:
@@ -463,40 +529,16 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
             if gold_txn is None:
                 continue
             matched_txn_ids.add(gold_txn)
-            status = "LOCKED" if r.confidence == "HIGH" else "OPEN"
-            ledger = MatchLedger(
-                customer_id=customer_id, run_id=run_id, match_id=r.match_id,
-                seq=next_seq,
-                gold_bank_txn_id=gold_txn, confidence=r.confidence,
-                status=status,
-                locked_at=now if status == "LOCKED" else None,
-                locked_by="AUTO_HIGH" if status == "LOCKED" else None,
-            )
+            ledger, match_links = _write_match(
+                session, customer_id, run_id, r, gold_txn, bill_ids,
+                next_seq, now)
             next_seq += 1
-            session.add(ledger)
-            session.flush()
             ledger_ids[r.match_id] = ledger.id
-            picked = {int(x) for x in r.bill_indices}
-            for pos in picked:
-                matched_bill_ids.add(bill_ids[pos])
-                session.add(MatchLedgerBill(match_ledger_id=ledger.id,
-                                            gold_bill_id=bill_ids[pos],
-                                            role="picked"))
-                links.append({"match_id": r.match_id,
-                              "gold_bill_id": bill_ids[pos], "role": "picked"})
-            # in the matcher's order (closest-dated first), not set order,
-            # so the ledger lists candidates the way the review cards do
-            for pos in [int(x) for x in r.candidate_indices]:
-                if pos in picked:
-                    continue
-                session.add(MatchLedgerBill(match_ledger_id=ledger.id,
-                                            gold_bill_id=bill_ids[pos],
-                                            role="candidate"))
-                links.append({"match_id": r.match_id,
-                              "gold_bill_id": bill_ids[pos],
-                              "role": "candidate"})
+            matched_bill_ids.update(l["gold_bill_id"] for l in match_links
+                                    if l["role"] == "picked")
+            links.extend(match_links)
             stats["matches_created"] += 1
-            if status == "LOCKED":
+            if ledger.status == "LOCKED":
                 stats["auto_locked"] += 1
 
     # resolve OPEN exceptions that this run's matches settled
@@ -548,6 +590,128 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
     record_event(session, logger, event_type="ledger.finalized",
                  customer_id=customer_id, run_id=run_id, details=stats)
     return stats, links, ledger_ids
+
+
+# locked_by of a review match a later run replaced with a HIGH pairing
+# (the row is REJECTED, decided by the system, not by a user)
+SUPERSEDED_BY = "AUTO_SUPERSEDED"
+
+
+def rescore_provisional(session, customer_id: int, run_id: str,
+                        statement_bronze_ids, rules: MatchRuleSet) -> dict:
+    """Give the review matches nobody has touched a second look, BEFORE the
+    run's own matching. An OPEN review match (AMBIGUOUS | LOW | AMOUNT_ONLY |
+    BATCHED) claims its credit and bills against every later run, so a bill
+    that arrives after the credit — IREPS lists a bill days after the money —
+    could never displace a weak pairing made while it was missing.
+
+    Every such match with no analyst decision on it is released and its
+    credit is re-scored, through the unchanged matcher, TOGETHER with the
+    run's own pool (the statement's credits + carried exceptions) against
+    all bills no other OPEN/LOCKED match holds, the released matches' own
+    bills included. Joint, so an old credit cannot take a bill a fresh
+    credit of this run would have (the released credits are queued last,
+    and the matcher breaks equal scores by queue position). Only the
+    released credits' results are used here; the fresh ones are left to the
+    run's own matching. A credit that now pairs HIGH supersedes its old match: the old
+    row goes REJECTED (locked_by AUTO_SUPERSEDED, decision_note naming the
+    replacement), the new one is written exactly like a run's HIGH match
+    (auto-LOCKED, next M-{seq}, run_id = this run) and the bills' OPEN
+    BILL_ONLY rows are RESOLVED by this run. Anything else — still weak,
+    still ambiguous, no result — is left as it is: a re-score never swaps
+    one review for another, so a row an analyst is looking at does not churn.
+
+    A HIGH pairing that would take a bill another (unupgraded) weak match
+    still holds is skipped and counted, never applied — it would orphan that
+    match. The bills a superseded match gave up are simply free again; the
+    run's own matching, which follows, reports them.
+
+    Returns counts for the run's ledger stats. Never commits."""
+    stats = {"provisional_reviewed": 0, "provisional_superseded": 0,
+             "provisional_kept_conflict": 0}
+    prov = list(session.execute(
+        select(MatchLedger).where(
+            MatchLedger.customer_id == customer_id,
+            MatchLedger.status == "OPEN",
+            MatchLedger.confidence.in_(sorted(REVIEW_CONFIDENCE)),
+            MatchLedger.run_id.isnot(None),
+            MatchLedger.decided_by_user_id.is_(None))).scalars())
+    stats["provisional_reviewed"] = len(prov)
+    if not prov:
+        return stats
+
+    release = {m.id for m in prov}
+    by_credit = {m.gold_bank_txn_id: m for m in prov}
+    pool = build_pool(session, customer_id, statement_bronze_ids, release)
+    bank_df, bank_ids = pool["bank_df"], pool["bank_ids"]
+    bill_ids = pool["bill_ids"]
+    unmatchable = unmatchable_positions(bank_df, bank_ids, pool["decided"], rules)
+    out = _engine_reconcile(bank_df, pool["bills_df"], pool["lineage_df"],
+                            rules, unmatchable, None)
+    out["bank"] = bank_df
+    if out["matched"].empty:
+        return stats
+
+    txn_by_row = _matched_txn_ids(out, bank_ids)
+    rows = list(out["matched"].itertuples())
+    todo = [(rows[i], txn) for i, txn in txn_by_row.items()
+            if rows[i].confidence == "HIGH" and txn in by_credit]
+    considered = len(todo)
+    # drop any upgrade that takes a bill a match we are NOT replacing holds;
+    # dropping one keeps its match, so repeat until nothing changes
+    while True:
+        replacing = {txn for _r, txn in todo}
+        kept_bills = set()
+        for m in prov:
+            if m.gold_bank_txn_id not in replacing:
+                kept_bills |= _picked_bill_ids(session, m.id)
+        ok = [(r, txn) for r, txn in todo
+              if not {bill_ids[int(x)] for x in r.bill_indices} & kept_bills]
+        if len(ok) == len(todo):
+            break
+        todo = ok
+    stats["provisional_kept_conflict"] = considered - len(todo)
+    if not todo:
+        return stats
+
+    now = utcnow()
+    next_seq = (session.execute(
+        select(func.max(MatchLedger.seq))
+        .where(MatchLedger.customer_id == customer_id)).scalar() or 0) + 1
+    for k, (r, txn) in enumerate(todo):
+        old = by_credit[txn]
+        new, new_links = _write_match(session, customer_id, run_id, r, txn,
+                                      bill_ids, next_seq, now,
+                                      match_id=f"s{k}")
+        next_seq += 1
+        was = old.confidence
+        old.status = "REJECTED"
+        old.locked_by = SUPERSEDED_BY
+        old.locked_at = now
+        old.decision_note = (f"Superseded by M-{new.seq}: a better "
+                             f"pairing (HIGH) became available")
+        open_bill = _open_exceptions(session, customer_id, "BILL_ONLY")
+        closed = 0
+        for link in new_links:
+            eid = open_bill.get(link["gold_bill_id"])                 if link["role"] == "picked" else None
+            if eid is None:
+                continue
+            row = session.get(ExceptionLedger, eid)
+            row.status = "RESOLVED"
+            row.resolved_by = "RUN"
+            row.resolved_by_run_id = run_id
+            row.resolved_by_match_id = None
+            row.resolved_by_user_id = None
+            row.resolved_at = now
+            closed += 1
+        record_event(session, logger, event_type="ledger.match_superseded",
+                     customer_id=customer_id, run_id=run_id,
+                     entity_type="match_ledger", entity_id=old.id,
+                     details={"was_confidence": was,
+                              "superseded_by_seq": new.seq,
+                              "exceptions_resolved": closed})
+        stats["provisional_superseded"] += 1
+    return stats
 
 
 def accept_match(match_ledger_id: str,

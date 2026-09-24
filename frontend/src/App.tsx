@@ -359,7 +359,7 @@ export default function App() {
     const title = PAGE_TITLES[view]
       ?? (goldName ? GOLD_TITLES[goldName]
           : VIEW_TITLES[view as keyof typeof VIEW_TITLES])
-    document.title = title ? `${title} — Recon Engine` : 'Recon Engine'
+    document.title = title ? `${title} — Recon Alpha` : 'Recon Alpha'
   }, [view])
 
   const onIngested = (_r: IngestResponse) => {
