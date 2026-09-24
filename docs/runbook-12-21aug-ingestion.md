@@ -2,8 +2,8 @@
 
 Extends the 18–21 Aug load in `docs/runbook-4day-ingestion.md` backward to 10
 days, dropping the `rnote`/`crn` lineage slots (not available for every day
-in this range). Not yet executed — this is the plan, ready to hand to
-another agent to run.
+in this range). **Executed 2026-09-23** after wiping the `default`
+customer's prior data (the 18–21 Aug load) — see §6 for what came out.
 
 ---
 
@@ -116,16 +116,70 @@ curl -s -b cookies.txt -X POST http://localhost:8000/api/reconcile \
 after a newer one would roll a bill's status back). **Mode matters** (only
 `incremental` feeds the match ledger).
 
-## 5. Before running
+**How this run was actually executed** (no password on hand): same
+in-process technique as `docs/runbook-4day-ingestion.md` §4's "Without a
+password" note — `fastapi.testclient.TestClient` over `app.main.app` with
+`app.dependency_overrides[auth.require_user]` set to a fixed user (id `0`,
+matching `tests/conftest.py`'s pattern), run as a standalone script rather
+than curl. Same code path, same `backend/data`, nothing written to `users`.
+The live `uvicorn --reload` process stayed up throughout; SQLite tolerated
+the second process fine for these short-lived writes.
 
-- Check whether `backend/data` already has the 18–21 Aug load from
-  `docs/runbook-4day-ingestion.md` (`GET /api/ingestions` or
-  `GET /api/gold/files`). If it does, days 8 and 10 here (19, 21 Aug file
-  dates) will just re-report already-known rows — harmless, but worth
-  knowing before comparing before/after counts.
-- If a clean slate is wanted instead, `docs/runbook-4day-ingestion.md` §6
-  item 5 has the teardown order (`credit_sources` first, then every table
-  with a `customer_id`, keep `customers`/`source_configs`/`match_rule_sets`).
-- This load has not been executed yet — there is no "what came out" section
-  to compare against. Fill one in after running it, the way §5 of the
-  4-day runbook does.
+## 5. What was done before running
+
+1. **Backed up `backend/data`** to
+   `data_backup_20260923_173949_pre_1221aug/` (sibling of `backend/`),
+   since the 18–21 Aug load in `backend/data` held live ledger state.
+2. **Wiped the `default` customer's data**, following the teardown order in
+   `docs/runbook-4day-ingestion.md` §6 item 5 (`credit_sources` first, then
+   every table with a `customer_id`, keeping `customers`/`source_configs`/
+   `match_rule_sets`), plus removing `backend/data/bronze/default/` blobs
+   and `backend/data/runs/*`. Confirmed by the delete counts matching the
+   4-day runbook's last known end state (47 matches, 2,407 gold bills, 194
+   exception rows, etc. — see script output).
+3. Ran the 10-day sequence in §4, oldest first, `mode: incremental`.
+
+## 6. What came out
+
+All 10 days ingested and reconciled without error, including day 5 (16 Aug,
+statement-only — no ingest error posting zero `bills` files, no reconcile
+error against a pool with nothing newly advised that day).
+
+Per-day ledger deltas (`ledger.finalized` from each `/api/reconcile` call):
+
+| Day | File date | matches created | auto-locked | exceptions opened | exceptions resolved | gold bills after |
+|---|---|---|---|---|---|---|
+| 1 | 12 Aug | 32 | 32 | 51 | 0 | 2,486 |
+| 2 | 13 Aug | 14 | 14 | 45 | 1 | 2,480 |
+| 3 | 14 Aug | 34 | 32 | 57 | 7 | 2,574 |
+| 4 | 15 Aug | 1 | 0 | 43 | 0 | 2,540 |
+| 5 | 16 Aug | 1 | 0 | 3 | 0 | 2,539 |
+| 6 | 17 Aug | 0 | 0 | 1 | 0 | 2,538 |
+| 7 | 18 Aug | 2 | 2 | 4 | 2 | 2,574 |
+| 8 | 19 Aug | 17 | 17 | 69 | 0 | 2,592 |
+| 9 | 20 Aug | 14 | 14 | 39 | 6 | 2,595 |
+| 10 | 21 Aug | 16 | 13 | 49 | 1 | 2,618 |
+
+End state (queried directly from `match_ledger`/`exception_ledger`/gold
+tables after all 10 runs):
+
+- **10 runs**, all succeeded.
+- **131 matches** total: **124 LOCKED** (auto-HIGH), **7 OPEN** for review.
+- **339 open BANK_ONLY**, **5 open BILL_ONLY**, **17 exceptions resolved**
+  by a later run in the sequence.
+- **2,733 gold bills**, **1,134 gold bank txns**, **4,248 recovery lines**.
+- **582 ingest conflicts** across the run (locked bills whose `data_row` or
+  `payment_order_ref` shifted between exports — the same benign class the
+  4-day runbook's §6 item 3 describes; no amounts or statuses moved).
+- `meta.expected_from` was **2026-08-11** on every run — the incremental
+  floor locked onto the first day's credit value date (11 Aug, from the 12
+  Aug file) and never moved, since every subsequent statement was newer.
+- Day 4→5 and day 5→6 (across the 16 Aug bills gap) show the pool
+  continuing to accumulate normally — 15 Aug's Bill Status export already
+  had most of what 16 Aug's credits needed (`matched: 1` on day 5 despite
+  no bills posted that day, matching against bills already in gold from
+  earlier exports), confirming the "no Bill Status file exists for 16 Aug"
+  gap is harmless to work around this way.
+- Full per-day JSON (ingest stats + reconcile `meta` for every day) is in
+  the session scratchpad as `ingest_12_21_aug_results.json` — not committed
+  to the repo (it's a one-off run artifact, not source data or code).
