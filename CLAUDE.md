@@ -779,9 +779,12 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
                the server stores only diffs from defaults) via GET/PUT
                /config, dropdowns fed by /api/gold/schema; there is NO
                per-run tunables panel — the UI sends no tunables so the
-               saved config governs) -> results. The "Reconciliation
-               result" nav items and the Data pages' run scope are NEVER
-               disabled: opened with nothing loaded, App auto-loads the
+               saved config governs) -> results. There is NO "Reconciliation
+               result" sidebar group (removed 2026-09-24 on request): the
+               run's Summary / Matched / Exception queue pages are reached
+               by finishing a reconcile (App opens Summary) or a run link,
+               and link to each other from the Summary. Those pages and
+               the Data pages' run scope are NEVER disabled: opened with nothing loaded, App auto-loads the
                customer's latest succeeded run (one attempt per run id,
                never while a hash-named selection is still restoring), and
                the header's RunPicker (mode + run-date range + checkbox

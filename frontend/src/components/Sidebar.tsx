@@ -1,8 +1,8 @@
 import type { ComponentType } from 'react'
 import {
-  ArrowDownLeft, Boxes, FileSearch, FileStack, Gauge, GitMerge,
-  Landmark, LayoutDashboard, Link2, ListChecks, ListMinus, ReceiptText,
-  TriangleAlert, Upload, Download, LogOut, Settings,
+  ArrowDownLeft, Boxes, FileSearch, FileStack, GitMerge,
+  Landmark, LayoutDashboard, ListChecks, ListMinus, ReceiptText,
+  Upload, Download, LogOut, Settings,
 } from 'lucide-react'
 import type { ReconResponse } from '../types'
 import { workbookUrl } from '../api'
@@ -39,7 +39,6 @@ interface NavItem {
   view: View
   label: string
   icon: IconType
-  count?: number
 }
 
 interface Props {
@@ -66,16 +65,6 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
   const counts = result?.meta.counts
   const { user, signOut } = useAuth()
 
-  const resultItems: NavItem[] = [
-    { view: 'summary', label: 'Summary', icon: Gauge },
-    { view: 'matched', label: 'Matched', icon: Link2, count: counts?.matched },
-    {
-      view: 'exceptions',
-      label: 'Exception queue',
-      icon: TriangleAlert,
-      count: counts ? counts.bank_only + counts.bill_only + (counts.match_review ?? 0) : undefined,
-    },
-  ]
   // one Data page per kind; a click opens the user's preferred scope,
   // active in EITHER scope. Row badges exist only in run scope (a run
   // payload carries its frame counts; the live gold total is only known
@@ -103,20 +92,6 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
       </button>
     )
   }
-
-  // result views are always reachable: with no run loaded they open on
-  // the latest run (App auto-loads it) or, with no runs yet, on a guide
-  // to run one — never a greyed-out item
-  const item = ({ view: v, label, icon, count }: NavItem) => (
-    <button
-      key={v}
-      className={`nav-item${view === v ? ' active' : ''}${result ? '' : ' nav-item-idle'}`}
-      onClick={() => onNavigate(v)}
-    >
-      <span className="nav-main"><NavIcon icon={icon} />{label}</span>
-      {count !== undefined && <span className="nav-count">{count}</span>}
-    </button>
-  )
 
   // views that work with no run loaded are never disabled
   const openItem = ({ view: v, label, icon }: NavItem) => (
@@ -150,9 +125,6 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
         {openItem({ view: 'ledger', label: 'Analyst queue', icon: ListChecks })}
         {openItem({ view: 'ar', label: 'AR Reconciliation', icon: ArrowDownLeft })}
         {openItem({ view: 'audit', label: 'Audit trail', icon: FileSearch })}
-
-        <div className="nav-group-label">Reconciliation result</div>
-        {resultItems.map(item)}
 
         <div className="nav-group-label">Data</div>
         {DATA_PAGES.map(dataItem)}

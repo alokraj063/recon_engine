@@ -1209,9 +1209,6 @@ table.ledger.ingestions { table-layout: fixed; min-width: 900px; }
 
 /* Runs inset filter bar */
 
-/* result / run-data nav with no run loaded: reachable, quietly muted */
-.nav-item-idle:not(.active) { opacity: 0.75; }
-
 /* --- command center ----------------------------------------------------- */
 
 /* five credit buckets side by side on a laptop; wraps below that */
