@@ -1,4 +1,4 @@
-# Recon Engine — User Guide
+# Recon Alpha — User Guide
 
 ### What happens when you click each button
 
@@ -267,4 +267,4 @@ Only one place: the *Analyst queue*. The Exception queue on a run's results has 
 
 ---
 
-*Recon Engine — internal user guide. Screens and wording may evolve; the four-stage journey in [The big idea](#the-big-idea) is the stable mental model underneath all of it.*
+*Recon Alpha — internal user guide. Screens and wording may evolve; the four-stage journey in [The big idea](#the-big-idea) is the stable mental model underneath all of it.*

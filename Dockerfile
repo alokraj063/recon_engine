@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Recon Engine: one image serving the React UI at / and the API at /api.
+# Recon Alpha: one image serving the React UI at / and the API at /api.
 #
 #   docker build -t recon-engine .                      (from the repo root)
 #

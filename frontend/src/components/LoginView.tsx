@@ -56,7 +56,7 @@ export function LoginView({ onSignedIn, expired }: Props) {
           <span className="logo-plate">
             <img className="logo-img" src={logo} alt="Joules to Watts" />
           </span>
-          <h1>Recon <span className="amp">Engine</span></h1>
+          <h1>Recon <span className="amp">Alpha</span></h1>
         </div>
 
         {expired && !error && (

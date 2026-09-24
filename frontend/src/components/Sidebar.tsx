@@ -136,7 +136,7 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
           <img className="logo-img" src={logo} alt="Joules to Watts" />
         </span>
         <h1>
-          Recon <span className="amp">Engine</span>
+          Recon <span className="amp">Alpha</span>
         </h1>
       </div>
 

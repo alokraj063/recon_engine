@@ -2,7 +2,7 @@
 
 ## Context
 
-Today the recon engine is single-customer and single-source: HSBC statement PDF + IREPS Bill Status + RNOTE/CRN, parsed straight into in-memory frames, matched, and served from an in-memory run store. The goal is to make it a product usable by many customers with different banks and PO sources:
+Today Recon Alpha is single-customer and single-source: HSBC statement PDF + IREPS Bill Status + RNOTE/CRN, parsed straight into in-memory frames, matched, and served from an in-memory run store. The goal is to make it a product usable by many customers with different banks and PO sources:
 
 - **Bronze** = raw uploaded files (registered, hashed, kept on disk).
 - **Silver** = each source's parsed output in its own native shape (audit + re-transform).
