@@ -139,9 +139,11 @@ def seed_admin_user(session, logger=None):
     user = User(email=normalize_email(email), name=email, password_hash=hashed)
     session.add(user)
     session.flush()
-    if logger is not None:
-        # id only — never the address (see the taxonomy in CLAUDE.md)
-        logger.log(logging.INFO, "auth.admin_seeded", extra={
-            "event_type": "auth.admin_seeded",
-            "details": {"user_id": user.id}})
+    # a login appearing is an access change: durable audit row, not just a
+    # log line. id only — never the address (see the taxonomy in CLAUDE.md)
+    from .audit import record_event
+    record_event(session, logger or logging.getLogger(__name__),
+                 event_type="auth.admin_seeded", entity_type="user",
+                 entity_id=user.id,
+                 details={"user_id": user.id, "via": "seed"})
     return user

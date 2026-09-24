@@ -44,7 +44,8 @@ function category(e: AuditEventRow): Category {
   // every analyst decision on the ledger: matches, and a credit's source
   if (t.startsWith('ledger.match_') || t.startsWith('ledger.non_ireps_')
       || t.startsWith('ledger.credit_source_')) return 'decision'
-  if (t.startsWith('config.') || t === 'customer.created') return 'config'
+  if (t.startsWith('config.') || t.startsWith('customer.')
+      || t.startsWith('user.') || t === 'auth.admin_seeded') return 'config'
   return 'other'
 }
 
@@ -59,6 +60,9 @@ const actorOf = (e: AuditEventRow & { cat: Category }): 'user' | 'system' =>
 function actorName(e: AuditEventRow & { cat: Category }): string {
   if (e.actor) return e.actor
   if (e.actor_user_id != null) return `User #${e.actor_user_id}`
+  // account changes made outside the app: the operator is not a signed-in user
+  if (e.details?.via === 'cli') return 'Command line'
+  if (e.details?.via === 'seed') return 'System'
   return actorOf(e) === 'user' ? 'Not recorded' : 'System'
 }
 
@@ -110,6 +114,15 @@ const EVENT_NAME: Record<string, string> = {
   'config.rules_updated': 'Matching rules updated',
   'config.sources_updated': 'Document sources updated',
   'customer.created': 'Customer created',
+  'config.rules_update_rejected': 'Matching rules change refused',
+  'config.sources_update_rejected': 'Document sources change refused',
+  'customer.create_rejected': 'Customer creation refused',
+  'customer.data_wiped': 'Customer data wiped',
+  'user.created': 'User created',
+  'user.updated': 'User updated',
+  'user.activated': 'User access restored',
+  'user.deactivated': 'User access revoked',
+  'auth.admin_seeded': 'First admin created',
 }
 function eventName(t: string): string {
   if (EVENT_NAME[t]) return EVENT_NAME[t]
@@ -180,13 +193,19 @@ const DETAIL_LABEL: Record<string, string> = {
   changed_field_names: 'Changed fields',
   rows_reported: 'Rows reported',
   rows_inserted: 'Rows added',
+  changed_fields: 'Changed fields',
+  error: 'Refused as',
+  reason: 'Reason',
+  deleted: 'Rows deleted',
+  kept: 'Kept',
 }
 // shown inside another key (was_auto rides with "was") or not at all
-const DETAIL_HIDDEN = new Set(['was_auto', 'bulk'])
+const DETAIL_HIDDEN = new Set(['was_auto', 'bulk', 'user_id'])
 
 const VALUE_TEXT: Record<string, string> = {
   IREPS: 'IREPS', NON_IREPS: 'Non-IREPS', AUTO_HIGH: 'System (high confidence)',
-  USER: 'User', bank: 'Bank transactions',
+  USER: 'User', bank: 'Bank transactions', cli: 'Command line',
+  seed: 'First-boot setup',
 }
 
 const words = (k: string) => {

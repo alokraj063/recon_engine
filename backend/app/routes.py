@@ -1793,19 +1793,26 @@ def _flatten(value, prefix: str, out: dict) -> dict:
         for k in sorted(value):
             _flatten(value[k], f"{prefix}.{k}" if prefix else str(k), out)
     else:
-        if isinstance(value, str) and len(value) > _AUDIT_TEXT_MAX:
-            value = value[:_AUDIT_TEXT_MAX - 1] + "…"
         out[prefix] = value
     return out
+
+
+def _audit_value(value):
+    if isinstance(value, str) and len(value) > _AUDIT_TEXT_MAX:
+        return value[:_AUDIT_TEXT_MAX - 1] + "…"
+    return value
 
 
 def config_changes(before: dict, after: dict) -> list:
     """[{field, from, to}] for every setting a save actually changed —
     the config.rules_updated / config.sources_updated audit detail.
     Settings are not financial content, so values are logged verbatim
-    (the taxonomy's no-PII rule concerns row data, not configuration)."""
+    (the taxonomy's no-PII rule concerns row data, not configuration).
+    Compared in FULL, shortened only for the record: an edit past the
+    160th character of a copy text is still a change."""
     a, b = _flatten(before, "", {}), _flatten(after, "", {})
-    return [{"field": k, "from": a.get(k), "to": b.get(k)}
+    return [{"field": k, "from": _audit_value(a.get(k)),
+             "to": _audit_value(b.get(k))}
             for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)]
 
 
@@ -2020,13 +2027,25 @@ def create_customer(body: CustomerBody):
             session.add(SourceConfig(customer_id=customer.id,
                                      source_type=source_type, role=role,
                                      adapter_key=adapter_key, params=params))
-        session.add(MatchRuleSetRow(
+        rule_row = MatchRuleSetRow(
             customer_id=customer.id, name="default", is_default=True,
             paid_statuses=["PAYMENT MADE"],
-            weights={"advice_date": 4, "zone": 2, "co7_date": 1}))
+            weights={"advice_date": 4, "zone": 2, "co7_date": 1})
+        session.add(rule_row)
+        session.flush()
+        # the starting configuration, as changes from nothing — so the
+        # first later edit reads against a recorded baseline
+        initial = {
+            "name": customer.name,
+            "sources": {st: {"adapter": key, "params": dict(params or {})}
+                        for st, _role, key, params in DEFAULT_SOURCES},
+            "rules": _audited_rules(rule_row),
+        }
         record_event(session, logger, event_type="customer.created",
                      customer_id=customer.id, entity_type="customer",
-                     entity_id=customer.id, details={"key": body.key})
+                     entity_id=customer.id,
+                     details={"key": body.key,
+                              "changes": config_changes({}, initial)})
         session.commit()
         return {
             "key": customer.key,

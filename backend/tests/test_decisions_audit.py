@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.auth import AuthUser, require_user  # noqa: E402
 from db import SessionLocal  # noqa: E402
 from db.audit import set_actor  # noqa: E402
-from db.models import GoldBankTxn, MatchLedger, User  # noqa: E402
+from db.models import AuditLog, GoldBankTxn, MatchLedger, User  # noqa: E402
 from tests.test_multi_statement import bills, world  # noqa: E402,F401
 from tests.test_unrecognised_receipts import _ingest, _reconcile, credits  # noqa: E402
 
@@ -184,6 +184,78 @@ def test_config_save_logs_changed_fields_only(world, analyst):  # noqa: F811
     assert ev["entity_label"] == "Source setup"
 
 
+def test_long_copy_text_edit_is_logged(world, analyst):  # noqa: F811
+    """The audit record shortens long text; the change test must not —
+    an edit past the 160th character is still a change."""
+    client, key = world["client"], world["key"]
+    cfg = client.get(f"/api/customers/{key}/config").json()["rules"]
+    body = {k: v for k, v in cfg.items() if k != "copy_effective"}
+    section, entries = next((s, e) for s, e in cfg["copy_effective"].items() if e)
+    code = next(iter(entries))
+    long_a = "x" * 200 + "a"
+    long_b = "x" * 200 + "b"
+    for text in (long_a, long_b):
+        r = client.put(f"/api/customers/{key}/config",
+                       json={**body, "copy_overrides": {section: {code: text}}})
+        assert r.status_code == 200, r.text
+    events = _audit(client, key, "config.rules_updated")
+    assert len(events) == 2
+    (change,) = events[0]["details"]["changes"]
+    assert change["field"] == f"copy_overrides.{section}.{code}"
+    assert len(change["to"]) == 160
+
+
+def test_customer_created_records_its_starting_config(world):  # noqa: F811
+    (ev,) = _audit(world["client"], world["key"], "customer.created")
+    fields = {c["field"]: c for c in ev["details"]["changes"]}
+    assert fields["name"]["from"] is None
+    assert fields["name"]["to"] == "multi statement test"
+    assert fields["sources.bank_statement.adapter"]["to"]
+    assert fields["rules.paid_statuses"]["to"] == ["PAYMENT MADE"]
+
+
+def _create_user_cli(monkeypatch, *argv, stdin=""):
+    import importlib.util
+    import io
+    spec = importlib.util.spec_from_file_location(
+        "create_user_cli", Path(__file__).resolve().parents[1] / "scripts" / "create_user.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setattr(sys, "argv", ["create_user.py", *argv])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
+    assert mod.main() == 0
+
+
+def test_user_account_changes_are_audited(world, monkeypatch):  # noqa: F811
+    """Every login change made from the CLI leaves an audit row, visible
+    in any customer's feed, carrying the user's id — never the email."""
+    email = f"cli-{uuid.uuid4().hex[:8]}@example.com"
+    try:
+        _create_user_cli(monkeypatch, "-e", email, "-n", "Cli User",
+                         "--password-stdin", stdin="first-password-1")
+        _create_user_cli(monkeypatch, "-e", email, "--deactivate")
+        _create_user_cli(monkeypatch, "-e", email, "--deactivate")  # no-op
+        _create_user_cli(monkeypatch, "-e", email, "-n", "Renamed",
+                         "--password-stdin", stdin="second-password-2")
+        with SessionLocal() as s:
+            uid = s.execute(select(User.id).where(User.email == email)).scalar_one()
+        events = [e for e in _audit(world["client"], world["key"])
+                  if e["event_type"].startswith("user.") and e["entity_id"] == str(uid)]
+        assert [e["event_type"] for e in events] ==             ["user.updated", "user.deactivated", "user.created"]
+        assert events[0]["details"]["changed_fields"] == ["password", "name", "is_active"]
+        assert all(e["details"]["via"] == "cli" for e in events)
+        assert email not in repr(events)
+        assert events[0]["entity_label"] == "User · Renamed"
+    finally:
+        with SessionLocal() as s:
+            uid = s.execute(select(User.id).where(User.email == email)).scalar_one_or_none()
+            if uid is not None:
+                s.execute(delete(AuditLog).where(AuditLog.entity_type == "user",
+                                                 AuditLog.entity_id == str(uid)))
+                s.execute(delete(User).where(User.id == uid))
+                s.commit()
+
+
 def test_awaiting_status_names_the_in_flight_bill(world, analyst):  # noqa: F811
     pk, bz, client, key = world["pk"], world["bz"], world["client"], world["key"]
     b = bills(["P1", "P2"])
@@ -201,3 +273,22 @@ def test_awaiting_status_names_the_in_flight_bill(world, analyst):  # noqa: F811
     with SessionLocal() as s:
         assert not s.execute(select(MatchLedger.id)
                              .where(MatchLedger.customer_id == pk)).first()
+
+
+def test_first_boot_admin_seed_is_audited(monkeypatch):
+    """seed_admin_user only acts on an EMPTY users table, so it runs in a
+    rolled-back transaction here: nothing it writes survives the test."""
+    from db.seeds import seed_admin_user
+    monkeypatch.setenv("ADMIN_EMAIL", "seeded-admin@example.com")
+    monkeypatch.setenv("ADMIN_PASSWORD", "a-long-seed-password")
+    with SessionLocal() as s:
+        s.execute(delete(User))  # rolled back below
+        user = seed_admin_user(s)
+        assert user is not None
+        s.flush()
+        (row,) = s.execute(select(AuditLog).where(
+            AuditLog.event_type == "auth.admin_seeded",
+            AuditLog.entity_id == str(user.id))).scalars()
+        assert row.details == {"user_id": user.id, "via": "seed"}
+        assert "seeded-admin" not in repr(row.details)
+        s.rollback()

@@ -18,6 +18,7 @@ let db/seeds.py create the same row (see seed_admin_user).
 """
 
 import argparse
+import logging
 import getpass
 import sys
 from pathlib import Path
@@ -27,9 +28,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import select  # noqa: E402
 
 from db import SessionLocal  # noqa: E402
+from db.audit import record_event  # noqa: E402
 from db.models import User  # noqa: E402
 from passwords import (PasswordError, hash_password, normalize_email,  # noqa: E402
                        validate_password)
+
+
+logger = logging.getLogger("scripts.create_user")
+
+
+def audit(session, event_type: str, user, **details) -> None:
+    """Every account change leaves an audit row in the same transaction.
+    The user's id only — an email address never enters the audit trail."""
+    session.flush()
+    record_event(session, logger, event_type=event_type, entity_type="user",
+                 entity_id=user.id,
+                 details={"user_id": user.id, "via": "cli", **details})
 
 
 def prompt_password() -> str:
@@ -82,7 +96,10 @@ def main() -> int:
         if args.deactivate or args.activate:
             if row is None:
                 raise SystemExit(f"no such user: {email}")
-            row.is_active = args.activate
+            if row.is_active != args.activate:
+                row.is_active = args.activate
+                audit(session, "user.activated" if args.activate
+                      else "user.deactivated", row)
             session.commit()
             print(f"{email}: {'active' if row.is_active else 'DISABLED'}")
             return 0
@@ -101,15 +118,24 @@ def main() -> int:
             raise SystemExit(str(exc))
 
         if row is None:
-            session.add(User(email=email, name=args.name or email,
-                             password_hash=hashed))
+            row = User(email=email, name=args.name or email,
+                       password_hash=hashed)
+            session.add(row)
+            audit(session, "user.created", row)
             action = "created"
         else:
+            # field NAMES only: a display name defaults to the email address,
+            # and the password is never recorded — only that it changed
+            changed = ["password"]
             row.password_hash = hashed
-            if args.name:
+            if args.name and args.name != row.name:
+                changed.append("name")
                 row.name = args.name
             # a password reset is also how a locked-out account comes back
+            if not row.is_active:
+                changed.append("is_active")
             row.is_active = True
+            audit(session, "user.updated", row, changed_fields=changed)
             action = "password updated for"
         session.commit()
 

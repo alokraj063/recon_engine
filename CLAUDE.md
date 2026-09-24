@@ -604,7 +604,17 @@ with a HIGH one; details was_confidence/superseded_by_seq/exceptions_resolved),
 `NO_SUCH_USER`/`INACTIVE`/`BAD_PASSWORD` — and an email address NEVER appears in a
 log line or an audit row, it is PII like any other)/`auth.logout`,
 `auth.admin_seeded`/`auth.admin_seed_rejected`/`auth.ephemeral_session_secret`
-(WARNING — no SESSION_SECRET set). Decision events (`ledger.match_*`,
+(WARNING — no SESSION_SECRET set). PLATFORM SETTINGS ARE FULLY AUDITED:
+`config.rules_updated`/`config.sources_updated` carry `details.changes`
+[{field, from, to}], compared in FULL and only shortened (160 chars) for the
+record; `customer.created` carries its starting config the same way (from
+null); account changes — `auth.admin_seeded` (now an audit row too, via
+"seed") and scripts/create_user.py's `user.created`/`user.updated`
+(`changed_fields` NAMES only: password, name, is_active — a display name can
+be the email)/`user.activated`/`user.deactivated` (via "cli", no-op toggles
+log nothing) — have NULL customer_id and entity `user`, and
+db/overview.audit_events shows them in EVERY customer's feed, since they
+change who can reach every customer. Decision events (`ledger.match_*`,
 `ledger.non_ireps_*`, `ledger.credit_source_*`) carry the analyst's optional
 `note` — user-written free text, deliberately kept because the Audit trail
 shows it; source events carry `was` + `was_auto` (the engine's reading when
