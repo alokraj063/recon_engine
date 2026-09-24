@@ -65,6 +65,11 @@ export interface LedgerStats {
   auto_locked: number
   exceptions_opened: number
   exceptions_resolved: number
+  /** untouched review matches re-judged by the run, and how many a HIGH
+   *  pairing replaced (absent on runs from before this existed) */
+  provisional_reviewed?: number
+  provisional_superseded?: number
+  provisional_kept_conflict?: number
 }
 
 export interface ReconMeta {
@@ -187,7 +192,7 @@ export interface LedgerMatch {
   seq: number | null
   confidence: string
   status: 'OPEN' | 'LOCKED' | 'REJECTED'
-  locked_by: 'AUTO_HIGH' | 'USER' | null
+  locked_by: 'AUTO_HIGH' | 'AUTO_SUPERSEDED' | 'USER' | null
   created_at: string
   locked_at: string | null
   /** analyst's free-text note (MANUAL matches only; optional) */

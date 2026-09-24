@@ -619,10 +619,15 @@ async def _run_incremental(customer_pk, customer_key, rule_set_id,
 
         def match_and_ledger():
             with SessionLocal() as session:
+                # unattended review matches get a second look first, so a
+                # bill that arrived after its credit can displace a weak pairing
+                rescored = incremental.rescore_provisional(
+                    session, customer_pk, run_id, bronze_ids["statement"], rules)
                 out, bank_ids, bill_ids = incremental.run_matching(
                     session, customer_pk, bronze_ids["statement"], rules)
                 ledger_stats, links, ledger_ids = incremental.finalize_ledger(
                     session, customer_pk, run_id, out, bank_ids, bill_ids)
+                ledger_stats.update(rescored)
                 session.commit()
             return out, ledger_stats, links, ledger_ids
 
@@ -1569,10 +1574,13 @@ async def _reconcile_incremental_from_gold(customer_pk, customer_key,
     try:
         def match_and_ledger():
             with SessionLocal() as session:
+                rescored = incremental.rescore_provisional(
+                    session, customer_pk, run_id, statement_bronze_ids, rules)
                 out, bank_ids, bill_ids = incremental.run_matching(
                     session, customer_pk, statement_bronze_ids, rules)
                 ledger_stats, links, ledger_ids = incremental.finalize_ledger(
                     session, customer_pk, run_id, out, bank_ids, bill_ids)
+                ledger_stats.update(rescored)
                 session.commit()
             return out, ledger_stats, links, ledger_ids
 

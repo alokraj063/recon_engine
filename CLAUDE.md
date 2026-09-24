@@ -333,6 +333,29 @@ backend/db/      persistence — imports recon, never the reverse. Real per-laye
                the response carries `variance` — and the pool machinery
                excludes it from every later run via _consumed with zero
                engine change.
+               rescore_provisional(session, customer, run_id, rules) runs
+               BEFORE run_matching (both routes call it, stats merged into
+               the run's `ledger` stats): an OPEN review match (AMBIGUOUS |
+               LOW | AMOUNT_ONLY | BATCHED) with run_id set and NO analyst
+               decision on it (decided_by_user_id NULL) is released and its
+               credit re-scored, through the same matcher (_engine_reconcile
+               is the ONE incremental engine call), against every bill no
+               other OPEN/LOCKED match holds. Only a HIGH result acts: the
+               old row goes REJECTED (locked_by AUTO_SUPERSEDED, decision_note
+               "Superseded by M-n"), the new one is written like any HIGH
+               (auto-LOCKED, run_id = this run, match_id "s{k}") and the
+               bills' OPEN BILL_ONLY rows RESOLVE by RUN. Never swaps one
+               review for another (no churn), never touches a match an
+               analyst has decided, and skips (provisional_kept_conflict) a
+               HIGH that would take a bill another still-standing weak match
+               holds. Why it exists: IREPS lists a bill days after its
+               money, and an OPEN match used to claim its credit + bills
+               forever, so a weak pairing made while the right bill was
+               missing (M-81: an NER credit on an SR bill of the same
+               amount) could never be replaced. The superseded match's own
+               bills are simply free again; the run's matching reports them.
+               The run's frozen frames do not contain the replacement (it
+               happens before matching) — the ledger and audit trail do.
   ledger_export.py  ledger -> DataFrames for Excel, composed at DOWNLOAD
                time (a manual match belongs to no run and decisions happen
                after a run's workbook was written): run_ledger_frames(run)
@@ -572,6 +595,8 @@ counts + {kept id: [deleted ids]}), `run.started`/`run.start_conflict`/`run.succ
 `run.failed`/`run.selfcheck_failed`/`run.parse_failed`, `ledger.finalized`
 (summary, not per-match), `ledger.match_accepted`/`ledger.match_rejected`/
 `ledger.match_unlocked` (LOCKED -> OPEN undo; details carry was_locked_by),
+`ledger.match_superseded` (rescore_provisional replaced an untouched review match
+with a HIGH one; details was_confidence/superseded_by_seq/exceptions_resolved),
 `ledger.non_ireps_approved`/`ledger.non_ireps_rejected`/`ledger.credit_source_undone`/
 `ledger.credit_source_set` (Bank Transactions edit; details was/source/via),
 `http.request`, `http.unhandled_exception`, `pipeline.selfcheck`,
