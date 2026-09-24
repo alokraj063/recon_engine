@@ -3,12 +3,14 @@ import { ArrowRight } from 'lucide-react'
 import type { AdapterRegistry, CustomerConfig, CustomerInfo } from '../types'
 import { fetchAdapters, fetchCustomerConfig } from '../api'
 import { MatchingConfigPanel } from './MatchingConfigPanel'
+import { ZoneDirectoryPanel } from './ZoneDirectoryPanel'
 import { CustomerSelect, Notice, PageHeader, TextLink } from './ui'
 
-type Tab = 'matching' | 'sources'
+type Tab = 'matching' | 'zones' | 'sources'
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'matching', label: 'Matching config' },
+  { key: 'zones', label: 'Zones' },
   { key: 'sources', label: 'Source setup' },
 ]
 
@@ -58,6 +60,11 @@ export function SettingsView({ customers, customerId, onCustomerChange, onGoToIn
         {tab === 'matching' && (
           <div className="ui-card-body config-body">
             <MatchingConfigPanel customerId={customerId} />
+          </div>
+        )}
+        {tab === 'zones' && (
+          <div className="ui-card-body config-body">
+            <ZoneDirectoryPanel customerId={customerId} />
           </div>
         )}
         {tab === 'sources' && <SourceSetup customerId={customerId} onGoToIngest={onGoToIngest} />}

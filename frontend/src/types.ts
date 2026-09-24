@@ -182,6 +182,31 @@ export interface LedgerBillInfo {
   bill_status: string | null
 }
 
+/** The customer's zone directory entry for a row's zone (Settings ›
+ *  Zones); null when the zone is blank or not in the directory. */
+export interface ZoneInfo {
+  code: string
+  name: string | null
+  region: string | null
+  /** business segment, e.g. TSG | OE */
+  segment: string | null
+}
+
+export interface ZoneEntry {
+  code: string
+  name: string | null
+  region: string | null
+  segment: string
+  aliases: string[]
+}
+
+export interface ZoneDirectory {
+  key: string
+  /** true = the built-in directory (nothing saved for this customer) */
+  is_default: boolean
+  zones: ZoneEntry[]
+}
+
 export interface LedgerMatch {
   id: string
   /** creating run — null for a MANUAL match (a user decision, no run) */
@@ -205,6 +230,8 @@ export interface LedgerMatch {
   decision_note?: string | null
   txn: LedgerTxnInfo | null
   bills: LedgerBillInfo[]
+  /** the credit's zone (else the bill's) through the zone directory */
+  zone_info?: ZoneInfo | null
 }
 
 /** How an exception_ledger row was closed (frozen codes). */
@@ -213,6 +240,8 @@ export type ExceptionResolvedBy =
 
 export interface LedgerException {
   id: string
+  /** its side's zone through the zone directory */
+  zone_info?: ZoneInfo | null
   exception_type: 'BANK_ONLY' | 'BILL_ONLY'
   status: 'OPEN' | 'RESOLVED'
   gold_bank_txn_id: string | null

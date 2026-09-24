@@ -99,6 +99,8 @@ function describe(e: AuditEventRow, finalized: Map<string, Record<string, unknow
       return { ...base, icon: Settings, tone: 'info', title: 'Matching config updated' }
     case 'config.sources_updated':
       return { ...base, icon: Settings, tone: 'info', title: 'Document sources updated' }
+    case 'config.zones_updated':
+      return { ...base, icon: Settings, tone: 'info', title: 'Zone directory updated' }
     case 'customer.created':
       return { ...base, icon: Settings, tone: 'info', title: 'Customer created' }
     default:

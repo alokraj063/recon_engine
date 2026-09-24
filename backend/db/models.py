@@ -151,6 +151,9 @@ class MatchRuleSetRow(Base):
     amount_decimals: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     ar_overdue_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     awaiting_status_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # zone code -> {name, region, segment, aliases}: display-only reference
+    # data (db/zones.py); NULL -> db/zones.DEFAULT_ZONE_DIRECTORY
+    zone_directory: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
 
 
 # --- bronze / silver ---------------------------------------------------

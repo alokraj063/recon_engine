@@ -3532,6 +3532,13 @@ tr.ui-more-row:hover td { background: hsl(220 16% 98.5%) !important; }
 .decision-note-block { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 12px; max-width: 720px; }
 .settings-foot { margin: 10px 0 2px; font-size: var(--fs-note); color: var(--ink-faint); }
 
+/* Settings › Zones: an editable directory table */
+.zone-table { width: 100%; margin: 8px 0 10px; }
+.zone-table td { padding: 3px 6px 3px 0; }
+.zone-table input { width: 100%; min-width: 0; }
+.zone-table .zone-code { width: 80px; font-family: var(--font-mono, monospace); }
+.zone-table .zone-short { width: 90px; }
+
 /* ── ReviewEvidence: credit strip + one-sentence reason ─────────────── */
 .rv { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 /* the queue table can be wider than the window; its expanded evidence must

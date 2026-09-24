@@ -113,6 +113,7 @@ const EVENT_NAME: Record<string, string> = {
   'pipeline.signal_coverage': 'Match signal missing',
   'config.rules_updated': 'Matching rules updated',
   'config.sources_updated': 'Document sources updated',
+  'config.zones_updated': 'Zone directory updated',
   'customer.created': 'Customer created',
   'config.rules_update_rejected': 'Matching rules change refused',
   'config.sources_update_rejected': 'Document sources change refused',
@@ -146,6 +147,7 @@ const ENTITY_NAME: Record<string, string> = {
   bronze_file: 'File',
   match_rule_set: 'Matching config',
   source_config: 'Source setup',
+  zone_directory: 'Zone directory',
   customer: 'Customer',
   user: 'User',
 }
@@ -194,6 +196,7 @@ const DETAIL_LABEL: Record<string, string> = {
   rows_reported: 'Rows reported',
   rows_inserted: 'Rows added',
   changed_fields: 'Changed fields',
+  reset_to_default: 'Reset to defaults',
   error: 'Refused as',
   reason: 'Reason',
   deleted: 'Rows deleted',

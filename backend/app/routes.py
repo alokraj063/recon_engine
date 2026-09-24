@@ -28,6 +28,7 @@ from starlette.concurrency import run_in_threadpool
 from db import SessionLocal, incremental, reconcile_gold
 from db import ledger_export
 from db import overview as db_overview
+from db import zones as db_zones
 from db.audit import record_event
 from db.bronze import register_file
 from db.ingest import ingest_gold_frames
@@ -962,6 +963,17 @@ def ledger(customer_id: str = "default"):
         # CUSTOMER'S copy_overrides exactly as a run stamps `action`, so
         # the queue explains a gap in the same words the workbook does.
         copy_text = resolve_copy(_effective_rules(rule_row, {}).copy_overrides)
+        zone_table = db_zones.lookup(db_zones.effective_directory(rule_row))
+    # the customer's segment (TSG / OE …) for each row's zone: a match
+    # reads its credit's zone, else its bill's (a manual or amount-only
+    # match can have a credit with no zone); an exception reads its side's
+    for m in payload["matches"]:
+        zone = (m["txn"] or {}).get("zone") or next(
+            (b["zone"] for b in m["bills"] if b.get("zone")), None)
+        m["zone_info"] = db_zones.resolve(zone_table, zone)
+    for e in payload["exceptions"]:
+        side = e["txn"] if e["txn"] else e["bill"]
+        e["zone_info"] = db_zones.resolve(zone_table, (side or {}).get("zone"))
     for e in payload["exceptions"]:
         e["gap_detail"] = gaps.get(e["id"])
         e["gap_bills"] = gap_bills.get(e["id"])
@@ -1996,6 +2008,68 @@ def put_customer_sources(customer_key: str, body: SourcesBody):
             .where(SourceConfig.customer_id == customer.id,
                    SourceConfig.is_active.is_(True))).scalars()}
     return {"key": customer_key, "sources": updated}
+
+
+class ZoneEntry(BaseModel):
+    code: str
+    name: str | None = None
+    region: str | None = None
+    segment: str
+    aliases: list[str] = []
+
+
+class ZonesBody(BaseModel):
+    # None = back to the default directory
+    zones: list[ZoneEntry] | None
+
+
+def _zones_payload(customer_key: str, rule_row) -> dict:
+    return {"key": customer_key,
+            "is_default": not (rule_row is not None and rule_row.zone_directory),
+            "zones": db_zones.as_list(db_zones.effective_directory(rule_row))}
+
+
+@router.get("/customers/{customer_key}/zones")
+def get_customer_zones(customer_key: str):
+    """The customer's zone directory: code -> name / region / segment,
+    with the aliases the data also spells it by."""
+    with SessionLocal() as session:
+        _customer, _sources, rule_row = _load_customer_context(
+            session, customer_key)
+        return _zones_payload(customer_key, rule_row)
+
+
+@router.put("/customers/{customer_key}/zones")
+def put_customer_zones(customer_key: str, body: ZonesBody):
+    """Replace the zone directory (or reset it with zones=null). Display
+    only — no reconcile needed; the Analyst queue reads it live."""
+    stored = None
+    if body.zones is not None:
+        try:
+            stored = db_zones.normalize([z.model_dump() for z in body.zones])
+        except db_zones.ZoneDirectoryError as e:
+            _fail(400, "INVALID_INPUT", str(e))
+    with SessionLocal() as session:
+        customer, _sources, rule_row = _load_customer_context(
+            session, customer_key)
+        customer_id_var.set(customer_key)
+        before = db_zones.effective_directory(rule_row)
+        if rule_row is None:
+            rule_row = MatchRuleSetRow(customer_id=customer.id,
+                                       name="default", is_default=True)
+            session.add(rule_row)
+        rule_row.zone_directory = stored
+        session.flush()
+        changes = config_changes(
+            {"zone_directory": before},
+            {"zone_directory": db_zones.effective_directory(rule_row)})
+        if changes:
+            record_event(session, logger, event_type="config.zones_updated",
+                         customer_id=customer.id, entity_type="zone_directory",
+                         details={"changes": changes,
+                                  "reset_to_default": stored is None})
+        session.commit()
+        return _zones_payload(customer_key, rule_row)
 
 
 class CustomerBody(BaseModel):

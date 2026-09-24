@@ -149,6 +149,8 @@ def audit_events(session, customer_pk: int, limit: int = 500) -> list:
         # a non-entity config event still names what it touched
         if e is None and r.entity_type == "source_config":
             e = {"label": "Source setup", "context": None}
+        if e is None and r.entity_type == "zone_directory":
+            e = {"label": "Zone directory", "context": None}
         out.append({
             "id": r.id,
             "event_type": r.event_type,
