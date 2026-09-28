@@ -51,9 +51,10 @@ const Q_UNMATCHED: LedgerIntent = {
 const Q_AWAITING: LedgerIntent = { section: 'awaiting', excStatus: ['OPEN'], excType: [], excGap: [] }
 /** other receipts: open AND approved ones, the same rows the figure counts */
 const Q_NON_IREPS: LedgerIntent = { section: 'non_ireps', excStatus: [], excType: [], excGap: [] }
-const Q_RESOLVED_EXC: LedgerIntent = {
-  section: 'exceptions', excStatus: ['RESOLVED'], excType: [], excGap: [],
-}
+/** the "N resolved" figure: matches that actually closed a once-open
+ *  exception — a strict subset of Q_SETTLED (most Locked matches were
+ *  never an open exception at all). */
+const Q_RESOLVED: LedgerIntent = { section: 'matches', matchStatus: ['LOCKED'], resolvedOnly: true }
 /** open exceptions of ONE side — "N credits" / "M bills" */
 const qExcSide = (side: string): LedgerIntent =>
   ({ section: 'exceptions', excStatus: ['OPEN'], excType: [side], excGap: [] })
@@ -179,7 +180,6 @@ export function CommandCenter({
   useEffect(load, [load, refreshKey])
   const filtered = !!data?.filters_applied
   const quiet = filtered && data && data.gold.credits === 0 && data.gold.bills === 0
-  const customerName = customers.find((c) => c.key === customerId)?.name ?? customerId
 
   const credits = data?.gold.credits ?? 0
   // unrecognised receipts (no match signal) are not matchable: every
@@ -254,8 +254,7 @@ export function CommandCenter({
 
   return (
     <section className="ui-page">
-      <PageHeader title="Command Center"
-                  context={<>{customerName}{data?.data_as_of && <><Dot />data through {fmtDay(data.data_as_of)}</>}</>}>
+      <PageHeader title="Command Center">
         <DateFilter value={filter} onChange={setFilter} units={units} unitCounts={unitCounts} />
         <CustomerSelect customers={customers} value={customerId} onChange={onCustomerChange} />
         <RefreshButton onClick={load} loading={loading} label="Refresh figures" />
@@ -336,7 +335,7 @@ export function CommandCenter({
                 {data.out_of_scope_value !== undefined && <>&nbsp;({inrCompact(data.out_of_scope_value)})</>}
                 &nbsp;excluded
                 <Dot />
-                <Link quiet onClick={() => openGold(G_CREDITS)}>{n(credits)} credits in window</Link>
+                <Link quiet onClick={() => openGold(G_CREDITS)}>{n(credits)} credits</Link>
                 <Dot />
                 <Link quiet onClick={() => openGold(G_BILLS)}>{n(data.gold.bills)} bills</Link>
                 &nbsp;·&nbsp;{n(data.gold.lineage_docs)} lineage docs
@@ -367,7 +366,7 @@ export function CommandCenter({
                   <Link onClick={() => openQueue(qExcSide('BILL_ONLY'))} title={inr(data.open_value.bill_only)}>
                     {n(billOnly)} {plural(billOnly, 'bill', 'bills')} · {inrCompact(data.open_value.bill_only)}
                   </Link>
-                  <Link onClick={() => openQueue(Q_RESOLVED_EXC)}>
+                  <Link onClick={() => openQueue(Q_RESOLVED)}>
                     {n(data.resolved_exceptions)} resolved
                   </Link>
                 </>} />

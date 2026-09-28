@@ -124,13 +124,13 @@ function MatchPairs({ bank, bill }: {
           payment_advice_date: Cell; payment_order_date: Cell } | null
 }) {
   if (!bill) return null
-  const pill = (side: 'bank' | 'bill', v: Cell, col: string) => (
-    <span className={`pair-pill pill-${side}`}>
+  const pill = (side: 'bank' | 'bill', v: Cell, col: string, cls?: string) => (
+    <span className={`pair-pill pill-${side}${cls ? ` ${cls}` : ''}`}>
       {typeof v === 'number' ? inr(v) : fmtCell(col, v)}
     </span>
   )
-  const verdict = (ok: boolean, note?: string) => (
-    <span className={`pair-verdict ${ok ? 'ok' : 'bad'}`}>
+  const verdict = (ok: boolean, note?: string, cls?: string) => (
+    <span className={`pair-verdict ${ok ? 'ok' : 'bad'}${cls ? ` ${cls}` : ''}`}>
       {ok ? '✓' : '✗'}{note ? <span className="pair-note"> {note}</span> : null}
     </span>
   )
@@ -141,10 +141,10 @@ function MatchPairs({ bank, bill }: {
   const gap = bank.date_gap_days
   return (
     <div className="pair-rows">
-      <span className="pair-label">Amount</span>
-      {pill('bank', bank.amount, 'amount')}
-      {verdict(true)}
-      {pill('bill', bill.net_payable_amount, 'net_payable_amount')}
+      <span className="pair-label pair-label-amt">Amount</span>
+      {pill('bank', bank.amount, 'amount', 'pill-amt')}
+      {verdict(true, undefined, 'verdict-amt')}
+      {pill('bill', bill.net_payable_amount, 'net_payable_amount', 'pill-amt')}
       <span className="pair-note">match key: amounts must agree</span>
 
       <span className="pair-label">Signal</span>
@@ -274,7 +274,7 @@ export function MatchedEvidence({ row, runId }: { row: Row; runId?: string | nul
           <DetailField key={k} row={row} k={k} label={l} />
         ))}
         <BillLineage runId={runId} billNumber={row.bill_number} fallbackRow={row} />
-        <div className="detail-section">Amounts — gross − deductions = net payable = credit</div>
+        <div className="detail-section">Amounts</div>
         {MATCHED_AMOUNTS.map(([k, l]) => (
           <DetailField key={k} row={row} k={k} label={l} />
         ))}
@@ -282,9 +282,6 @@ export function MatchedEvidence({ row, runId }: { row: Row; runId?: string | nul
           <div className="dt-label">Net payable</div>
           <div className="dt-value match-key">
             {fmtCell('net_payable_amount', (net ?? null) as Cell)}
-            {netFallback && net !== null && net !== undefined && (
-              <span className="chip-note"> = credit (match key)</span>
-            )}
           </div>
         </div>
       </div>

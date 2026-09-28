@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle, Ban, CheckCircle2, ChevronRight, Clock3, Download, ListChecks, ListFilter, Lock,
+  AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronRight, Clock3, Download, ListChecks,
+  ListFilter, Lock,
 } from 'lucide-react'
 import {
   approveNonIrepsBulk, decideNonIreps, fetchLedger, fetchRun, fetchRuns, ledgerWorkbookUrl,
@@ -90,6 +91,12 @@ function DateRangeFilter({ from, to, onChange }: {
 export interface LedgerIntent {
   /** matches → Status (OPEN | LOCKED | REJECTED) */
   matchStatus?: string[]
+  /** matches → only those that actually closed a once-open exception
+   *  (a RESOLVED exception's resolved_by_match_id) — the Command
+   *  Center's "N resolved" figure, a strict subset of Status=Locked:
+   *  most Locked matches were auto-matched on first sight and never
+   *  spent a moment as an open exception. */
+  resolvedOnly?: boolean
   /** exceptions → Status (OPEN | RESOLVED) */
   excStatus?: string[]
   /** exceptions → Type (BANK_ONLY | BILL_ONLY) */
@@ -298,6 +305,7 @@ export function LedgerView({
   const [confFilter, setConfFilter] = useState<string[]>([])
   const [segFilter, setSegFilter] = useState<string[]>([])
   const [matchStatusFilter, setMatchStatusFilter] = useState<string[]>([])
+  const [resolvedOnly, setResolvedOnly] = useState(false)
   const [sortAsc, setSortAsc] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -371,6 +379,7 @@ export function LedgerView({
       setDateFrom('')
       setDateTo('')
     }
+    setResolvedOnly(!!it.resolvedOnly)
     if (it.excStatus) setExcFilter(it.excStatus)
     if (it.excType) setExcTypeFilter(it.excType)
     if (it.excGap) setExcGapFilter(it.excGap)
@@ -468,6 +477,37 @@ export function LedgerView({
       .concat([...present].filter((c) => !CONFIDENCE_ORDER.includes(c)).sort())
   }, [data])
 
+  // matches that actually closed a once-open exception (excludes a
+  // non-IREPS approval, which is a classification, never a match) —
+  // the same rows db/overview counts into "resolved_exceptions". Traced
+  // by gold id (gold_bank_txn_id / a picked bill's gold_bill_id) rather
+  // than resolved_by_match_id, which an older RUN resolution may not
+  // carry — this works for every resolution, old or new. Windowed on
+  // excDay (BANK_ONLY: credit value date; BILL_ONLY: the BILL's own
+  // due date), matching db/overview's resolved_exceptions count exactly
+  // — the credit's value date alone would over- or under-count a
+  // BILL_ONLY resolution, whose window is its bill's date, not its
+  // credit's.
+  const resolvedMatchIds = useMemo(() => {
+    const byTxn = new Map<string, string>()
+    const byBill = new Map<string, string>()
+    for (const m of data?.matches ?? []) {
+      if (m.gold_bank_txn_id) byTxn.set(m.gold_bank_txn_id, m.id)
+      for (const b of m.bills) if (b.role === 'picked') byBill.set(b.gold_bill_id, m.id)
+    }
+    const ids = new Set<string>()
+    for (const e of allExceptions) {
+      if (e.status !== 'RESOLVED' || e.resolved_by === 'USER_NON_IREPS') continue
+      if ((windowFrom || windowTo) && !inDayRange(excDay(e), windowFrom, windowTo)) continue
+      const mid = e.exception_type === 'BANK_ONLY'
+        ? (e.gold_bank_txn_id ? byTxn.get(e.gold_bank_txn_id) : undefined)
+        : (e.gold_bill_id ? byBill.get(e.gold_bill_id) : undefined)
+      if (mid) ids.add(mid)
+    }
+    return ids
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, windowFrom, windowTo])
+
   const visibleMatches = useMemo(() => {
     const rows = (data?.matches ?? []).filter((m) => {
       if (confFilter.length && !confFilter.includes(m.confidence)) return false
@@ -476,7 +516,13 @@ export function LedgerView({
       // a MANUAL match belongs to no run: a run filter hides it
       if (runSet && (!m.run_id || !runSet.has(m.run_id))) return false
       if (!inDayRange((m.txn?.value_date ?? '').slice(0, 10), dateFrom, dateTo)) return false
-      if ((windowFrom || windowTo)
+      if (resolvedOnly) {
+        // resolvedMatchIds already applied the Credit date window itself,
+        // on whichever date db/overview counted this match's resolution
+        // with — applying the credit's OWN value date again here would
+        // wrongly re-window a BILL_ONLY resolution on the wrong field.
+        if (!resolvedMatchIds.has(m.id)) return false
+      } else if ((windowFrom || windowTo)
           && !inDayRange((m.txn?.value_date ?? '').slice(0, 10), windowFrom, windowTo)) return false
       return true
     })
@@ -485,7 +531,8 @@ export function LedgerView({
     return rows.sort((a, b) => sortAsc
       ? key(a).localeCompare(key(b))
       : key(b).localeCompare(key(a)))
-  }, [data, confFilter, segFilter, matchStatusFilter, runSet, dateFrom, dateTo, windowFrom, windowTo, sortAsc])
+  }, [data, confFilter, segFilter, matchStatusFilter, resolvedOnly, resolvedMatchIds, runSet,
+      dateFrom, dateTo, windowFrom, windowTo, sortAsc])
 
   const windowOn = !!(windowFrom || windowTo)
   const windowValues = windowOn ? [`${windowFrom || '…'} → ${windowTo || '…'}`] : []
@@ -502,6 +549,8 @@ export function LedgerView({
       onRemove: (v) => setSegFilter(v === undefined ? [] : segFilter.filter((x) => x !== v)) },
     { key: 'status', label: 'Status', values: matchStatusFilter, format: titleCase,
       onRemove: (v) => setMatchStatusFilter(v === undefined ? [] : matchStatusFilter.filter((x) => x !== v)) },
+    { key: 'resolved-only', label: 'Resolved', values: resolvedOnly ? ['exceptions only'] : [],
+      onRemove: () => setResolvedOnly(false) },
   ]
   const excChips: FilterChip[] = [
     { key: 'exc-status', label: 'Status', values: excFilter, format: titleCase,
@@ -526,7 +575,7 @@ export function LedgerView({
   const tabAllMatches = allMatches.filter((m) => inMatchTab(m, matchTab))
   // the Run column earns its place only when the rows differ on it
   const showRun = new Set(tabMatches.map((m) => m.run_id)).size > 1
-  const matchCols = showRun ? 12 : 11
+  const matchCols = showRun ? 13 : 12
   const drawnMatches = useProgressiveRows(tabMatches)
   const excTab: ExcTab = isMatchTab(activeTab) ? 'exceptions' : activeTab
   const exceptions = excTab === 'non_ireps' ? byKind(excTabs[excTab]) : excTabs[excTab]
@@ -761,6 +810,7 @@ export function LedgerView({
                   <th><HelpLabel k="ui:decided_by">Decided by</HelpLabel></th>
                   {showRun && <th><HelpLabel k="ui:run">Run</HelpLabel></th>}
                   <th />
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -793,8 +843,6 @@ export function LedgerView({
                           }
                         }}>
                       <td className="mono nowrap" title={`Created ${fmtWhen(m.created_at)} · run label ${m.match_id}`}>
-                        <ChevronRight className="chev chev-ic" size={14}
-                                      strokeWidth={2} aria-hidden />
                         {m.seq !== null ? `M-${m.seq}` : m.match_id}
                       </td>
                       <td><span className={`stamp stamp-${m.status}`}>{m.status}</span></td>
@@ -825,6 +873,10 @@ export function LedgerView({
                       )}
                       <td onClick={(e) => e.stopPropagation()}>
                         <MatchDecision match={m} busy={!!busy[m.id]} decide={decide} />
+                      </td>
+                      <td className="chev-cell">
+                        <ChevronDown className="chev chev-down chev-ic" size={14}
+                                     strokeWidth={2} aria-hidden />
                       </td>
                     </tr>
                     {expanded[m.id] && (
