@@ -514,6 +514,10 @@ table.data tbody tr:hover { background: #f1ead7; }
 /* lucide ChevronRight standing in for the old ▶ glyph: strokes with
    currentColor, so .chev's color and rotation apply unchanged. */
 .chev-ic { vertical-align: -3px; margin-right: 1px; }
+/* the match row's disclosure arrow: a down chevron on the right, flips
+   to point up (not sideways) when the row is expanded. */
+.chev-cell { text-align: right; }
+.xq-row.open .chev-down { transform: rotate(180deg); }
 
 .xq-detail td {
   background: var(--paper);
@@ -650,6 +654,12 @@ table.data tbody tr:hover { background: #f1ead7; }
 .pair-verdict.ok { color: var(--success); }
 .pair-verdict.bad { color: var(--sienna); }
 .pair-note { font-size: var(--fs-label); color: var(--ink-faint); }
+
+/* the amount row is the one signal that always agrees (it's the join
+   key candidates were filtered on) — call that out against Zone/Date */
+.pair-label-amt { color: var(--success); font-weight: 700; }
+.pair-pill.pill-amt { border-color: var(--success); box-shadow: inset 0 0 0 1px var(--success); }
+.pair-verdict.verdict-amt { font-weight: 700; }
 
 th.th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
 

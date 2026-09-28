@@ -229,6 +229,10 @@ export interface LedgerMatch {
   decided_at?: string | null
   decision_note?: string | null
   txn: LedgerTxnInfo | null
+  /** the raw gold id behind `txn` — lets a RESOLVED exception (whose
+   *  resolved_by_match_id may be unset for an older RUN resolution) be
+   *  traced to this match by gold id instead */
+  gold_bank_txn_id: string | null
   bills: LedgerBillInfo[]
   /** the credit's zone (else the bill's) through the zone directory */
   zone_info?: ZoneInfo | null

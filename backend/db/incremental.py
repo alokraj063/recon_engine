@@ -512,6 +512,12 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
              "exceptions_opened": 0, "exceptions_resolved": 0}
     links: List[dict] = []
     ledger_ids: Dict[str, str] = {}
+    # which match resolved which side, so a RUN-resolved exception can
+    # still be traced to its match (resolved_by_match_id) like a
+    # USER-resolved one — db/overview.resolved_exceptions and the
+    # Analyst queue's "resolved" filter both key off this column
+    ledger_by_txn: Dict[str, str] = {}
+    ledger_by_bill: Dict[str, str] = {}
 
     txn_by_match_row = _matched_txn_ids(out, bank_ids)
     matched_bill_ids, matched_txn_ids = set(), set()
@@ -534,23 +540,28 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
                 next_seq, now)
             next_seq += 1
             ledger_ids[r.match_id] = ledger.id
-            matched_bill_ids.update(l["gold_bill_id"] for l in match_links
-                                    if l["role"] == "picked")
+            ledger_by_txn[gold_txn] = ledger.id
+            picked_bills = [l["gold_bill_id"] for l in match_links
+                            if l["role"] == "picked"]
+            matched_bill_ids.update(picked_bills)
+            for bid in picked_bills:
+                ledger_by_bill[bid] = ledger.id
             links.extend(match_links)
             stats["matches_created"] += 1
             if ledger.status == "LOCKED":
                 stats["auto_locked"] += 1
 
     # resolve OPEN exceptions that this run's matches settled
-    for exc_type, matched_ids in (("BANK_ONLY", matched_txn_ids),
-                                  ("BILL_ONLY", matched_bill_ids)):
+    for exc_type, matched_ids, ledger_by_gid in (
+            ("BANK_ONLY", matched_txn_ids, ledger_by_txn),
+            ("BILL_ONLY", matched_bill_ids, ledger_by_bill)):
         for gid, eid in _open_exceptions(session, customer_id, exc_type).items():
             if gid in matched_ids:
                 row = session.get(ExceptionLedger, eid)
                 row.status = "RESOLVED"
                 row.resolved_by = "RUN"
                 row.resolved_by_run_id = run_id
-                row.resolved_by_match_id = None
+                row.resolved_by_match_id = ledger_by_gid.get(gid)
                 row.resolved_by_user_id = None
                 row.resolved_at = now
                 stats["exceptions_resolved"] += 1
@@ -700,7 +711,7 @@ def rescore_provisional(session, customer_id: int, run_id: str,
             row.status = "RESOLVED"
             row.resolved_by = "RUN"
             row.resolved_by_run_id = run_id
-            row.resolved_by_match_id = None
+            row.resolved_by_match_id = new.id
             row.resolved_by_user_id = None
             row.resolved_at = now
             closed += 1
@@ -1270,7 +1281,7 @@ def ledger_view(customer_id: int) -> dict:
 
         matches = [{
             "id": m.id, "run_id": m.run_id, "match_id": m.match_id,
-            "seq": m.seq,
+            "seq": m.seq, "gold_bank_txn_id": m.gold_bank_txn_id,
             "confidence": m.confidence, "status": m.status,
             "locked_by": m.locked_by,
             "created_at": m.created_at.isoformat(),
