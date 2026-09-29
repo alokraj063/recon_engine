@@ -3631,3 +3631,21 @@ tr.ui-more-row:hover td { background: hsl(220 16% 98.5%) !important; }
   white-space: nowrap;
 }
 .xd-bill-status { font-weight: 600; color: var(--bill); }
+
+/* WebADI export (ExportView) */
+.ui-date input {
+  height: 100%;
+  padding: 0 8px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--fs-body);
+  color: var(--ink);
+}
+.ui-date .ui-date-sep {
+  border: none; background: none; padding: 0 2px;
+}
+.webadi-blank { color: var(--sienna); font-weight: 600; }
+.webadi-table tr.is-flagged td:first-child { box-shadow: inset 3px 0 0 var(--sienna); }
+.webadi-table td.webadi-head { color: var(--ink-faint); font-size: var(--fs-note); }
+a.ui-btn.is-disabled { opacity: 0.5; pointer-events: none; }

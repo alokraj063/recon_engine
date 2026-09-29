@@ -82,6 +82,7 @@ const CATEGORY_TONE: Record<Category, 'ok' | 'bad' | 'info' | 'warn' | 'neutral'
  *  always shown beside it, so nothing is hidden. */
 const EVENT_NAME: Record<string, string> = {
   'ingestion.completed': 'Documents ingested',
+  'export.webadi_downloaded': 'WebADI exported',
   'bronze.file_registered': 'File registered',
   'bronze.file_deduped': 'Duplicate file recognised',
   'silver.rows_persisted': 'Parsed rows stored',

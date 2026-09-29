@@ -26,7 +26,7 @@ from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
 from db import SessionLocal, incremental, reconcile_gold
-from db import ledger_export
+from db import ledger_export, webadi_export
 from db import overview as db_overview
 from db import zones as db_zones
 from db.audit import record_event
@@ -40,7 +40,8 @@ from recon import (REGISTRY, MatchRuleSet, PipelineSinks, SelfCheckError,
                    get_adapter, run_pipeline, write_workbook)
 from recon.engine import DEFAULT_COPY, DEFAULT_LABELS, resolve_copy
 from recon.pipeline import check_signal_coverage
-from recon.report import append_ledger_sheets, write_ledger_workbook
+from recon.report import (append_ledger_sheets, write_ledger_workbook,
+                          write_webadi_workbook)
 from recon.gold import GOLD_COLUMNS
 from recon.rules import COPY_SECTIONS, FieldMapping
 from recon.sources import resolve_adapter, role_of
@@ -779,6 +780,80 @@ def download_ledger_workbook(customer_id: str = "default"):
     safe = re.sub(r"[^\w. -]", "_", key)[:60]
     return FileResponse(str(out), media_type=XLSX,
                         filename=f"Ledger_{safe}.xlsx",
+                        background=BackgroundTask(_cleanup, out))
+
+
+# --- WebADI export (Oracle AR Receipt Upload) ---------------------------
+
+def _webadi_scope(session, customer_id: str, date_from: Optional[date],
+                  date_to: Optional[date]):
+    customer = _get_customer(session, customer_id)
+    if date_from is None:
+        date_from = webadi_export.latest_date(session, customer.id) or date.today()
+    if date_to is None:
+        date_to = date_from
+    if date_to < date_from:
+        _fail(400, "INVALID_INPUT", "'to' is before 'from'")
+    return customer, date_from, date_to
+
+
+@router.get("/export/webadi/preview")
+def preview_webadi(customer_id: str = "default",
+                   date_from: Optional[date] = Query(None, alias="from"),
+                   date_to: Optional[date] = Query(None, alias="to"),
+                   unit: Optional[list[str]] = Query(None),
+                   gl_date: Optional[date] = None):
+    """The records the WebADI download would carry, as JSON. With no
+    `from`, the day is the newest credit date with a confirmed match."""
+    with SessionLocal() as session:
+        customer, date_from, date_to = _webadi_scope(
+            session, customer_id, date_from, date_to)
+        records = webadi_export.build_records(
+            session, customer.id, date_from, date_to, units=unit, gl_date=gl_date)
+        return clean({
+            "from": date_from.isoformat(), "to": date_to.isoformat(),
+            "latest_date": _iso_or_none(webadi_export.latest_date(session, customer.id)),
+            "summary": webadi_export.summarize(records),
+            "issue_text": webadi_export.ISSUE_TEXT,
+            "records": records,
+        })
+
+
+def _iso_or_none(d):
+    return d.isoformat() if d else None
+
+
+@router.get("/export/webadi")
+def download_webadi(customer_id: str = "default",
+                    date_from: Optional[date] = Query(None, alias="from"),
+                    date_to: Optional[date] = Query(None, alias="to"),
+                    unit: Optional[list[str]] = Query(None),
+                    gl_date: Optional[date] = None):
+    """Oracle AR Receipt Upload (WebADI) workbook: one sheet per operating
+    unit, laid out like the ADI template."""
+    with SessionLocal() as session:
+        customer, date_from, date_to = _webadi_scope(
+            session, customer_id, date_from, date_to)
+        customer_id_var.set(customer.key)
+        records = webadi_export.build_records(
+            session, customer.id, date_from, date_to, units=unit, gl_date=gl_date)
+        summary = webadi_export.summarize(records)
+        out = _tmp_xlsx("recon_webadi_")
+        write_webadi_workbook(webadi_export.sheets(records, date.today()), out)
+        record_event(session, logger, event_type="export.webadi_downloaded",
+                     customer_id=customer.id, entity_type="webadi_export",
+                     details={"from": date_from.isoformat(), "to": date_to.isoformat(),
+                              "units": sorted(unit) if unit else None,
+                              "records": summary["records"],
+                              "receipts": summary["receipts"],
+                              "bills": summary["bills"],
+                              "by_unit": summary["by_unit"],
+                              "issues": summary["issues"]})
+        session.commit()
+    span = date_from.strftime("%d%m%Y") + (
+        "" if date_to == date_from else "_" + date_to.strftime("%d%m%Y"))
+    return FileResponse(str(out), media_type=XLSX,
+                        filename=f"AR_Receipt_Upload_{span}_WebADI.xlsx",
                         background=BackgroundTask(_cleanup, out))
 
 

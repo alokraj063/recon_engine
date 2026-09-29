@@ -123,3 +123,82 @@ def _cell(v):
     if isinstance(v, (list, dict)):
         return str(v)
     return v
+
+
+# --- Oracle "AR Receipt Upload" WebADI --------------------------------------
+# The custom Receipt Upload ADI, laid out cell-for-cell like the template
+# Oracle hands out (bneradFCC77 AR Receipt Upload): column A empty, the
+# metadata block in B/D from row 4, HEADER1/2 at rows 11-12, the column
+# header at row 15, its "* *List Double Click" hint row at 16, records from
+# row 17 — so Finance can paste a sheet's records straight into their own
+# downloaded template. Two unnamed columns sit between Adjustment Type and
+# Messages in the template; they stay empty here too.
+WEBADI_COLUMNS = [
+    "Upl", "Operating Unit ID Selected", "Customer Name", "Receipt Method",
+    "Receipt Number", "Currency", "Receipt Amount", "Receipt Date", "GL Date",
+    "Invoice Number", "Receipt Amount Applied", "Adjustment Amount",
+    "Factoring Amount", "Adjustment Type", None, None, "Messages",
+]
+WEBADI_HINTS = [
+    None, "* *List Double Click", "* *List Double click", "* *Receipt Method",
+    "* *Receipt Number", "* *Currency", "* *Receipt Amount", "* *Receipt Date",
+    "* *GL Date", "* *Transaction Number",
+    "* *Receipt Amount to be applied on Invoice",
+    "* *Adjustment amount to be applied on Invoice",
+    "* Factoring Amount to be applied", "* *Select the Adjustment Type",
+    None, None, None,
+]
+WEBADI_META_KEYS = ("BATCH_ID", "RESPONSIBILITY", "OU_NAME_RESP", "USER_NAME",
+                    "DATABASE", "CREATION_DATE")
+_WEBADI_MONEY = {"Receipt Amount", "Receipt Amount Applied", "Adjustment Amount",
+                 "Factoring Amount"}
+_WEBADI_HEADER_ROW = 15
+_WEBADI_FILL = PatternFill("solid", fgColor="DDEBF7")
+
+
+def write_webadi_workbook(sheets, path):
+    """sheets: [{"name", "meta": {WEBADI_META_KEYS: value}, "records":
+    [{column: value}]}] — one worksheet each. Values are written as given
+    (dates arrive as the DD-Mon-YYYY text the ADI expects)."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    for sheet in sheets or [{"name": "WebADI", "meta": {}, "records": []}]:
+        ws = wb.create_sheet(sheet["name"][:31])
+        meta = sheet.get("meta") or {}
+        for i, key in enumerate(WEBADI_META_KEYS):
+            ws.cell(row=4 + i, column=2, value=key)
+            ws.cell(row=4 + i, column=4, value=meta.get(key))
+        ws.cell(row=11, column=2, value="HEADER1")
+        ws.cell(row=11, column=4, value="* Text")
+        ws.cell(row=11, column=5,
+                value="This is a custom ADI for Receipt creation and application")
+        ws.cell(row=12, column=2, value="HEADER2")
+        ws.cell(row=12, column=4, value="* Text")
+        ws.cell(row=12, column=5, value="Please enter the fields and upload the record")
+        for j, (head, hint) in enumerate(zip(WEBADI_COLUMNS, WEBADI_HINTS)):
+            h = ws.cell(row=_WEBADI_HEADER_ROW, column=2 + j, value=head)
+            h.font = Font(name="Arial", size=10, bold=True)
+            h.fill = _WEBADI_FILL
+            h.alignment = Alignment(vertical="center", wrap_text=True)
+            ws.cell(row=_WEBADI_HEADER_ROW + 1, column=2 + j, value=hint).font = \
+                Font(name="Arial", size=9, italic=True, color="595959")
+        for r, rec in enumerate(sheet.get("records") or []):
+            for j, head in enumerate(WEBADI_COLUMNS):
+                if head is None:
+                    continue
+                c = ws.cell(row=_WEBADI_HEADER_ROW + 2 + r, column=2 + j,
+                            value=_cell(rec.get(head)))
+                c.font = BODY_FONT
+                if head in _WEBADI_MONEY:
+                    c.number_format = "0.00"
+        ws.column_dimensions["A"].width = 3
+        for j, head in enumerate(WEBADI_COLUMNS):
+            ws.column_dimensions[get_column_letter(2 + j)].width = (
+                6 if head == "Upl" else 58 if head == "Operating Unit ID Selected"
+                else 30 if head in ("Customer Name", "Receipt Method", "Adjustment Type")
+                else 16 if head else 4)
+        ws.freeze_panes = ws.cell(row=_WEBADI_HEADER_ROW + 2, column=3)
+    wb.save(path)
+    return path

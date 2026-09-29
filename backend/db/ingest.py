@@ -291,6 +291,102 @@ def _ingest_bills(session, df, base, stats,
     return ids, inserted_ids
 
 
+def _line_signature(lines) -> list:
+    return sorted((str(h or "").strip().upper(),
+                   None if _is_na(a) or a is None else round(float(a), 2))
+                  for h, a in lines)
+
+
+def sync_recovery_lines(session, customer_id: int, df: pd.DataFrame,
+                        bill_ids: Dict[int, str], inserted_bill_ids: set,
+                        base: dict) -> dict:
+    """Make each bill's gold recovery lines the ones this file carries.
+
+    A bill is often first exported BEFORE IREPS applies its deductions
+    (no Recovery Details) and re-exported with them later. The bill's
+    totals update in place (BILL_MUTABLE); its per-head lines must follow
+    or every deduction breakdown (Recoveries page, WebADI adjustment
+    rows) silently loses them — before 2026-09-29 they were written for
+    NEW bills only.
+
+    - new bill: its lines are inserted;
+    - existing bill whose stored lines differ (head, amount multiset)
+      from the file's: stored lines + their sightings are deleted and the
+      file's inserted — latest export wins, like the bill's own fields;
+    - LOCKED bill: never changed, EXCEPT a bill with no lines at all
+      whose incoming lines total its own stored recovery_sum (±1): that
+      fills in detail the locked row already asserts, it moves nothing.
+
+    `bill_ids` is {bill row_seq in this file: gold bill id}; when a bill
+    appears on several rows of one file the LAST row wins, as for its
+    mutable fields. Returns {ids, lines_inserted, lines_deleted,
+    bills_refreshed, locked_filled}."""
+    out = {"ids": {}, "lines_inserted": 0, "lines_deleted": 0,
+           "bills_refreshed": 0, "locked_filled": 0}
+    # gold bill id -> (last bill_row_seq, [recovery recs])
+    last_seq: Dict[str, int] = {}
+    for seq, gid in bill_ids.items():
+        if gid is not None and seq >= last_seq.get(gid, -1):
+            last_seq[gid] = seq
+    by_seq: Dict[int, list] = {}
+    for rec in (df.to_dict(orient="records") if df is not None else []):
+        s = rec.get("bill_row_seq")
+        if not _is_na(s):
+            by_seq.setdefault(int(s), []).append(rec)
+    if not last_seq:
+        return out
+
+    existing_ids = [g for g in last_seq if g not in inserted_bill_ids]
+    stored: Dict[str, list] = {}
+    if existing_ids:
+        for line in session.execute(
+                select(GoldRecovery).where(
+                    GoldRecovery.gold_bill_id.in_(existing_ids))).scalars():
+            stored.setdefault(line.gold_bill_id, []).append(line)
+    locked = _consumed_bill_ids(session, customer_id, ("LOCKED",)) \
+        if existing_ids else set()
+    recovery_sum = dict(session.execute(
+        select(GoldBill.id, GoldBill.recovery_sum)
+        .where(GoldBill.id.in_([g for g in existing_ids if g in locked])))
+        .all()) if locked else {}
+
+    keep, delete_ids = [], []
+    for gid, seq in last_seq.items():
+        incoming = by_seq.get(seq, [])
+        if gid not in inserted_bill_ids:
+            old = stored.get(gid, [])
+            if _line_signature((r.get("recovery_head"), r.get("recovery_amt"))
+                               for r in incoming) == _line_signature(
+                    (l.recovery_head, l.recovery_amt) for l in old):
+                continue
+            if gid in locked:
+                total = sum(float(r.get("recovery_amt") or 0) for r in incoming)
+                if old or not incoming or recovery_sum.get(gid) is None \
+                        or abs(total - recovery_sum[gid]) >= 1.0:
+                    continue
+                out["locked_filled"] += 1
+            delete_ids += [l.id for l in old]
+            out["bills_refreshed"] += 1
+        for rec in incoming:
+            keep.append({**rec, "_gold_bill_id": gid})
+
+    if delete_ids:
+        session.execute(GoldFileRow.__table__.delete().where(
+            GoldFileRow.frame == "recoveries",
+            GoldFileRow.gold_row_id.in_(delete_ids)))
+        session.execute(GoldRecovery.__table__.delete().where(
+            GoldRecovery.id.in_(delete_ids)))
+        out["lines_deleted"] = len(delete_ids)
+    if keep:
+        bill_by_seq = {int(r["row_seq"]): r["_gold_bill_id"] for r in keep}
+        sub = pd.DataFrame(keep).drop(columns=["_gold_bill_id"])
+        out["ids"] = _persist_frame(
+            session, GoldRecovery, sub, RECOVERIES_MAP, base,
+            resolve=lambda rec: {"gold_bill_id": bill_by_seq[int(rec["row_seq"])]})
+        out["lines_inserted"] = len(keep)
+    return out
+
+
 def ingest_gold_frames(session, customer_id: int,
                        gold_frames: Dict[str, pd.DataFrame],
                        bronze_ids: Dict[str, int],
@@ -366,29 +462,13 @@ def ingest_gold_frames(session, customer_id: int,
 
     if "recoveries" in gold_frames and "recoveries" not in reused_files:
         before = dict(stats)
-        bill_ids = ids.get("bills", {})
-        df = gold_frames["recoveries"]
-        keep = []
-        for rec in df.to_dict(orient="records"):
-            seq = rec.get("bill_row_seq")
-            gold_bill = (bill_ids.get(int(seq)) if not _is_na(seq) else None)
-            # recovery lines ride with their bill: only NEW bills get rows,
-            # merged bills keep the recovery detail from first ingest
-            if gold_bill is not None and gold_bill in inserted_bill_ids:
-                rec["_gold_bill_id"] = gold_bill
-                keep.append(rec)
-        if keep:
-            bill_by_seq = {int(r["row_seq"]): r["_gold_bill_id"] for r in keep}
-            sub = pd.DataFrame(keep).drop(columns=["_gold_bill_id"])
-            ids["recoveries"] = _persist_frame(
-                session, GoldRecovery, sub, RECOVERIES_MAP,
-                base("recoveries"),
-                resolve=lambda rec: {"gold_bill_id":
-                                     bill_by_seq[int(rec["row_seq"])]})
-            stats["rows_inserted"] += len(keep)
-        else:
-            ids.setdefault("recoveries", {})
+        sync = sync_recovery_lines(
+            session, customer_id, gold_frames["recoveries"],
+            ids.get("bills", {}), inserted_bill_ids, base("recoveries"))
+        ids["recoveries"] = sync["ids"]
+        stats["rows_inserted"] += sync["lines_inserted"]
         by_frame["recoveries"] = _frame_delta(before, stats)
+        by_frame["recoveries"]["updated"] = sync["bills_refreshed"]
 
     for frame in gold_frames:
         if frame.startswith("lineage") and frame not in reused_files:

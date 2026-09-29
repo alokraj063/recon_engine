@@ -367,3 +367,73 @@ export async function signIn(email: string, password: string): Promise<AuthUser>
 export async function signOut(): Promise<{ status: string }> {
   return postJson('/api/auth/logout')
 }
+
+/** One Oracle AR Receipt Upload (WebADI) record + display-only keys. */
+export interface WebadiRecord {
+  'Upl': string
+  'Operating Unit ID Selected': string | null
+  'Customer Name': string | null
+  'Receipt Method': string | null
+  'Receipt Number': string | null
+  'Currency': string
+  'Receipt Amount': number | null
+  'Receipt Date': string | null
+  'GL Date': string | null
+  'Invoice Number': string | null
+  'Receipt Amount Applied': number | null
+  'Adjustment Amount': number | null
+  'Factoring Amount': number | null
+  'Adjustment Type': string | null
+  unit: string
+  match: string
+  match_ledger_id: string
+  confidence: string
+  zone: string | null
+  submission_ref: string | null
+  recovery_head: string | null
+  issues: string[]
+}
+
+export interface WebadiPreview {
+  from: string
+  to: string
+  latest_date: string | null
+  summary: {
+    records: number
+    receipts: number
+    bills: number
+    receipt_amount: number
+    issues: Record<string, number>
+    by_unit: Record<string, number>
+  }
+  issue_text: Record<string, string>
+  records: WebadiRecord[]
+}
+
+export interface WebadiQuery {
+  customerId: string
+  from?: string
+  to?: string
+  unit?: string
+  glDate?: string
+}
+
+function webadiParams(q: WebadiQuery): string {
+  const p = new URLSearchParams({ customer_id: q.customerId })
+  if (q.from) p.set('from', q.from)
+  if (q.to) p.set('to', q.to)
+  if (q.unit) p.append('unit', q.unit)
+  if (q.glDate) p.set('gl_date', q.glDate)
+  return p.toString()
+}
+
+/** GET /api/export/webadi/preview — the records the download would carry;
+ *  with no `from` the server picks the newest day with a confirmed match. */
+export async function fetchWebadiPreview(q: WebadiQuery): Promise<WebadiPreview> {
+  return getJson(`/api/export/webadi/preview?${webadiParams(q)}`)
+}
+
+/** GET /api/export/webadi — the Oracle Receipt Upload workbook. */
+export function webadiUrl(q: WebadiQuery): string {
+  return `/api/export/webadi?${webadiParams(q)}`
+}
