@@ -30,6 +30,7 @@ interface SlotSpec {
 }
 
 const BANK_SLOT: SlotSpec = { field: 'statement', sourceType: 'bank_statement' }
+const AR_SLOT = 'ar_statement'
 
 // ERP document slots, in ingest order; which of them RENDER depends on
 // the chosen ERP system (whichever source_types it has adapters for)
@@ -202,6 +203,11 @@ export function IngestForm({
   const extraSlots = Object.keys(sources)
     .filter((st) => st.startsWith('lineage_') && !FIXED_SOURCE_TYPES.has(st))
     .sort()
+  // the ERP's AR statement (Daily Collection export only): a singleton
+  // slot, posted under its slot key like an extra lineage slot
+  const arSlot = sources[AR_SLOT] ? AR_SLOT : null
+  const arOpt = (adapters[AR_SLOT] ?? []).find((o) => o.key === sources[AR_SLOT])
+  const uploadSlots = arSlot ? [...extraSlots, arSlot] : extraSlots
   const lineageAdapters = [...new Map(
     Object.values(adapters).flat()
       .filter((o) => o.role === 'lineage')
@@ -250,7 +256,7 @@ export function IngestForm({
       .map((s) => [s.field, files[s.field]])),
   }
   const outgoingExtras: Record<string, File[]> = Object.fromEntries(
-    extraSlots.filter(extraEnabled).map((st) => [st, extraFiles[st] ?? []]))
+    uploadSlots.filter(extraEnabled).map((st) => [st, extraFiles[st] ?? []]))
   const anyInput = Object.values(outgoing).some((fs) => fs.length > 0)
     || Object.values(outgoingExtras).some((fs) => fs.length > 0)
 
@@ -356,7 +362,11 @@ export function IngestForm({
     ...extraSlots.map((st) => ({
       key: st, name: st.replace(/^lineage_/, ''), on: extraEnabled(st), n: (extraFiles[st] ?? []).length,
     })),
+    ...(arSlot ? [{
+      key: arSlot, name: 'AR statement', on: extraEnabled(arSlot), n: (extraFiles[arSlot] ?? []).length,
+    }] : []),
   ]
+  const showLineageCard = extraSlots.length > 0 || addingSlot || lineageAdapters.length > 0
   const fileCount = plan.reduce((a, p) => a + (p.on ? p.n : 0), 0)
   const checks = result
     ? (result.selfchecks?.length
@@ -494,7 +504,7 @@ export function IngestForm({
             })}
           </Card>
 
-          {(extraSlots.length > 0 || addingSlot || lineageAdapters.length > 0) && (
+          {showLineageCard && (
             <Card title={<><span className="step">3</span> Additional lineage documents</>}
                   sub="Optional"
                   action={!addingSlot && (
@@ -563,6 +573,25 @@ export function IngestForm({
               )}
             </Card>
           )}
+
+          {arSlot && (() => {
+            const on = extraEnabled(arSlot)
+            const own = extraFiles[arSlot] ?? []
+            return (
+              <Card title={<><span className="step">{showLineageCard ? 4 : 3}</span> AR statement</>}
+                    sub="Optional · for the Daily collection export">
+                <div className={`up-slot${on ? '' : ' is-off'}${on && own.length ? ' is-filled' : ''}`}>
+                  {toggle(arSlot, on, arOpt?.label ?? 'AR statement')}
+                  <SlotFileArea on={on} running={running} files={own}
+                                accept={acceptOf(arOpt)}
+                                onAdd={(fs) =>
+                                  setExtraFiles((prev) => ({ ...prev, [arSlot]: [...(prev[arSlot] ?? []), ...fs] }))}
+                                onRemove={(i) =>
+                                  setExtraFiles((prev) => ({ ...prev, [arSlot]: (prev[arSlot] ?? []).filter((_, j) => j !== i) }))} />
+                </div>
+              </Card>
+            )
+          })()}
         </div>
 
         {/* ---- what will be sent ---- */}

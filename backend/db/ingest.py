@@ -25,10 +25,10 @@ from sqlalchemy import select
 from logging_setup import get_logger
 
 from .audit import record_event
-from .gold import (BANK_MAP, BILLS_MAP, LINEAGE_MAP, RECOVERIES_MAP,
+from .gold import (AR_MAP, BANK_MAP, BILLS_MAP, LINEAGE_MAP, RECOVERIES_MAP,
                    _coerce, _is_na, _json_clean, _persist_frame)
-from .models import (GoldBankTxn, GoldBill, GoldFileRow, GoldLineageDoc,
-                     GoldRecovery, IngestConflict, MatchLedger,
+from .models import (GoldArInvoice, GoldBankTxn, GoldBill, GoldFileRow,
+                     GoldLineageDoc, GoldRecovery, IngestConflict, MatchLedger,
                      MatchLedgerBill)
 
 logger = get_logger(__name__)
@@ -407,7 +407,7 @@ def ingest_gold_frames(session, customer_id: int,
                 "bronze_file_id": bronze_ids[frame]}
 
     fixed_models = {"bank_txns": GoldBankTxn, "bills": GoldBill,
-                    "recoveries": GoldRecovery}
+                    "recoveries": GoldRecovery, "ar_invoices": GoldArInvoice}
     # any other frame is a lineage slot (canonical unified shape)
     models = {frame: fixed_models.get(frame, GoldLineageDoc)
               for frame in gold_frames}
@@ -469,6 +469,22 @@ def ingest_gold_frames(session, customer_id: int,
         stats["rows_inserted"] += sync["lines_inserted"]
         by_frame["recoveries"] = _frame_delta(before, stats)
         by_frame["recoveries"]["updated"] = sync["bills_refreshed"]
+
+    if "ar_invoices" in gold_frames and "ar_invoices" not in reused_files:
+        # a statement is a SNAPSHOT: every row of the file is its own
+        # record (no upsert across files); only a replay of this same
+        # file's rows is recognised
+        before = dict(stats)
+        done = file_rows.get("ar_invoices") or {}
+        df = gold_frames["ar_invoices"]
+        fresh = df[~df["row_seq"].astype(int).isin(done.keys())]
+        ids["ar_invoices"] = dict(done)
+        stats["rows_reused"] += len(df) - len(fresh)
+        if len(fresh):
+            ids["ar_invoices"].update(_persist_frame(
+                session, GoldArInvoice, fresh, AR_MAP, base("ar_invoices")))
+            stats["rows_inserted"] += len(fresh)
+        by_frame["ar_invoices"] = _frame_delta(before, stats)
 
     for frame in gold_frames:
         if frame.startswith("lineage") and frame not in reused_files:

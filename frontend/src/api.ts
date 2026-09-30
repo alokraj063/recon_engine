@@ -437,3 +437,114 @@ export async function fetchWebadiPreview(q: WebadiQuery): Promise<WebadiPreview>
 export function webadiUrl(q: WebadiQuery): string {
   return `/api/export/webadi?${webadiParams(q)}`
 }
+
+/* --- Daily Collection export ------------------------------------------ */
+
+/** One row of the collections team's DAILY COLLECTION sheet + display-only keys. */
+export interface DailyCollectionRow {
+  'SL.NO': number | null
+  'EFT DATE': string
+  'Bank': string
+  'Bank Ref': string | null
+  'Region': string | null
+  'RLY': string | null
+  'EFT AMOUNT': number | null
+  'BILL NO.': string | null
+  'Bill Date': string | null
+  'INVOICE AMOUNT': number | null
+  'DAILY COLLECTION': number | null
+  'TOTAL COLLECTION': number | null
+  'BRANCH': string | null
+  'Invoice Value': number | null
+  'OD/NOD': string | null
+  'Category': string | null
+  'Week': string
+  month: string
+  match: string
+  match_ledger_id: string
+  confidence: string
+  zone: string | null
+  subcategory: string | null
+  due_date: string | null
+  ar_statement_date: string | null
+  first_of_credit: boolean
+  issues: string[]
+}
+
+export interface DailyCollectionPreview {
+  from: string
+  to: string
+  latest_date: string | null
+  ar_statements: { statement_date: string | null; invoices: number }[]
+  recipients: string[]
+  summary: {
+    rows: number
+    credits: number
+    eft_amount: number
+    collection: number
+    days: number
+    issues: Record<string, number>
+    by_month: Record<string, number>
+  }
+  issue_text: Record<string, string>
+  rows: DailyCollectionRow[]
+}
+
+export interface DailyCollectionQuery {
+  customerId: string
+  from?: string
+  to?: string
+}
+
+function dailyCollectionParams(q: DailyCollectionQuery): string {
+  const p = new URLSearchParams({ customer_id: q.customerId })
+  if (q.from) p.set('from', q.from)
+  if (q.to) p.set('to', q.to)
+  return p.toString()
+}
+
+/** GET /api/export/daily-collection/preview — `from` snaps back to its
+ *  4-4-5 fiscal month's first day; no dates = the newest confirmed
+ *  credit's month to date. */
+export async function fetchDailyCollectionPreview(q: DailyCollectionQuery): Promise<DailyCollectionPreview> {
+  return getJson(`/api/export/daily-collection/preview?${dailyCollectionParams(q)}`)
+}
+
+/** GET /api/export/daily-collection — the DAILY COLLECTION workbook. */
+export function dailyCollectionUrl(q: DailyCollectionQuery): string {
+  return `/api/export/daily-collection?${dailyCollectionParams(q)}`
+}
+
+export interface CategoryMasterRow {
+  region: string | null
+  sales_rep: string
+  order_type: string | null
+  category: string | null
+  subcategory: string
+}
+
+export interface CollectionSettings {
+  key: string
+  /** sections still following the built-in default */
+  defaults: string[]
+  fiscal_calendar: { pattern: number[]; year_starts: Record<string, string> }
+  category_master: CategoryMasterRow[]
+  branch_codes: Record<string, string>
+  recipients: string[]
+  segments: string[]
+}
+
+/** null = that section follows the built-in default again */
+export type CollectionSettingsBody = {
+  [K in keyof Omit<CollectionSettings, 'key' | 'defaults'>]: CollectionSettings[K] | null
+}
+
+export async function fetchCollectionSettings(key: string): Promise<CollectionSettings> {
+  return getJson(`/api/customers/${encodeURIComponent(key)}/collection`)
+}
+
+/** PUT /api/customers/{key}/collection — a section equal to its default
+ *  is stored as "follow the default". */
+export async function saveCollectionSettings(key: string, body: CollectionSettingsBody): Promise<CollectionSettings> {
+  return sendJson('PUT', `/api/customers/${encodeURIComponent(key)}/collection`, body)
+}

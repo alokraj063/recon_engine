@@ -2,7 +2,7 @@ import type { ComponentType } from 'react'
 import {
   ArrowDownLeft, Boxes, FileSearch, FileStack, GitMerge,
   Landmark, LayoutDashboard, ListChecks, ListMinus, ReceiptText,
-  Upload, Download, FileOutput, LogOut, Settings,
+  Upload, Download, FileOutput, FileSpreadsheet, LogOut, Settings,
 } from 'lucide-react'
 import type { ReconResponse } from '../types'
 import { workbookUrl } from '../api'
@@ -20,6 +20,7 @@ export type View =
   | 'ar'
   | 'audit'
   | 'export'
+  | 'collection'
   | 'architecture'
   | 'settings'
   | 'summary'
@@ -126,7 +127,8 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
         {openItem({ view: 'ledger', label: 'Analyst queue', icon: ListChecks })}
         {openItem({ view: 'ar', label: 'AR Reconciliation', icon: ArrowDownLeft })}
         {openItem({ view: 'audit', label: 'Audit trail', icon: FileSearch })}
-        {openItem({ view: 'export', label: 'Export', icon: FileOutput })}
+        {openItem({ view: 'export', label: 'WebADI export', icon: FileOutput })}
+        {openItem({ view: 'collection', label: 'Daily collection', icon: FileSpreadsheet })}
 
         <div className="nav-group-label">Data</div>
         {DATA_PAGES.map(dataItem)}

@@ -157,6 +157,10 @@ class MatchRuleSetRow(Base):
     # zone code -> {name, region, segment, aliases}: display-only reference
     # data (db/zones.py); NULL -> db/zones.DEFAULT_ZONE_DIRECTORY
     zone_directory: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
+    # Daily Collection export settings (db/collection.py): fiscal
+    # calendar, category master, branch codes, recipients; NULL/missing
+    # keys -> the defaults there
+    collection_config: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
 
 
 # --- bronze / silver ---------------------------------------------------
@@ -300,6 +304,41 @@ class GoldRecovery(Base):
     recovery_head: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     recovery_amt: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     recovery_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    extras: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
+
+
+class GoldArInvoice(Base):
+    """The ERP's receivables ledger, one row per invoice line of one AR
+    statement. A statement is a SNAPSHOT as of statement_date: rows are
+    never upserted across files, so every month's statement stays
+    readable and a reader picks the snapshot that fits its date
+    (db/collection.ar_lookup). Only the Daily Collection export reads it."""
+    __tablename__ = "ar_invoices"
+    __table_args__ = (
+        Index("uq_ar_invoices_file_seq", "bronze_file_id", "row_seq", unique=True),
+        Index("ix_ar_invoices_customer_invoice", "customer_id", "invoice_number"),
+        {"schema": "gold"},
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_uuid)
+    run_id: Mapped[Optional[str]] = mapped_column(ForeignKey("runs.id"), nullable=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    bronze_file_id: Mapped[int] = mapped_column(ForeignKey("bronze.files.id"), index=True)
+    row_seq: Mapped[int] = mapped_column(Integer)
+    statement_date: Mapped[Optional[datetime]] = mapped_column(Date, nullable=True, index=True)
+    invoice_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    invoice_date: Mapped[Optional[datetime]] = mapped_column(Date, nullable=True)
+    due_date: Mapped[Optional[datetime]] = mapped_column(Date, nullable=True)
+    customer_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    customer_name: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    operating_unit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    sales_rep: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    sales_order_type: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    subcategory: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    currency: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    functional_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    functional_amount_open: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     extras: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
 
 

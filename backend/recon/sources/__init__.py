@@ -10,12 +10,14 @@ from .hsbc_bank import HsbcBankAdapter
 from .ireps_bills import IrepsBillsAdapter
 from .ireps_crn import IrepsCrnAdapter
 from .ireps_rnote import IrepsRnoteAdapter
+from .oracle_ar import OracleArAdapter
 
 _ADAPTERS = (
     HsbcBankAdapter(),
     IrepsBillsAdapter(),
     IrepsRnoteAdapter(),
     IrepsCrnAdapter(),
+    OracleArAdapter(),
 )
 
 REGISTRY = {(a.source_type, a.adapter_key): a for a in _ADAPTERS}

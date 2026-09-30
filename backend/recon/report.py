@@ -202,3 +202,89 @@ def write_webadi_workbook(sheets, path):
         ws.freeze_panes = ws.cell(row=_WEBADI_HEADER_ROW + 2, column=3)
     wb.save(path)
     return path
+
+
+# --- Daily Collection (the collections team's month-to-date sheet) ---------
+# Laid out like the team's own "DAILY COLLECTION <d Mon yy>.xlsx": one sheet
+# per 4-4-5 fiscal month named "Sep 26", totals in rows 2-3, the header in
+# row 4, rows from 5. Column R carries the Category with no header, as in
+# theirs. DAILY / TOTAL COLLECTION and the totals are FORMULAS, as in
+# theirs, so a row the team adds by hand still adds up.
+DAILY_COLLECTION_COLUMNS = [
+    "SL.NO", "EFT DATE", "Bank", "Bank Ref", "Region", "RLY", "EFT AMOUNT",
+    "BILL NO.", "Bill Date", "INVOICE AMOUNT", "Receipt No.", "Receipts Date",
+    "DAILY COLLECTION", "TOTAL COLLECTION", "BRANCH", "Invoice Value",
+    "OD/NOD", None, "Week",
+]
+_DC_ROW_KEYS = [c if c is not None else "Category" for c in DAILY_COLLECTION_COLUMNS]
+_DC_MONEY = {"EFT AMOUNT", "INVOICE AMOUNT", "DAILY COLLECTION",
+             "TOTAL COLLECTION", "Invoice Value"}
+_DC_DATES = {"EFT DATE", "Bill Date", "Receipts Date"}
+_DC_HEADER_ROW = 4
+_DC_FILL = PatternFill("solid", fgColor="FFF2CC")
+
+
+def _dc_value(key, v):
+    if key == "BILL NO." and isinstance(v, str) and v.isdigit() and len(v) <= 15:
+        return int(v)       # the team's sheet holds bill numbers as numbers
+    return _cell(v)
+
+
+def write_daily_collection_workbook(sheets, path):
+    """sheets: [{"name": "Sep 26", "rows": [{column: value, ...}]}], rows
+    in order; a row whose "DAILY COLLECTION" is set closes its day."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    col = {k: get_column_letter(i + 1) for i, k in enumerate(_DC_ROW_KEYS)}
+    for sheet in sheets or [{"name": "Daily Collection", "rows": []}]:
+        ws = wb.create_sheet(sheet["name"][:31])
+        rows = sheet.get("rows") or []
+        first, last = _DC_HEADER_ROW + 1, _DC_HEADER_ROW + max(len(rows), 1)
+        for j, head in enumerate(DAILY_COLLECTION_COLUMNS):
+            h = ws.cell(row=_DC_HEADER_ROW, column=j + 1, value=head)
+            h.font = Font(name="Arial", size=10, bold=True)
+            h.fill = _DC_FILL
+            h.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for key in ("EFT AMOUNT", "INVOICE AMOUNT", "DAILY COLLECTION"):
+            c = col[key]
+            ws[f"{c}3"] = f"=SUM({c}{first}:{c}{last})"
+            ws[f"{c}3"].number_format = "#,##0.00"
+            ws[f"{c}3"].font = Font(name="Arial", size=10, bold=True)
+        for key in ("EFT AMOUNT", "INVOICE AMOUNT"):
+            c = col[key]
+            ws[f"{c}2"] = f"={c}3/1000000"     # MINR, as the team reads it
+            ws[f"{c}2"].number_format = "0.00"
+            ws[f"{c}2"].font = Font(name="Arial", size=10, bold=True)
+
+        day_start, prev_day_end = first, None
+        for i, rec in enumerate(rows):
+            r = first + i
+            for j, key in enumerate(_DC_ROW_KEYS):
+                if key in ("DAILY COLLECTION", "TOTAL COLLECTION"):
+                    continue
+                c = ws.cell(row=r, column=j + 1, value=_dc_value(key, rec.get(key)))
+                c.font = BODY_FONT
+                if key in _DC_MONEY:
+                    c.number_format = "#,##0.00"
+                elif key in _DC_DATES:
+                    c.number_format = "dd-mm-yyyy"
+            if rec.get("DAILY COLLECTION") is not None:
+                m, n = col["DAILY COLLECTION"], col["TOTAL COLLECTION"]
+                ws[f"{m}{r}"] = f"=SUM({col['INVOICE AMOUNT']}{day_start}:{col['INVOICE AMOUNT']}{r})"
+                ws[f"{n}{r}"] = f"={m}{r}" + (f"+{n}{prev_day_end}" if prev_day_end else "")
+                for cell in (ws[f"{m}{r}"], ws[f"{n}{r}"]):
+                    cell.number_format = "#,##0.00"
+                    cell.font = Font(name="Arial", size=10, bold=True)
+                prev_day_end, day_start = r, r + 1
+
+        widths = {"SL.NO": 7, "EFT DATE": 12, "Bank": 7, "Bank Ref": 26,
+                  "Region": 9, "RLY": 8, "BILL NO.": 16, "Bill Date": 12,
+                  "Receipt No.": 11, "Receipts Date": 12, "BRANCH": 9,
+                  "OD/NOD": 8, "Category": 11, "Week": 10}
+        for key, letter in col.items():
+            ws.column_dimensions[letter].width = widths.get(key, 16)
+        ws.freeze_panes = ws.cell(row=_DC_HEADER_ROW + 1, column=1)
+    wb.save(path)
+    return path

@@ -50,12 +50,14 @@ RAILWAY_COPY = {
 }
 
 # (slot source_type, role, adapter_key, params) — lineage is 0..N slots
-# per customer; these two are the seeded IREPS pair.
+# per customer; the two lineage rows are the seeded IREPS pair.
 DEFAULT_SOURCES = [
     ("bank_statement", "bank_statement", "hsbc", {}),
     ("bill_status", "bill_status", "ireps", {}),
     ("lineage_rnote", "lineage", "ireps_rnote", {"sheet": 0}),
     ("lineage_crn", "lineage", "ireps_crn", {"sheet": 0}),
+    # the ERP's AR statement — feeds the Daily Collection export only
+    ("ar_statement", "ar_statement", "oracle_ar", {}),
 ]
 
 

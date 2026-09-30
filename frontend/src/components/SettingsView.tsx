@@ -4,13 +4,15 @@ import type { AdapterRegistry, CustomerConfig, CustomerInfo } from '../types'
 import { fetchAdapters, fetchCustomerConfig } from '../api'
 import { MatchingConfigPanel } from './MatchingConfigPanel'
 import { ZoneDirectoryPanel } from './ZoneDirectoryPanel'
+import { CollectionSettingsPanel } from './CollectionSettingsPanel'
 import { CustomerSelect, Notice, PageHeader, TextLink } from './ui'
 
-type Tab = 'matching' | 'zones' | 'sources'
+type Tab = 'matching' | 'zones' | 'collection' | 'sources'
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'matching', label: 'Matching config' },
   { key: 'zones', label: 'Zones' },
+  { key: 'collection', label: 'Daily collection' },
   { key: 'sources', label: 'Source setup' },
 ]
 
@@ -20,6 +22,7 @@ const SLOT_NAME: Record<string, string> = {
   bill_status: 'Bill status',
   lineage_rnote: 'Receipt notes',
   lineage_crn: 'CRN report',
+  ar_statement: 'AR statement',
 }
 const slotName = (slot: string) =>
   SLOT_NAME[slot] ?? (slot.startsWith('lineage_') ? `Lineage · ${slot.slice(8)}` : slot)
@@ -65,6 +68,11 @@ export function SettingsView({ customers, customerId, onCustomerChange, onGoToIn
         {tab === 'zones' && (
           <div className="ui-card-body config-body">
             <ZoneDirectoryPanel customerId={customerId} />
+          </div>
+        )}
+        {tab === 'collection' && (
+          <div className="ui-card-body config-body">
+            <CollectionSettingsPanel customerId={customerId} />
           </div>
         )}
         {tab === 'sources' && <SourceSetup customerId={customerId} onGoToIngest={onGoToIngest} />}
