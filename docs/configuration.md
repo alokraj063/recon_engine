@@ -118,6 +118,7 @@ nothing is deleted by the app. Add an S3 lifecycle rule on `{prefix}runs/`.
 |---|---|---|
 | `RECON_DATA_DIR` | `backend/data` (image: `/tmp/recon-data`) | Local storage root and SQLite location. In a container it is scratch space only. |
 | `FRONTEND_DIST` | `frontend/dist` (image: `/app/frontend_dist`) | Built React app served at `/`. No `index.html` there = API only, which is what local development with Vite on :5173 wants. |
+| `BACKEND_PORT` | `8000` | Local development only, read by `frontend/vite.config.ts`: the port the Vite dev server proxies `/api` to. Match it to uvicorn's `--port`. |
 
 ### Sign-in
 
