@@ -38,3 +38,6 @@ deploy/
 
 # local copies of backend/data taken before a wipe / re-ingest
 data_backup_*/
+
+# partial copies of backend/data (real business data)
+data_partial_*/

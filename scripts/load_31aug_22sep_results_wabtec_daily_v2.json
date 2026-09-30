@@ -1,0 +1,3004 @@
+{
+  "customer": "wabtec_daily_v2",
+  "warnings": [],
+  "steps": [
+    {
+      "date": "2026-09-01",
+      "statement": "HSBCINRHSBCINR2026-09-01-03.00.07.000999.PDF",
+      "bills": "BILL STATUS 01092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-01-03.00.07.000999.PDF",
+            "bronze_file_id": 76,
+            "outcome": "registered",
+            "size_bytes": 115719
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 01092026.xlsx",
+            "bronze_file_id": 77,
+            "outcome": "registered",
+            "size_bytes": 352374
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 6266,
+          "bills_updated": 0,
+          "rows_reused": 0,
+          "conflicts": 0,
+          "rows_reported": 6266,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 270,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 270
+            },
+            "bills": {
+              "inserted": 2299,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 2299
+            },
+            "recoveries": {
+              "inserted": 3697,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 3697
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 3,
+          "bank_only": 99,
+          "bill_only": 1,
+          "match_review": 0,
+          "bank_credits": 102,
+          "unrecognised_receipts": 90,
+          "bank_txns": 102,
+          "bills": 2299,
+          "bills_grouped": 2044,
+          "recoveries": 3697
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-01-03.00.07.000999.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-01-03.00.07.000999.PDF"
+          ],
+          "bills": "BILL STATUS 01092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 3,
+          "auto_locked": 3,
+          "exceptions_opened": 99,
+          "exceptions_resolved": 0,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 0,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 76,
+        "statement_bronze_ids": [
+          76
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-02",
+      "statement": "HSBCINRHSBCINR2026-09-02-03.00.11.000516.PDF",
+      "bills": "BILL STATUS 02092026.xls",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-02-03.00.11.000516.PDF",
+            "bronze_file_id": 78,
+            "outcome": "registered",
+            "size_bytes": 180315
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 02092026.xls",
+            "bronze_file_id": 79,
+            "outcome": "registered",
+            "size_bytes": 830976
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 423,
+          "bills_updated": 2262,
+          "rows_reused": 5,
+          "conflicts": 3,
+          "rows_reported": 2693,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 336,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 336
+            },
+            "bills": {
+              "inserted": 53,
+              "updated": 2262,
+              "unchanged": 5,
+              "conflicts": 3,
+              "reported": 2323
+            },
+            "recoveries": {
+              "inserted": 34,
+              "updated": 16,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 34
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 16,
+          "bank_only": 165,
+          "bill_only": 1,
+          "match_review": 0,
+          "bank_credits": 181,
+          "unrecognised_receipts": 156,
+          "bank_txns": 181,
+          "bills": 2349,
+          "bills_grouped": 2074,
+          "recoveries": 3726
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-02-03.00.11.000516.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-02-03.00.11.000516.PDF"
+          ],
+          "bills": "BILL STATUS 02092026.xls",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 16,
+          "auto_locked": 16,
+          "exceptions_opened": 66,
+          "exceptions_resolved": 0,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 0,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 78,
+        "statement_bronze_ids": [
+          78
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-03",
+      "statement": "HSBCINRHSBCINR2026-09-03-03.00.18.000537.PDF",
+      "bills": "BILL STATUS 03092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-03-03.00.18.000537.PDF",
+            "bronze_file_id": 80,
+            "outcome": "registered",
+            "size_bytes": 94869
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 03092026.xlsx",
+            "bronze_file_id": 81,
+            "outcome": "registered",
+            "size_bytes": 355058
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 267,
+          "bills_updated": 2189,
+          "rows_reused": 88,
+          "conflicts": 15,
+          "rows_reported": 2559,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 171,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 171
+            },
+            "bills": {
+              "inserted": 24,
+              "updated": 2189,
+              "unchanged": 88,
+              "conflicts": 15,
+              "reported": 2316
+            },
+            "recoveries": {
+              "inserted": 72,
+              "updated": 29,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 72
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 31,
+          "bank_only": 203,
+          "bill_only": 2,
+          "match_review": 0,
+          "bank_credits": 234,
+          "unrecognised_receipts": 194,
+          "bank_txns": 234,
+          "bills": 2357,
+          "bills_grouped": 2073,
+          "recoveries": 3764
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-03-03.00.18.000537.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-03-03.00.18.000537.PDF"
+          ],
+          "bills": "BILL STATUS 03092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 31,
+          "auto_locked": 31,
+          "exceptions_opened": 39,
+          "exceptions_resolved": 0,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 0,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 80,
+        "statement_bronze_ids": [
+          80
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-04",
+      "statement": "HSBCINRHSBCINR2026-09-04-03.00.06.000657.PDF",
+      "bills": "BILL STATUS 04092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-04-03.00.06.000657.PDF",
+            "bronze_file_id": 82,
+            "outcome": "registered",
+            "size_bytes": 131198
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 04092026.xlsx",
+            "bronze_file_id": 83,
+            "outcome": "registered",
+            "size_bytes": 343911
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 328,
+          "bills_updated": 2150,
+          "rows_reused": 61,
+          "conflicts": 40,
+          "rows_reported": 2579,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 227,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 227
+            },
+            "bills": {
+              "inserted": 26,
+              "updated": 2150,
+              "unchanged": 61,
+              "conflicts": 40,
+              "reported": 2277
+            },
+            "recoveries": {
+              "inserted": 75,
+              "updated": 31,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 75
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 29,
+          "bank_only": 247,
+          "bill_only": 6,
+          "match_review": 0,
+          "bank_credits": 276,
+          "unrecognised_receipts": 237,
+          "bank_txns": 276,
+          "bills": 2352,
+          "bills_grouped": 2064,
+          "recoveries": 3771
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-04-03.00.06.000657.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-04-03.00.06.000657.PDF"
+          ],
+          "bills": "BILL STATUS 04092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 29,
+          "auto_locked": 29,
+          "exceptions_opened": 49,
+          "exceptions_resolved": 1,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 0,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 82,
+        "statement_bronze_ids": [
+          82
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-05",
+      "statement": "HSBCINRHSBCINR2026-09-05-03.00.09.000958.PDF",
+      "bills": "BILL STATUS 05092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-05-03.00.09.000958.PDF",
+            "bronze_file_id": 84,
+            "outcome": "registered",
+            "size_bytes": 95625
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 05092026.xlsx",
+            "bronze_file_id": 85,
+            "outcome": "registered",
+            "size_bytes": 355028
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 180,
+          "bills_updated": 2144,
+          "rows_reused": 76,
+          "conflicts": 72,
+          "rows_reported": 2472,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 125,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 125
+            },
+            "bills": {
+              "inserted": 19,
+              "updated": 2144,
+              "unchanged": 76,
+              "conflicts": 72,
+              "reported": 2311
+            },
+            "recoveries": {
+              "inserted": 36,
+              "updated": 17,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 36
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 11,
+          "bank_only": 267,
+          "bill_only": 11,
+          "match_review": 4,
+          "bank_credits": 278,
+          "unrecognised_receipts": 256,
+          "bank_txns": 278,
+          "bills": 2342,
+          "bills_grouped": 2058,
+          "recoveries": 3738
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-05-03.00.09.000958.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-05-03.00.09.000958.PDF"
+          ],
+          "bills": "BILL STATUS 05092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 11,
+          "auto_locked": 7,
+          "exceptions_opened": 30,
+          "exceptions_resolved": 5,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 0,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 84,
+        "statement_bronze_ids": [
+          84
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-06",
+      "statement": "HSBCINRHSBCINR2026-09-06-03.00.05.000676.PDF",
+      "bills": "BILL STATUS 06092026.xls",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-06-03.00.05.000676.PDF",
+            "bronze_file_id": 86,
+            "outcome": "registered",
+            "size_bytes": 51341
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 06092026.xls",
+            "bronze_file_id": 87,
+            "outcome": "registered",
+            "size_bytes": 799744
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 95,
+          "bills_updated": 2103,
+          "rows_reused": 36,
+          "conflicts": 78,
+          "rows_reported": 2312,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 51,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 51
+            },
+            "bills": {
+              "inserted": 19,
+              "updated": 2103,
+              "unchanged": 36,
+              "conflicts": 78,
+              "reported": 2236
+            },
+            "recoveries": {
+              "inserted": 25,
+              "updated": 11,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 25
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 16,
+          "bank_only": 277,
+          "bill_only": 1,
+          "match_review": 0,
+          "bank_credits": 293,
+          "unrecognised_receipts": 261,
+          "bank_txns": 293,
+          "bills": 2350,
+          "bills_grouped": 2070,
+          "recoveries": 3739
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-06-03.00.05.000676.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-06-03.00.05.000676.PDF"
+          ],
+          "bills": "BILL STATUS 06092026.xls",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 16,
+          "auto_locked": 16,
+          "exceptions_opened": 10,
+          "exceptions_resolved": 10,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 4,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 86,
+        "statement_bronze_ids": [
+          86
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-08",
+      "statement": "HSBCINRHSBCINR2026-09-08-03.00.10.000759.PDF",
+      "bills": "BILL STATUS 08092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-08-03.00.10.000759.PDF",
+            "bronze_file_id": 88,
+            "outcome": "registered",
+            "size_bytes": 83101
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 08092026.xlsx",
+            "bronze_file_id": 89,
+            "outcome": "registered",
+            "size_bytes": 342652
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 274,
+          "bills_updated": 2055,
+          "rows_reused": 78,
+          "conflicts": 100,
+          "rows_reported": 2507,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 182,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 182
+            },
+            "bills": {
+              "inserted": 34,
+              "updated": 2055,
+              "unchanged": 78,
+              "conflicts": 100,
+              "reported": 2267
+            },
+            "recoveries": {
+              "inserted": 58,
+              "updated": 27,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 58
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 17,
+          "bank_only": 344,
+          "bill_only": 4,
+          "match_review": 0,
+          "bank_credits": 361,
+          "unrecognised_receipts": 323,
+          "bank_txns": 361,
+          "bills": 2368,
+          "bills_grouped": 2094,
+          "recoveries": 3764
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-08-03.00.10.000759.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-08-03.00.10.000759.PDF"
+          ],
+          "bills": "BILL STATUS 08092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 17,
+          "auto_locked": 17,
+          "exceptions_opened": 70,
+          "exceptions_resolved": 0,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 4,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 88,
+        "statement_bronze_ids": [
+          88
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-09",
+      "statement": "HSBCINRHSBCINR2026-09-09-03.00.42.000221.PDF",
+      "bills": "BILL STATUS 09092026.xls",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-09-03.00.42.000221.PDF",
+            "bronze_file_id": 90,
+            "outcome": "registered",
+            "size_bytes": 200911
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 09092026.xls",
+            "bronze_file_id": 91,
+            "outcome": "registered",
+            "size_bytes": 807936
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 475,
+          "bills_updated": 2056,
+          "rows_reused": 55,
+          "conflicts": 116,
+          "rows_reported": 2702,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 387,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 387
+            },
+            "bills": {
+              "inserted": 25,
+              "updated": 2056,
+              "unchanged": 55,
+              "conflicts": 116,
+              "reported": 2252
+            },
+            "recoveries": {
+              "inserted": 63,
+              "updated": 31,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 63
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 29,
+          "bank_only": 424,
+          "bill_only": 1,
+          "match_review": 2,
+          "bank_credits": 453,
+          "unrecognised_receipts": 392,
+          "bank_txns": 453,
+          "bills": 2376,
+          "bills_grouped": 2101,
+          "recoveries": 3794
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-09-03.00.42.000221.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-09-03.00.42.000221.PDF"
+          ],
+          "bills": "BILL STATUS 09092026.xls",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 29,
+          "auto_locked": 27,
+          "exceptions_opened": 80,
+          "exceptions_resolved": 3,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 4,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 90,
+        "statement_bronze_ids": [
+          90
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-10",
+      "statement": "HSBCINRHSBCINR2026-09-10-03.00.32.000797.PDF",
+      "bills": "BILL STATUS 10092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-10-03.00.32.000797.PDF",
+            "bronze_file_id": 92,
+            "outcome": "registered",
+            "size_bytes": 63780
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 10092026.xlsx",
+            "bronze_file_id": 93,
+            "outcome": "registered",
+            "size_bytes": 340828
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 189,
+          "bills_updated": 1999,
+          "rows_reused": 64,
+          "conflicts": 144,
+          "rows_reported": 2396,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 102,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 102
+            },
+            "bills": {
+              "inserted": 39,
+              "updated": 1999,
+              "unchanged": 64,
+              "conflicts": 144,
+              "reported": 2246
+            },
+            "recoveries": {
+              "inserted": 48,
+              "updated": 18,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 48
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 21,
+          "bank_only": 465,
+          "bill_only": 2,
+          "match_review": 0,
+          "bank_credits": 486,
+          "unrecognised_receipts": 432,
+          "bank_txns": 486,
+          "bills": 2386,
+          "bills_grouped": 2105,
+          "recoveries": 3785
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-10-03.00.32.000797.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-10-03.00.32.000797.PDF"
+          ],
+          "bills": "BILL STATUS 10092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 21,
+          "auto_locked": 21,
+          "exceptions_opened": 42,
+          "exceptions_resolved": 0,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 6,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 92,
+        "statement_bronze_ids": [
+          92
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-11",
+      "statement": "HSBCINRHSBCINR2026-09-11-03.00.15.000832.PDF",
+      "bills": "BILL STATUS 11092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-11-03.00.15.000832.PDF",
+            "bronze_file_id": 94,
+            "outcome": "registered",
+            "size_bytes": 85563
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 11092026.xlsx",
+            "bronze_file_id": 95,
+            "outcome": "registered",
+            "size_bytes": 344994
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 263,
+          "bills_updated": 2012,
+          "rows_reused": 48,
+          "conflicts": 161,
+          "rows_reported": 2484,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 158,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 158
+            },
+            "bills": {
+              "inserted": 33,
+              "updated": 2012,
+              "unchanged": 48,
+              "conflicts": 161,
+              "reported": 2254
+            },
+            "recoveries": {
+              "inserted": 72,
+              "updated": 33,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 72
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 32,
+          "bank_only": 507,
+          "bill_only": 5,
+          "match_review": 2,
+          "bank_credits": 539,
+          "unrecognised_receipts": 473,
+          "bank_txns": 539,
+          "bills": 2398,
+          "bills_grouped": 2113,
+          "recoveries": 3811
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-11-03.00.15.000832.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-11-03.00.15.000832.PDF"
+          ],
+          "bills": "BILL STATUS 11092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 32,
+          "auto_locked": 30,
+          "exceptions_opened": 46,
+          "exceptions_resolved": 1,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 6,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 94,
+        "statement_bronze_ids": [
+          94
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-12",
+      "statement": "HSBCINRHSBCINR2026-09-12-03.00.39.000403.PDF",
+      "bills": "BILL STATUS 12092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-12-03.00.39.000403.PDF",
+            "bronze_file_id": 96,
+            "outcome": "registered",
+            "size_bytes": 66444
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 12092026.xlsx",
+            "bronze_file_id": 97,
+            "outcome": "registered",
+            "size_bytes": 349988
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 205,
+          "bills_updated": 1946,
+          "rows_reused": 89,
+          "conflicts": 195,
+          "rows_reported": 2435,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 106,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 106
+            },
+            "bills": {
+              "inserted": 25,
+              "updated": 1946,
+              "unchanged": 89,
+              "conflicts": 195,
+              "reported": 2255
+            },
+            "recoveries": {
+              "inserted": 74,
+              "updated": 28,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 74
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 40,
+          "bank_only": 546,
+          "bill_only": 2,
+          "match_review": 3,
+          "bank_credits": 586,
+          "unrecognised_receipts": 512,
+          "bank_txns": 586,
+          "bills": 2391,
+          "bills_grouped": 2113,
+          "recoveries": 3820
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-12-03.00.39.000403.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-12-03.00.39.000403.PDF"
+          ],
+          "bills": "BILL STATUS 12092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 40,
+          "auto_locked": 37,
+          "exceptions_opened": 40,
+          "exceptions_resolved": 4,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 8,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 96,
+        "statement_bronze_ids": [
+          96
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-13",
+      "statement": "HSBCINRHSBCINR2026-09-13-03.00.20.000980.PDF",
+      "bills": null,
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-13-03.00.20.000980.PDF",
+            "bronze_file_id": 98,
+            "outcome": "registered",
+            "size_bytes": 33131
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 3,
+          "bills_updated": 0,
+          "rows_reused": 0,
+          "conflicts": 0,
+          "rows_reported": 3,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 3,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 3
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 0,
+          "bank_only": 547,
+          "bill_only": 2,
+          "match_review": 0,
+          "bank_credits": 547,
+          "unrecognised_receipts": 513,
+          "bank_txns": 547,
+          "bills": 2351,
+          "bills_grouped": 2081,
+          "recoveries": 3739
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-13-03.00.20.000980.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-13-03.00.20.000980.PDF"
+          ],
+          "bills": "BILL STATUS 12092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 0,
+          "auto_locked": 0,
+          "exceptions_opened": 1,
+          "exceptions_resolved": 0,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 11,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 98,
+        "statement_bronze_ids": [
+          98
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-15",
+      "statement": "HSBCINRHSBCINR2026-09-15-03.00.17.000960.PDF",
+      "bills": "BILLS STATUS 15092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-15-03.00.17.000960.PDF",
+            "bronze_file_id": 99,
+            "outcome": "registered",
+            "size_bytes": 131036
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILLS STATUS 15092026.xlsx",
+            "bronze_file_id": 100,
+            "outcome": "registered",
+            "size_bytes": 340512
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 358,
+          "bills_updated": 1896,
+          "rows_reused": 33,
+          "conflicts": 229,
+          "rows_reported": 2516,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 261,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 261
+            },
+            "bills": {
+              "inserted": 50,
+              "updated": 1896,
+              "unchanged": 33,
+              "conflicts": 229,
+              "reported": 2208
+            },
+            "recoveries": {
+              "inserted": 47,
+              "updated": 16,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 47
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 15,
+          "bank_only": 626,
+          "bill_only": 3,
+          "match_review": 0,
+          "bank_credits": 641,
+          "unrecognised_receipts": 587,
+          "bank_txns": 641,
+          "bills": 2401,
+          "bills_grouped": 2129,
+          "recoveries": 3786
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-15-03.00.17.000960.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-15-03.00.17.000960.PDF"
+          ],
+          "bills": "BILLS STATUS 15092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 15,
+          "auto_locked": 15,
+          "exceptions_opened": 80,
+          "exceptions_resolved": 0,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 11,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 99,
+        "statement_bronze_ids": [
+          99
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-16",
+      "statement": "HSBCINRHSBCINR2026-09-16-03.00.04.000019.PDF",
+      "bills": "BILL STATUS 16092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-16-03.00.04.000019.PDF",
+            "bronze_file_id": 101,
+            "outcome": "registered",
+            "size_bytes": 156862
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 16092026.xlsx",
+            "bronze_file_id": 102,
+            "outcome": "registered",
+            "size_bytes": 338321
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 384,
+          "bills_updated": 1873,
+          "rows_reused": 53,
+          "conflicts": 246,
+          "rows_reported": 2556,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 302,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 302
+            },
+            "bills": {
+              "inserted": 30,
+              "updated": 1873,
+              "unchanged": 53,
+              "conflicts": 246,
+              "reported": 2202
+            },
+            "recoveries": {
+              "inserted": 52,
+              "updated": 20,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 52
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 8,
+          "bank_only": 688,
+          "bill_only": 14,
+          "match_review": 0,
+          "bank_credits": 696,
+          "unrecognised_receipts": 649,
+          "bank_txns": 696,
+          "bills": 2416,
+          "bills_grouped": 2139,
+          "recoveries": 3805
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-16-03.00.04.000019.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-16-03.00.04.000019.PDF"
+          ],
+          "bills": "BILL STATUS 16092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 8,
+          "auto_locked": 8,
+          "exceptions_opened": 68,
+          "exceptions_resolved": 0,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 11,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 101,
+        "statement_bronze_ids": [
+          101
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-17",
+      "statement": "HSBCINRHSBCINR2026-09-17-03.00.09.000571.PDF",
+      "bills": null,
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-17-03.00.09.000571.PDF",
+            "bronze_file_id": 103,
+            "outcome": "registered",
+            "size_bytes": 105856
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 286,
+          "bills_updated": 0,
+          "rows_reused": 0,
+          "conflicts": 0,
+          "rows_reported": 286,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 286,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 286
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 8,
+          "bank_only": 865,
+          "bill_only": 6,
+          "match_review": 1,
+          "bank_credits": 873,
+          "unrecognised_receipts": 793,
+          "bank_txns": 873,
+          "bills": 2408,
+          "bills_grouped": 2132,
+          "recoveries": 3786
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-17-03.00.09.000571.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-17-03.00.09.000571.PDF"
+          ],
+          "bills": "BILL STATUS 16092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 8,
+          "auto_locked": 7,
+          "exceptions_opened": 177,
+          "exceptions_resolved": 8,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 11,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 103,
+        "statement_bronze_ids": [
+          103
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-18",
+      "statement": "HSBCINRHSBCINR2026-09-18-03.00.24.000721.PDF",
+      "bills": "BILL STATUS 18092026.xls",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-18-03.00.24.000721.PDF",
+            "bronze_file_id": 104,
+            "outcome": "registered",
+            "size_bytes": 77424
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 18092026.xls",
+            "bronze_file_id": 105,
+            "outcome": "registered",
+            "size_bytes": 808448
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 360,
+          "bills_updated": 1845,
+          "rows_reused": 27,
+          "conflicts": 262,
+          "rows_reported": 2494,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 120,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 120
+            },
+            "bills": {
+              "inserted": 101,
+              "updated": 1845,
+              "unchanged": 27,
+              "conflicts": 262,
+              "reported": 2235
+            },
+            "recoveries": {
+              "inserted": 139,
+              "updated": 46,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 139
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 48,
+          "bank_only": 875,
+          "bill_only": 21,
+          "match_review": 2,
+          "bank_credits": 923,
+          "unrecognised_receipts": 830,
+          "bank_txns": 923,
+          "bills": 2501,
+          "bills_grouped": 2192,
+          "recoveries": 3910
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-18-03.00.24.000721.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-18-03.00.24.000721.PDF"
+          ],
+          "bills": "BILL STATUS 18092026.xls",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 48,
+          "auto_locked": 46,
+          "exceptions_opened": 53,
+          "exceptions_resolved": 28,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 12,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 104,
+        "statement_bronze_ids": [
+          104
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-19",
+      "statement": "HSBCINRHSBCINR2026-09-19-03.00.08.000554.PDF",
+      "bills": "BILL STATUS 19092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-19-03.00.08.000554.PDF",
+            "bronze_file_id": 106,
+            "outcome": "registered",
+            "size_bytes": 74849
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 19092026.xlsx",
+            "bronze_file_id": 107,
+            "outcome": "registered",
+            "size_bytes": 341901
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 190,
+          "bills_updated": 1890,
+          "rows_reused": 35,
+          "conflicts": 309,
+          "rows_reported": 2424,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 108,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 108
+            },
+            "bills": {
+              "inserted": 35,
+              "updated": 1890,
+              "unchanged": 35,
+              "conflicts": 309,
+              "reported": 2269
+            },
+            "recoveries": {
+              "inserted": 47,
+              "updated": 20,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 47
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 37,
+          "bank_only": 899,
+          "bill_only": 7,
+          "match_review": 2,
+          "bank_credits": 936,
+          "unrecognised_receipts": 850,
+          "bank_txns": 936,
+          "bills": 2488,
+          "bills_grouped": 2175,
+          "recoveries": 3850
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-19-03.00.08.000554.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-19-03.00.08.000554.PDF"
+          ],
+          "bills": "BILL STATUS 19092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 37,
+          "auto_locked": 35,
+          "exceptions_opened": 25,
+          "exceptions_resolved": 15,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 14,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 106,
+        "statement_bronze_ids": [
+          106
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-20",
+      "statement": "HSBCINRHSBCINR2026-09-20-03.00.21.000287.PDF",
+      "bills": null,
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-20-03.00.21.000287.PDF",
+            "bronze_file_id": 108,
+            "outcome": "registered",
+            "size_bytes": 60760
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 75,
+          "bills_updated": 0,
+          "rows_reused": 0,
+          "conflicts": 0,
+          "rows_reported": 75,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 75,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 75
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 0,
+          "bank_only": 940,
+          "bill_only": 7,
+          "match_review": 0,
+          "bank_credits": 940,
+          "unrecognised_receipts": 858,
+          "bank_txns": 940,
+          "bills": 2451,
+          "bills_grouped": 2139,
+          "recoveries": 3773
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-20-03.00.21.000287.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-20-03.00.21.000287.PDF"
+          ],
+          "bills": "BILL STATUS 19092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 0,
+          "auto_locked": 0,
+          "exceptions_opened": 41,
+          "exceptions_resolved": 0,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 16,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 108,
+        "statement_bronze_ids": [
+          108
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-21",
+      "statement": null,
+      "bills": "BILL STATUS 21092026.xls",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 21092026.xls",
+            "bronze_file_id": 109,
+            "outcome": "registered",
+            "size_bytes": 788992
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 54,
+          "bills_updated": 1786,
+          "rows_reused": 60,
+          "conflicts": 337,
+          "rows_reported": 2237,
+          "by_frame": {
+            "bills": {
+              "inserted": 12,
+              "updated": 1786,
+              "unchanged": 60,
+              "conflicts": 337,
+              "reported": 2195
+            },
+            "recoveries": {
+              "inserted": 42,
+              "updated": 18,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 42
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      }
+    },
+    {
+      "date": "2026-09-22",
+      "statement": "HSBCINRHSBCINR2026-09-22-03.00.16.000030.PDF",
+      "bills": "BILL STATUS 22092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-22-03.00.16.000030.PDF",
+            "bronze_file_id": 110,
+            "outcome": "registered",
+            "size_bytes": 68029
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 22092026.xlsx",
+            "bronze_file_id": 111,
+            "outcome": "registered",
+            "size_bytes": 332859
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 238,
+          "bills_updated": 1761,
+          "rows_reused": 38,
+          "conflicts": 341,
+          "rows_reported": 2378,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 123,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 123
+            },
+            "bills": {
+              "inserted": 46,
+              "updated": 1761,
+              "unchanged": 38,
+              "conflicts": 341,
+              "reported": 2186
+            },
+            "recoveries": {
+              "inserted": 69,
+              "updated": 29,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 69
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 51,
+          "bank_only": 960,
+          "bill_only": 18,
+          "match_review": 2,
+          "bank_credits": 1011,
+          "unrecognised_receipts": 905,
+          "bank_txns": 1011,
+          "bills": 2509,
+          "bills_grouped": 2194,
+          "recoveries": 3884
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-22-03.00.16.000030.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-22-03.00.16.000030.PDF"
+          ],
+          "bills": "BILL STATUS 22092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 51,
+          "auto_locked": 49,
+          "exceptions_opened": 63,
+          "exceptions_resolved": 32,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 16,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 110,
+        "statement_bronze_ids": [
+          110
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    },
+    {
+      "date": "2026-09-23",
+      "statement": "HSBCINRHSBCINR2026-09-23-03.00.18.000257.PDF",
+      "bills": "BILL STATUS 23092026.xlsx",
+      "ingest": {
+        "customer": "wabtec_daily_v2",
+        "files": [
+          {
+            "field": "statement",
+            "source_type": "bank_statement",
+            "original_name": "HSBCINRHSBCINR2026-09-23-03.00.18.000257.PDF",
+            "bronze_file_id": 112,
+            "outcome": "registered",
+            "size_bytes": 120920
+          },
+          {
+            "field": "bills",
+            "source_type": "bill_status",
+            "original_name": "BILL STATUS 23092026.xlsx",
+            "bronze_file_id": 113,
+            "outcome": "registered",
+            "size_bytes": 330131
+          }
+        ],
+        "stats": {
+          "files_reused": 0,
+          "rows_inserted": 302,
+          "bills_updated": 1668,
+          "rows_reused": 72,
+          "conflicts": 389,
+          "rows_reported": 2431,
+          "by_frame": {
+            "bank_txns": {
+              "inserted": 180,
+              "updated": 0,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 180
+            },
+            "bills": {
+              "inserted": 31,
+              "updated": 1668,
+              "unchanged": 72,
+              "conflicts": 389,
+              "reported": 2160
+            },
+            "recoveries": {
+              "inserted": 91,
+              "updated": 33,
+              "unchanged": 0,
+              "conflicts": 0,
+              "reported": 91
+            }
+          }
+        },
+        "selfcheck": null,
+        "selfchecks": []
+      },
+      "reconcile": {
+        "counts": {
+          "matched": 36,
+          "bank_only": 977,
+          "bill_only": 19,
+          "match_review": 4,
+          "bank_credits": 1013,
+          "unrecognised_receipts": 920,
+          "bank_txns": 1013,
+          "bills": 2489,
+          "bills_grouped": 2169,
+          "recoveries": 3900
+        },
+        "selfcheck": null,
+        "signal_coverage": null,
+        "config": {
+          "window_days": null,
+          "co7_lookback_days": null,
+          "date_tolerance_days": null,
+          "amount_tolerance": null,
+          "allow_batched": null,
+          "max_batch_size": null
+        },
+        "filenames": {
+          "statement": "HSBCINRHSBCINR2026-09-23-03.00.18.000257.PDF",
+          "statements": [
+            "HSBCINRHSBCINR2026-09-23-03.00.18.000257.PDF"
+          ],
+          "bills": "BILL STATUS 23092026.xlsx",
+          "rnote": null,
+          "crn": null
+        },
+        "customer": "wabtec_daily_v2",
+        "mode": "incremental",
+        "ledger": {
+          "matches_created": 36,
+          "auto_locked": 32,
+          "exceptions_opened": 29,
+          "exceptions_resolved": 11,
+          "zero_net_closed": 0,
+          "provisional_reviewed": 18,
+          "provisional_superseded": 0,
+          "provisional_kept_conflict": 0,
+          "provisional_released": 0
+        },
+        "statement_bronze_id": 112,
+        "statement_bronze_ids": [
+          112
+        ],
+        "selfchecks": [],
+        "expected_from": "2026-08-31",
+        "rules_effective": {
+          "field_map": {
+            "bank_amount_field": "amount",
+            "bill_amount_field": "net_payable_amount",
+            "bank_date_field": "value_date",
+            "bill_date_primary": "payment_advice_date",
+            "bill_date_fallback": "payment_order_date",
+            "exact_signals": [
+              {
+                "bank_field": "zone_guess",
+                "bill_field": "zone",
+                "weight": 2,
+                "key": "zone"
+              }
+            ],
+            "eligibility_field": "bill_status",
+            "fallback_due_statuses": [],
+            "reference_signals": [
+              {
+                "bank_field": "narrative",
+                "bill_field": "bill_number",
+                "weight": 8,
+                "key": "bill_ref",
+                "min_length": 6
+              }
+            ]
+          },
+          "paid_statuses": [
+            "PAYMENT MADE"
+          ],
+          "weights": {
+            "advice_date": 4,
+            "zone": 2,
+            "co7_date": 1
+          },
+          "copy_overridden": true,
+          "batch_amount_slack": 0.5,
+          "amount_decimals": 2,
+          "max_pairing_gap_days": 10
+        }
+      }
+    }
+  ]
+}
