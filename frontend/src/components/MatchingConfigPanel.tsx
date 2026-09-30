@@ -37,6 +37,7 @@ const DEFAULT_RULES: CustomerRules = {
   amount_decimals: 2,
   ar_overdue_days: 30,
   awaiting_status_days: 7,
+  max_pairing_gap_days: null,
 }
 
 /** Terminology sections in display order: section key + heading + what
@@ -364,11 +365,20 @@ export function MatchingConfigPanel({ customerId }: Props) {
             <input type="number" min={0} value={rules.awaiting_status_days}
                    onChange={(e) => patch({ awaiting_status_days: Number(e.target.value) })} />
           </label>
+          <label className="ctx-field">
+            <span className="slot-label">Pair bills up to (days old)</span>
+            <input type="number" min={0} placeholder="No limit"
+                   value={rules.max_pairing_gap_days ?? ''}
+                   onChange={(e) => patch({ max_pairing_gap_days:
+                     e.target.value === '' ? null : Number(e.target.value) })} />
+          </label>
         </div>
         <p className="explain">
           Batch amount slack: unexplained amount allowed in a batched match. Amount decimals:
           rounding precision of the amount comparison. Awaiting status: how long a credit whose
-          bill is still in flight stays excused before it counts as an exception.
+          bill is still in flight stays excused before it counts as an exception. Pair bills up to: a
+          bill whose advice date is older than this many days before the credit is never paired
+          with it; blank for no limit.
         </p>
       </div>
 

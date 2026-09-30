@@ -67,6 +67,49 @@ def pick_bill_date(row, mapping=None):
     return None, None
 
 
+def reference_hits(bank_row, bill_row, mapping=None):
+    """The reference signals whose bill value is written in the bank
+    text. A hit must stand on its own: an alphanumeric value is found
+    only when no letter/digit of the same kind runs straight into it —
+    a digit before or after a number means it is a slice of a longer
+    number (a UTR, an account), so "…SBINN52026091639731257…" never
+    names bill 2026091639. Letters beside a number are fine: IREPS glues
+    the unit code on ("1301ICF2002260301912 10")."""
+    m = mapping or DEFAULT_MAPPING
+    hits = []
+    for sig in m.reference_signals:
+        text = norm_text(bank_row.get(sig.bank_field))
+        ref = norm_text(bill_row.get(sig.bill_field))
+        if not text or not ref or len(ref) < sig.min_length:
+            continue
+        start = text.find(ref)
+        while start != -1:
+            end = start + len(ref)
+            before = text[start - 1] if start else ""
+            after = text[end] if end < len(text) else ""
+            clash = ((ref[0].isdigit() and before.isdigit())
+                     or (ref[-1].isdigit() and after.isdigit())
+                     or (ref[0].isalpha() and before.isalpha())
+                     or (ref[-1].isalpha() and after.isalpha()))
+            if not clash:
+                hits.append(sig)
+                break
+            start = text.find(ref, start + 1)
+    return hits
+
+
+def pairing_allowed(bank_date, bill_date, date_tolerance_days=2,
+                    max_pairing_gap_days=None):
+    """MatchRuleSet.max_pairing_gap_days: is this bill's compared date
+    close enough to the credit to be its payment at all? None = no window;
+    an undated side cannot be judged and is allowed."""
+    if max_pairing_gap_days is None or bill_date is None \
+            or bank_date is None or pd.isna(bank_date) or pd.isna(bill_date):
+        return True
+    days_before = (pd.Timestamp(bank_date) - pd.Timestamp(bill_date)).days
+    return -date_tolerance_days <= days_before <= max_pairing_gap_days
+
+
 def score_pair(bank_row, bill_row, date_tolerance_days=2, weights=None,
                mapping=None):
     """
@@ -107,6 +150,10 @@ def score_pair(bank_row, bill_row, date_tolerance_days=2, weights=None,
     for sig, ok in zip(m.exact_signals, checks):
         if ok:
             score += (w.get(sig.key, sig.weight) if sig.key else sig.weight)
+    # ranking only: a named bill outranks the unnamed ones, the label
+    # below still reads the exact + date signals alone
+    for sig in reference_hits(bank_row, bill_row, m):
+        score += (w.get(sig.key, sig.weight) if sig.key else sig.weight)
 
     return score, exact_ok, date_check, date_gap, date_source
 

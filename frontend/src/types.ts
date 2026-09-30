@@ -560,6 +560,16 @@ export interface FieldMap {
   exact_signals: ExactSignal[]
   eligibility_field: string
   fallback_due_statuses: string[]
+  /** bill identifiers looked for in a bank text field (narrative); absent = server defaults */
+  reference_signals?: ReferenceSignal[]
+}
+
+export interface ReferenceSignal {
+  bank_field: string
+  bill_field: string
+  weight: number
+  key: string | null
+  min_length: number
 }
 
 /** Advisory-copy dictionaries keyed by section then frozen code. */
@@ -584,6 +594,8 @@ export interface CustomerRules {
   ar_overdue_days: number
   /** days a credit is excused while its bill's status lags (Awaiting data) */
   awaiting_status_days: number
+  /** pairing window: max days a bill's date may precede the credit; null = no window */
+  max_pairing_gap_days: number | null
 }
 
 export interface CustomerConfig {

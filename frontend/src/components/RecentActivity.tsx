@@ -77,8 +77,12 @@ function describe(e: AuditEventRow, finalized: Map<string, Record<string, unknow
     case 'ledger.match_rejected':
       return { ...base, icon: X, tone: 'warn', title: `${label} rejected`, detail: bill }
     case 'ledger.match_superseded':
-      return { ...base, icon: RotateCcw, tone: 'info', title: `${label} replaced`,
-               detail: d.superseded_by_seq ? `by M-${String(d.superseded_by_seq)}` : undefined }
+      return d.reason
+        ? { ...base, icon: RotateCcw, tone: 'info', title: `${label} released`,
+            detail: d.reason === 'BILL_TAKEN_BY_HIGH' ? 'bill paired with a later credit'
+              : 'bill outside the pairing window' }
+        : { ...base, icon: RotateCcw, tone: 'info', title: `${label} replaced`,
+            detail: d.superseded_by_seq ? `by M-${String(d.superseded_by_seq)}` : undefined }
     case 'ledger.match_unlocked':
       return { ...base, icon: Unlock, tone: 'warn', title: `${label} unlocked`, detail: bill }
     case 'ledger.match_reopened':

@@ -126,6 +126,7 @@ def run_snapshot(session, customer_id: int, statement_bronze_ids,
         copy_overrides=rules.copy_overrides,
         batch_amount_slack=rules.batch_amount_slack,
         amount_decimals=rules.amount_decimals,
+        max_pairing_gap_days=rules.max_pairing_gap_days,
     )
     out["bank"] = f["bank_df"]
     out["bank_all"] = f["bank_all_df"]

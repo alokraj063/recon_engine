@@ -277,6 +277,7 @@ def _effective_rules(rule_row, form_config):
             "amount_decimals": rule_row.amount_decimals,
             "ar_overdue_days": rule_row.ar_overdue_days,
             "awaiting_status_days": rule_row.awaiting_status_days,
+            "max_pairing_gap_days": rule_row.max_pairing_gap_days,
         }
     return MatchRuleSet().merged(db_overrides).merged(form_config)
 
@@ -335,6 +336,7 @@ def _build_payload(out, form_config, selfcheck, names, customer_key,
             "copy_overridden": bool(rules.copy_overrides),
             "batch_amount_slack": rules.batch_amount_slack,
             "amount_decimals": rules.amount_decimals,
+            "max_pairing_gap_days": rules.max_pairing_gap_days,
         }
     return payload
 
@@ -1741,6 +1743,14 @@ class ExactSignalBody(BaseModel):
     key: str | None = None
 
 
+class ReferenceSignalBody(BaseModel):
+    bank_field: str
+    bill_field: str
+    weight: int = 8
+    key: str | None = None
+    min_length: int = 6
+
+
 class FieldMapBody(BaseModel):
     bank_amount_field: str
     bill_amount_field: str
@@ -1750,6 +1760,9 @@ class FieldMapBody(BaseModel):
     exact_signals: list[ExactSignalBody] = []
     eligibility_field: str
     fallback_due_statuses: list[str] = []
+    # None = keep the default reference signals (a client that predates
+    # them must not switch them off by saving); [] = explicitly none
+    reference_signals: list[ReferenceSignalBody] | None = None
 
 
 class RulesBody(BaseModel):
@@ -1770,6 +1783,8 @@ class RulesBody(BaseModel):
     amount_decimals: int = 2
     ar_overdue_days: int = 30
     awaiting_status_days: int = 7
+    # None = no pairing window
+    max_pairing_gap_days: int | None = None
 
 
 def _validate_rules(body: RulesBody):
@@ -1794,6 +1809,12 @@ def _validate_rules(body: RulesBody):
         need(sig.bill_field, bill_fields, "signal bill field")
         if sig.weight < 1:
             _fail(400, "INVALID_INPUT", "signal weights must be positive")
+    for sig in fm.reference_signals or []:
+        need(sig.bank_field, bank_fields, "reference signal bank field")
+        need(sig.bill_field, bill_fields, "reference signal bill field")
+        if sig.weight < 1 or sig.min_length < 1:
+            _fail(400, "INVALID_INPUT",
+                  "reference signal weight and min_length must be positive")
     if any(w < 1 for w in body.weights.values()):
         _fail(400, "INVALID_INPUT", "weights must be positive")
     if body.date_tolerance_days < 0 or body.amount_tolerance < 0 \
@@ -1811,6 +1832,8 @@ def _validate_rules(body: RulesBody):
         _fail(400, "INVALID_INPUT", "ar_overdue_days must be >= 0")
     if body.awaiting_status_days < 0:
         _fail(400, "INVALID_INPUT", "awaiting_status_days must be >= 0")
+    if body.max_pairing_gap_days is not None and body.max_pairing_gap_days < 0:
+        _fail(400, "INVALID_INPUT", "max_pairing_gap_days must be >= 0")
     if body.copy_overrides:
         known_codes = {code for section in DEFAULT_COPY.values()
                        for code in section}
@@ -1850,6 +1873,7 @@ def _rules_to_dict(rules: MatchRuleSet) -> dict:
         "amount_decimals": rules.amount_decimals,
         "ar_overdue_days": rules.ar_overdue_days,
         "awaiting_status_days": rules.awaiting_status_days,
+        "max_pairing_gap_days": rules.max_pairing_gap_days,
     }
 
 
@@ -1916,7 +1940,10 @@ def put_customer_config(customer_key: str, body: RulesBody):
     paid_statuses + weights + field mapping)."""
     _validate_rules(body)
     # normalize the field map through the dataclass round-trip
-    field_map = FieldMapping.from_dict(body.field_map.model_dump()).to_dict()
+    fm_dict = body.field_map.model_dump()
+    if fm_dict.get("reference_signals") is None:
+        fm_dict.pop("reference_signals", None)
+    field_map = FieldMapping.from_dict(fm_dict).to_dict()
     with SessionLocal() as session:
         customer, _sources, rule_row = _load_customer_context(
             session, customer_key)
@@ -1951,6 +1978,7 @@ def put_customer_config(customer_key: str, body: RulesBody):
         rule_row.amount_decimals = body.amount_decimals
         rule_row.ar_overdue_days = body.ar_overdue_days
         rule_row.awaiting_status_days = body.awaiting_status_days
+        rule_row.max_pairing_gap_days = body.max_pairing_gap_days
         session.flush()
         changes = config_changes(before, _audited_rules(rule_row))
         # a save that changed nothing is not a configuration change

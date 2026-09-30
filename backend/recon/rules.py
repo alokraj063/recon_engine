@@ -50,6 +50,36 @@ class ExactSignal:
 
 
 @dataclass(frozen=True)
+class ReferenceSignal:
+    """The bill's own identifier written inside a bank text field — IREPS
+    production units (ICF, RCF…) put the bill number straight into the
+    NEFT narrative ("NEFT FROM 1301ICF2002260301912 10 …"). Found = the
+    credit NAMES that bill, the strongest evidence there is, so it only
+    ever adds to a pairing's score: among bills sharing the credit's
+    amount the named one outranks every unnamed one, which also breaks an
+    AMBIGUOUS tie. It never makes a pairing HIGH on its own — confidence
+    labels stay derived from the exact + date signals. A bill value
+    shorter than `min_length` is never looked for (a short number turns
+    up inside any long digit run by chance)."""
+    bank_field: str
+    bill_field: str
+    weight: int = 8
+    key: Optional[str] = None
+    min_length: int = 6
+
+    def to_dict(self) -> dict:
+        return {"bank_field": self.bank_field, "bill_field": self.bill_field,
+                "weight": self.weight, "key": self.key,
+                "min_length": self.min_length}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ReferenceSignal":
+        return cls(bank_field=d["bank_field"], bill_field=d["bill_field"],
+                   weight=int(d.get("weight", 8)), key=d.get("key"),
+                   min_length=int(d.get("min_length", 6)))
+
+
+@dataclass(frozen=True)
 class FieldMapping:
     """Which gold columns drive matching. Defaults reproduce the
     historical hardcoded behaviour exactly (golden-gated).
@@ -78,6 +108,13 @@ class FieldMapping:
     # expected to be paid. A customer whose source advises differently can
     # put its own statuses back.
     fallback_due_statuses: Tuple[str, ...] = ()
+    # Bill identifiers looked for inside a bank text field (see
+    # ReferenceSignal). ON by default since 2026-09-30: on the 31 Aug-
+    # 22 Sep load every ICF/RCF credit carried its bill number, and in 19
+    # of 24 AMBIGUOUS ties the narrative named a bill the matcher had not
+    # picked. Weight key "bill_ref" lets the weights dict override it.
+    reference_signals: Tuple[ReferenceSignal, ...] = (
+        ReferenceSignal("narrative", "bill_number", 8, key="bill_ref"),)
 
     def to_dict(self) -> dict:
         return {
@@ -89,6 +126,7 @@ class FieldMapping:
             "exact_signals": [s.to_dict() for s in self.exact_signals],
             "eligibility_field": self.eligibility_field,
             "fallback_due_statuses": list(self.fallback_due_statuses),
+            "reference_signals": [s.to_dict() for s in self.reference_signals],
         }
 
     @classmethod
@@ -111,6 +149,10 @@ class FieldMapping:
         if "fallback_due_statuses" in d:
             kwargs["fallback_due_statuses"] = tuple(
                 d["fallback_due_statuses"] or ())
+        if "reference_signals" in d:         # explicit [] turns them off
+            kwargs["reference_signals"] = tuple(
+                ReferenceSignal.from_dict(s)
+                for s in (d["reference_signals"] or ()))
         return cls(**kwargs)
 
 
@@ -142,6 +184,16 @@ class MatchRuleSet:
     # status". Past it the status lag is a process problem, not a timing
     # quirk, and the credit counts as an ordinary unmatched exception.
     awaiting_status_days: int = 7
+    # Pairing window: a bill is only a candidate for a credit when its
+    # compared date (advice, else payment order) lies at most this many
+    # days BEFORE the credit's date — and never more than
+    # date_tolerance_days AFTER it (money does not arrive before IREPS
+    # advises the bank). A bill with no date at all is not judged. None =
+    # no window (the historical behaviour): an incremental pool keeps
+    # every unconsumed bill, so a bill paid before the bank data starts
+    # looks unpaid for ever and pairs, on amount alone, with a much later
+    # credit of the same amount.
+    max_pairing_gap_days: Optional[int] = None
 
     def merged(self, overrides: Optional[dict]) -> "MatchRuleSet":
         """A copy with any non-None overrides applied. Unknown keys are

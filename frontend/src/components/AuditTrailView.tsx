@@ -178,6 +178,7 @@ const DETAIL_LABEL: Record<string, string> = {
   via: 'Changed from',
   confidence: 'Confidence',
   exceptions_resolved: 'Exceptions closed',
+  zero_net_closed: 'Nil-payable bills closed',
   was_confidence: 'Was',
   superseded_by_seq: 'Replaced by match',
   exceptions_reopened: 'Exceptions reopened',

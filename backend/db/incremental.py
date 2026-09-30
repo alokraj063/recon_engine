@@ -31,7 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from logging_setup import get_logger, run_id_var
 from recon.engine import REVIEW_CONFIDENCE, exception_queue, reconcile
 from recon.gold import ensure_schema
-from recon.matching.scoring import norm_text
+from recon.matching.scoring import norm_text, pairing_allowed, pick_bill_date
 from recon.rules import FieldMapping, MatchRuleSet
 
 from .audit import actor_id, record_event
@@ -404,6 +404,7 @@ def _engine_reconcile(bank_df, bills_df, lineage_df, rules: MatchRuleSet,
         amount_decimals=rules.amount_decimals,
         unmatchable=unmatchable,
         expected_from=expected_from,
+        max_pairing_gap_days=rules.max_pairing_gap_days,
     )
 
 
@@ -502,6 +503,34 @@ def _write_match(session, customer_id: int, run_id: str, r, gold_txn: str,
     return ledger, links
 
 
+# ExpectedBasis code (recon.engine._expected_bills, FROZEN) of a bill
+# whose net payable is nil: nothing is due, so its missing credit is not
+# a shortfall and never becomes an OPEN BILL_ONLY exception
+ZERO_NET_BASIS = "ZERO_NET_NOTHING_DUE"
+
+
+def _close_zero_net_bill_only(session, customer_id: int, run_id: str,
+                              now: datetime) -> int:
+    """RESOLVE (by RUN, no match) every OPEN BILL_ONLY row whose bill's
+    net payable is nil — the same test the engine's ZERO_NET_NOTHING_DUE
+    label applies (NULL counts as nil). Returns how many it closed."""
+    rows = session.execute(
+        select(ExceptionLedger)
+        .join(GoldBill, GoldBill.id == ExceptionLedger.gold_bill_id)
+        .where(ExceptionLedger.customer_id == customer_id,
+               ExceptionLedger.exception_type == "BILL_ONLY",
+               ExceptionLedger.status == "OPEN",
+               func.coalesce(GoldBill.net_payable_amount, 0) == 0)).scalars().all()
+    for row in rows:
+        row.status = "RESOLVED"
+        row.resolved_by = "RUN"
+        row.resolved_by_run_id = run_id
+        row.resolved_by_match_id = None
+        row.resolved_by_user_id = None
+        row.resolved_at = now
+    return len(rows)
+
+
 def finalize_ledger(session, customer_id: int, run_id: str, out,
                     bank_ids: List[str], bill_ids: List[str]
                     ) -> Tuple[dict, List[dict], Dict[str, str]]:
@@ -588,10 +617,20 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
                 row = session.get(ExceptionLedger, open_bank[gid])
                 if row is not None and row.gap_type != gap:
                     row.gap_type = gap
+    # a nil-payable bill (deductions consumed it all) can never be paid by
+    # a credit: it stays in the run's bill_only frame, labelled, but is
+    # never an OPEN ledger exception — and one opened before this rule
+    # (or reopened since) is closed here, by RUN, with no match
+    stats["zero_net_closed"] = _close_zero_net_bill_only(
+        session, customer_id, run_id, now)
     open_bill = _open_exceptions(session, customer_id, "BILL_ONLY")
     if not out["bill_only"].empty:
+        basis = (out["bill_only"]["ExpectedBasis"]
+                 if "ExpectedBasis" in out["bill_only"].columns else None)
         for pos in out["bill_only"].index:
             gid = bill_ids[int(pos)]
+            if basis is not None and basis.loc[pos] == ZERO_NET_BASIS:
+                continue
             if gid not in open_bill:
                 session.add(ExceptionLedger(
                     customer_id=customer_id, exception_type="BILL_ONLY",
@@ -606,6 +645,35 @@ def finalize_ledger(session, customer_id: int, run_id: str, out,
 # locked_by of a review match a later run replaced with a HIGH pairing
 # (the row is REJECTED, decided by the system, not by a user)
 SUPERSEDED_BY = "AUTO_SUPERSEDED"
+
+# decision_note of a weak match rescore_provisional released without a
+# replacement of its own; the key is the audit event's details.reason
+RELEASE_NOTES = {
+    "BILL_TAKEN_BY_HIGH": ("Released: a later credit pairs HIGH with this "
+                           "bill"),
+    "OUTSIDE_PAIRING_WINDOW": ("Released: the bill's date is outside the "
+                               "pairing window"),
+}
+
+
+def _pairing_still_allowed(session, m: MatchLedger, bill_gids,
+                           rules: MatchRuleSet) -> bool:
+    """Would the pairing window (rules.max_pairing_gap_days) still allow
+    every picked bill of this match for its credit?"""
+    mapping = rules.field_map or FieldMapping()
+    txn = session.get(GoldBankTxn, m.gold_bank_txn_id)
+    bank_date = getattr(txn, mapping.bank_date_field, None) if txn else None
+    for gid in bill_gids:
+        bill = session.get(GoldBill, gid)
+        if bill is None:
+            continue
+        row = {f: getattr(bill, f, None) for f in
+               (mapping.bill_date_primary, mapping.bill_date_fallback) if f}
+        bill_date, _src = pick_bill_date(row, mapping)
+        if not pairing_allowed(bank_date, bill_date, rules.date_tolerance_days,
+                               rules.max_pairing_gap_days):
+            return False
+    return True
 
 
 def rescore_provisional(session, customer_id: int, run_id: str,
@@ -637,9 +705,27 @@ def rescore_provisional(session, customer_id: int, run_id: str,
     match. The bills a superseded match gave up are simply free again; the
     run's own matching, which follows, reports them.
 
+    Two more reasons RELEASE an untouched weak match without a replacement
+    of its own (REJECTED, locked_by AUTO_SUPERSEDED, the reason in
+    decision_note; its credit re-opens as a BANK_ONLY exception exactly as
+    reject_match does, so it rejoins the run's pool):
+      BILL_TAKEN_BY_HIGH  in the joint re-score another credit — one of
+                          this run's or a carried exception, NOT a released
+                          one — pairs HIGH with a bill the match holds. The
+                          old rule only asked whether the weak match's OWN
+                          credit could do better, so a later credit that
+                          was the bill's real payment (M-274: an 08-Sep
+                          credit on a bill advised 15-Sep, the exact credit
+                          arriving 16-Sep) stayed an exception for ever.
+                          The run's own matching then gives it the bill.
+      OUTSIDE_PAIRING_WINDOW  a picked bill's date is outside the customer's
+                          pairing window (max_pairing_gap_days) — a match
+                          made before the window was set, which the rule
+                          would no longer allow.
+
     Returns counts for the run's ledger stats. Never commits."""
     stats = {"provisional_reviewed": 0, "provisional_superseded": 0,
-             "provisional_kept_conflict": 0}
+             "provisional_kept_conflict": 0, "provisional_released": 0}
     prov = list(session.execute(
         select(MatchLedger).where(
             MatchLedger.customer_id == customer_id,
@@ -660,32 +746,65 @@ def rescore_provisional(session, customer_id: int, run_id: str,
     out = _engine_reconcile(bank_df, pool["bills_df"], pool["lineage_df"],
                             rules, unmatchable, None)
     out["bank"] = bank_df
-    if out["matched"].empty:
-        return stats
 
     txn_by_row = _matched_txn_ids(out, bank_ids)
     rows = list(out["matched"].itertuples())
-    todo = [(rows[i], txn) for i, txn in txn_by_row.items()
-            if rows[i].confidence == "HIGH" and txn in by_credit]
+    highs = [(rows[i], txn) for i, txn in txn_by_row.items()
+             if rows[i].confidence == "HIGH"]
+    todo = [(r, txn) for r, txn in highs if txn in by_credit]
+    upgraded = {txn for _r, txn in todo}
+    picked = {m.id: _picked_bill_ids(session, m.id) for m in prov}
+
+    # weak matches released with no replacement of their own
+    release_why: Dict[str, str] = {}
+    taken = {bill_ids[int(x)] for r, txn in highs if txn not in by_credit
+             for x in r.bill_indices}
+    for m in prov:
+        if m.gold_bank_txn_id in upgraded:
+            continue
+        if picked[m.id] & taken:
+            release_why[m.id] = "BILL_TAKEN_BY_HIGH"
+        elif rules.max_pairing_gap_days is not None \
+                and not _pairing_still_allowed(session, m, picked[m.id], rules):
+            release_why[m.id] = "OUTSIDE_PAIRING_WINDOW"
+
     considered = len(todo)
-    # drop any upgrade that takes a bill a match we are NOT replacing holds;
-    # dropping one keeps its match, so repeat until nothing changes
+    # drop any upgrade that takes a bill a match we are NOT replacing (nor
+    # releasing) holds; dropping one keeps its match, so repeat until
+    # nothing changes
     while True:
         replacing = {txn for _r, txn in todo}
         kept_bills = set()
         for m in prov:
-            if m.gold_bank_txn_id not in replacing:
-                kept_bills |= _picked_bill_ids(session, m.id)
+            if m.gold_bank_txn_id not in replacing and m.id not in release_why:
+                kept_bills |= picked[m.id]
         ok = [(r, txn) for r, txn in todo
               if not {bill_ids[int(x)] for x in r.bill_indices} & kept_bills]
         if len(ok) == len(todo):
             break
         todo = ok
     stats["provisional_kept_conflict"] = considered - len(todo)
+
+    now = utcnow()
+    for m in prov:
+        why = release_why.get(m.id)
+        if why is None:
+            continue
+        m.status = "REJECTED"
+        m.locked_by = SUPERSEDED_BY
+        m.locked_at = now
+        m.decision_note = RELEASE_NOTES[why]
+        reopened = _reopen_exceptions_for_match(session, m, bills=False)
+        record_event(session, logger, event_type="ledger.match_superseded",
+                     customer_id=customer_id, run_id=run_id,
+                     entity_type="match_ledger", entity_id=m.id,
+                     details={"was_confidence": m.confidence,
+                              "reason": why,
+                              "exceptions_reopened": reopened})
+        stats["provisional_released"] += 1
     if not todo:
         return stats
 
-    now = utcnow()
     next_seq = (session.execute(
         select(func.max(MatchLedger.seq))
         .where(MatchLedger.customer_id == customer_id)).scalar() or 0) + 1
