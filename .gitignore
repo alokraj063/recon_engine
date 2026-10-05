@@ -35,9 +35,14 @@ backend/data/
 
 # local AWS deployment scripts / IAM policies (not versioned here)
 deploy/
+har_files/
 
 # local copies of backend/data taken before a wipe / re-ingest
 data_backup_*/
 
 # partial copies of backend/data (real business data)
 data_partial_*/
+
+# personal scratch work (notebooks with credentials, one-off scripts)
+scratch/
+.pytest_cache/

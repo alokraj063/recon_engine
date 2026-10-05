@@ -1,0 +1,25 @@
+# Sites for ECM_ENV=TEST. Source: Henri Jézo's emails of 2026-09-28.
+#
+#   site_id     scopes every search (ecm:ancestorId = site_id)
+#   locations   named folders. Paths contain real spaces: the spreadsheet writes them
+#               URL-encoded (%20), so decode before pasting here.
+#               A path may contain {field_key} placeholders, e.g. {invoice_number}.
+#               A search that supplies the field gets the exact folder; otherwise it
+#               looks under the part before the placeholder.
+
+[sites.hosur]
+name = "Hosur"
+site_id = "ad5090e5-648d-4f75-8c14-7052e8ac3b72"
+
+[sites.hosur.locations]
+inputs  = "/FT/workspaces/Sites/HSR/Invoice Certificate - TS/Inputs"
+tenders = "/FT/workspaces/Sites/HSR/Invoice Certificate - TS/Tenders"
+# storage: TEST path not supplied yet (PROD is .../Invoice Certificate/Storage/{invoice_number})
+
+[sites.rohtak]
+name = "Rohtak"
+site_id = "34a61f51-10fe-44ce-a669-2ea14dc86ff4"
+
+[sites.rohtak.locations]
+inputs = "/FT/workspaces/Sites/BRH - FT India (HPD) - R/Invoice Certificate/Inputs"
+# storage, tenders: TEST paths not supplied yet

@@ -1,0 +1,21 @@
+# Sites for ECM_ENV=PROD. Source: "Download and Upload v1.xlsx" (paths and the
+# ancestorId values in its "Query to retrieve" column). Henri's email gives different
+# TEST ids and paths, so the spreadsheet's are taken to be production. Confirm before
+# first PROD use. Format: see sites.test.toml.
+
+[sites.hosur]
+name = "Hosur"
+site_id = "7dfe3fc0-3157-489d-826a-9435e65631fc"
+
+[sites.hosur.locations]
+inputs  = "/FT/workspaces/Sites/HSR/Invoice Certificate/Inputs"
+storage = "/FT/workspaces/Sites/HSR/Invoice Certificate/Storage/{invoice_number}"
+# tenders: PROD path not supplied yet
+
+[sites.rohtak]
+name = "Rohtak"
+site_id = "f2a5bf87-877b-4e4c-b4fc-7301cabfd236"
+
+[sites.rohtak.locations]
+inputs  = "/FT/workspaces/Sites/HPD/Invoice Certificate/Input"     # "Input", singular, as in the spreadsheet
+storage = "/FT/workspaces/Sites/HPD/Invoice Certificate/Storage/{invoice_number}"

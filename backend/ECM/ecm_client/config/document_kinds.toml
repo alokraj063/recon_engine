@@ -1,0 +1,162 @@
+# Document kinds held in the ECM. Shared by every environment (TEST / PROD).
+#
+# Edit freely: the gateway validates this file when it loads and names every mistake.
+# Sources: "Download and Upload v1.xlsx" (order processing team) and Henri Jézo's
+# email of 2026-09-28.
+#
+# A kind is one value of `type_property`. Every kind is the Nuxeo document type
+# `doc_type` unless it sets its own.
+#
+# Per kind:
+#   label      display name
+#   locations  where documents of this kind live, as keys of [sites.<site>.locations]
+#              in sites.<env>.toml. A search always scopes to the SITE (ecm:ancestorId,
+#              exactly as Oceane's queries do); `location` only narrows it when asked for.
+#   fields     metadata (keys of [fields] below) returned with each document and
+#              accepted as search filters
+#   filters    conditions every search for this kind adds, e.g. only signed invoices
+#   upload     present only when the gateway may CREATE this kind:
+#                location = where new documents go
+#                required = fields that must be supplied (title, type and the file
+#                           are always required)
+
+doc_type = "InvoiceCertificate"
+type_property = "InvoiceCertificateSchema:type"
+
+# Metadata fields: short key -> Nuxeo property.
+# Long form: { property = "...", type = "string" | "date" | "boolean" | "integer", list = true }
+#   type  how a filter or upload value is converted (default string)
+#   list  a multi-valued property; filters match any element
+[fields]
+invoice_number             = "InvoiceCertificateSchema:invoiceNumber"
+customer_po_number         = "InvoiceCertificateSchema:customerPONumber"
+ic_number                  = "InvoiceCertificateSchema:icNumber"
+ic_date                    = "InvoiceCertificateSchema:icDate"
+co_number                  = "InvoiceCertificateSchema:coNumber"
+months_guarantee           = "InvoiceCertificateSchema:monthsGuarantee"
+modification_advise_number = "InvoiceCertificateSchema:modificationAdviseNumber"
+customer_id                = { property = "CustomerCommonSchema:customerId", list = true }
+is_signed                  = { property = "InvoiceCertificateSchema:isSigned", type = "boolean" }
+tender_number              = "InvoiceCertificateSchema:tenderNumber"
+tender_date                = { property = "InvoiceCertificateSchema:tenderDate", type = "date" }
+
+
+# ---------------------------------------------------------------------------
+# Order processing: from the spreadsheet ("Query to retrieve" column)
+# ---------------------------------------------------------------------------
+
+[kinds.inspectionCertificate]
+label = "Inspection Certificate"
+locations = ["inputs", "storage"]
+fields = ["invoice_number", "customer_po_number", "ic_number", "ic_date", "co_number"]
+# Spreadsheet's mandatory metadata to CREATE one: title, file, type, invoice_number,
+# customer_po_number, ic_number, ic_date, co_number. Upload not enabled yet.
+
+[kinds.poCopy]
+label = "PO copy"
+locations = ["inputs"]
+fields = ["customer_id", "customer_po_number", "months_guarantee"]
+# To create: title, file, type, customer_id (list of MDM customer ids, e.g.
+# CU0000860803YHR), customer_po_number, months_guarantee. Upload not enabled yet.
+
+[kinds.modificationAdvise]
+label = "MA copy (Modification Advice)"
+locations = ["inputs"]
+fields = ["customer_id", "customer_po_number", "modification_advise_number"]
+# To create: title, file, type, customer_id, customer_po_number,
+# modification_advise_number. Upload not enabled yet.
+
+[kinds.taxInvoice]
+label = "Invoice copy"
+locations = ["inputs", "storage"]
+fields = ["invoice_number", "is_signed"]
+filters = { is_signed = true }          # spreadsheet: only signed invoices
+
+[kinds.garrantyWarrantyCertificate]      # spelling is the ECM's id; do not correct it
+label = "GC/WC (Guarantee/Warranty Certificate)"
+locations = ["inputs", "storage"]
+fields = ["invoice_number"]
+
+[kinds.modvatDeclarationCertificate]
+label = "Modvat Declaration"
+locations = ["inputs", "storage"]
+fields = ["invoice_number"]
+
+[kinds.workCertificate]
+label = "WTC (Work Test Certificate)"
+locations = ["inputs", "storage"]
+fields = ["invoice_number"]
+
+
+# ---------------------------------------------------------------------------
+# IREPS reports: Henri Jézo, 2026-09-28 (Inputs folder)
+# ---------------------------------------------------------------------------
+
+[kinds.rNoteReports]
+label = "R-Note report"
+locations = ["inputs"]
+fields = ["invoice_number"]
+upload = { location = "inputs", required = ["invoice_number"] }
+
+[kinds.crnReports]
+label = "CRN report"
+locations = ["inputs"]
+fields = ["invoice_number"]
+upload = { location = "inputs", required = ["invoice_number"] }
+
+[kinds.rejectionAdvise]
+label = "Rejection advice"
+locations = ["inputs"]
+fields = ["invoice_number"]
+upload = { location = "inputs", required = ["invoice_number"] }
+
+[kinds.recoveriesReport]
+label = "Recoveries report"
+locations = ["inputs"]
+upload = { location = "inputs" }
+
+[kinds.billStatus]
+label = "Bill status report"
+locations = ["inputs"]
+upload = { location = "inputs" }
+
+
+# ---------------------------------------------------------------------------
+# Tenders: Henri Jézo, 2026-09-28 (Tenders folder)
+# ---------------------------------------------------------------------------
+
+[kinds.loi]
+label = "LOI"
+locations = ["tenders"]
+fields = ["tender_number", "tender_date"]
+upload = { location = "tenders", required = ["tender_number", "tender_date"] }
+
+[kinds.vft]
+label = "VFT"
+locations = ["tenders"]
+fields = ["tender_number", "tender_date"]
+upload = { location = "tenders", required = ["tender_number", "tender_date"] }
+
+[kinds.nbsp]
+label = "NBSP"
+locations = ["tenders"]
+fields = ["tender_number", "tender_date"]
+upload = { location = "tenders", required = ["tender_number", "tender_date"] }
+
+[kinds.extension]
+label = "Extension"
+locations = ["tenders"]
+fields = ["tender_number", "tender_date"]
+upload = { location = "tenders", required = ["tender_number", "tender_date"] }
+
+[kinds.crp]
+label = "CRP"
+locations = ["tenders"]
+fields = ["tender_number", "tender_date"]
+upload = { location = "tenders", required = ["tender_number", "tender_date"] }
+
+[kinds.co]
+label = "CO"
+locations = ["tenders"]
+fields = ["tender_number", "tender_date"]
+upload = { location = "tenders", required = ["tender_number", "tender_date"] }
