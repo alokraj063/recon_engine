@@ -51,6 +51,7 @@ from recon.sources import resolve_adapter, role_of
 
 from . import runs
 from .auth import require_role, require_user
+from .users import router as users_router
 from .serialize import clean, df_to_records, summary_records
 
 # Every route below is gated in ONE place. A route added later is
@@ -58,6 +59,7 @@ from .serialize import clean, df_to_records, summary_records
 # remembered to decorate it. Public by construction: /api/health and
 # /api/auth/* are registered elsewhere (app/main.py, app/auth.py).
 router = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
+router.include_router(users_router)
 logger = get_logger(__name__)
 
 # legacy upload field -> slot source_type. Slots beyond these four (extra
