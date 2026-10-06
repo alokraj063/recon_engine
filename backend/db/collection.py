@@ -183,7 +183,8 @@ def ar_lookup(session, customer_pk: int, invoice_numbers: Iterable[str]) -> Dict
             if agg is None:
                 per[key] = {"statement_date": r.statement_date,
                             "bronze_file_id": r.bronze_file_id,
-                            "due_date": r.due_date, "sales_rep": r.sales_rep,
+                            "due_date": r.due_date, "customer_name": r.customer_name,
+                            "sales_rep": r.sales_rep,
                             "sales_order_type": r.sales_order_type,
                             "category": r.category, "subcategory": r.subcategory,
                             "functional_amount": r.functional_amount,

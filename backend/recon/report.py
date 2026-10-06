@@ -3,6 +3,8 @@ Excel output. Nothing here decides anything; it only lays out frames the
 engine already produced.
 """
 
+from datetime import datetime
+
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -152,8 +154,21 @@ WEBADI_META_KEYS = ("BATCH_ID", "RESPONSIBILITY", "OU_NAME_RESP", "USER_NAME",
                     "DATABASE", "CREATION_DATE")
 _WEBADI_MONEY = {"Receipt Amount", "Receipt Amount Applied", "Adjustment Amount",
                  "Factoring Amount"}
+_WEBADI_DATES = {"Receipt Date", "GL Date"}
+_WEBADI_DATE_FORMAT = "dd\\-mmm\\-yyyy"      # the template's own format
 _WEBADI_HEADER_ROW = 15
 _WEBADI_FILL = PatternFill("solid", fgColor="DDEBF7")
+
+
+def _adi_date(v):
+    """The records carry the ADI's DD-Mon-YYYY text (what the preview shows);
+    the template's date cells are real dates, so parse it back for the file."""
+    if isinstance(v, str):
+        try:
+            return datetime.strptime(v.strip(), "%d-%b-%Y")
+        except ValueError:
+            return v
+    return v
 
 
 def write_webadi_workbook(sheets, path):
@@ -169,7 +184,10 @@ def write_webadi_workbook(sheets, path):
         meta = sheet.get("meta") or {}
         for i, key in enumerate(WEBADI_META_KEYS):
             ws.cell(row=4 + i, column=2, value=key)
-            ws.cell(row=4 + i, column=4, value=meta.get(key))
+            c = ws.cell(row=4 + i, column=4, value=(
+                _adi_date(meta.get(key)) if key == "CREATION_DATE" else meta.get(key)))
+            if key == "CREATION_DATE":
+                c.number_format = _WEBADI_DATE_FORMAT
         ws.cell(row=11, column=2, value="HEADER1")
         ws.cell(row=11, column=4, value="* Text")
         ws.cell(row=11, column=5,
@@ -188,9 +206,14 @@ def write_webadi_workbook(sheets, path):
             for j, head in enumerate(WEBADI_COLUMNS):
                 if head is None:
                     continue
+                value = _cell(rec.get(head))
+                if head in _WEBADI_DATES:
+                    value = _adi_date(value)
                 c = ws.cell(row=_WEBADI_HEADER_ROW + 2 + r, column=2 + j,
-                            value=_cell(rec.get(head)))
+                            value=value)
                 c.font = BODY_FONT
+                if head in _WEBADI_DATES and isinstance(value, datetime):
+                    c.number_format = _WEBADI_DATE_FORMAT
                 if head in _WEBADI_MONEY:
                     c.number_format = "0.00"
         ws.column_dimensions["A"].width = 3

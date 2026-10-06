@@ -26,8 +26,8 @@ Column sources (spec 2026-09-30, Mapping sheet of the team's file):
   Receipt No. / Receipts Date       not required, blank
   BRANCH                            category master -> Subcategory -> code
   Invoice Value                     AR statement: functional amount, open
-  OD/NOD                            OD when the credit came after the AR
-                                    due date, else NOD
+  OD/NOD                            the AR due date's bucket against the
+                                    sheet's fiscal month (see od_nod)
   (unnamed column R)                category master -> Category
   Week                              4-4-5 week within the fiscal month
 
@@ -35,7 +35,7 @@ Anything not derivable stays BLANK and is named in the row's `issues`,
 never guessed — like the WebADI export.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
 from sqlalchemy import select
@@ -50,6 +50,7 @@ BANK = "HSBC"
 ISSUE_TEXT = {
     "NO_INVOICE": "No bill number",
     "NO_ZONE": "Zone not in the zone directory",
+    "NO_LEGACY_ZONE": "South Coast zone: legacy railway not readable from the AR customer or division",
     "NO_AR_INVOICE": "Invoice not in any AR statement",
     "NO_CATEGORY": "Sales rep not in the category master",
     "NO_BRANCH": "No branch code for the subcategory",
@@ -60,6 +61,33 @@ def _day(d) -> Optional[date]:
     if d is None:
         return None
     return d.date() if isinstance(d, datetime) else d
+
+
+def od_nod(cal, value_date: date, due: Optional[date]) -> Optional[str]:
+    """The team's OD/NOD label: where the invoice's AR due date falls
+    against the fiscal month the credit's sheet belongs to.
+      due before the month starts   "OD"
+      due inside the month          "OD Sep 26"
+      due inside the next month     "OD Oct 26"
+      due later                     "NOD"
+    Read off the team's Sep 26 sheet (2026-10-05): 240 of the 247 rows we
+    can label agree. The 7 misses are Friction invoices due 1 Oct and
+    invoices due on the next month's last day (25 Oct), which the team
+    reads NOD (or, once, OD Sep 26) — unexplained, so not special-cased. It is a
+    due-date bucket, NOT "the credit arrived after the due date" — a credit
+    paid early still reads "OD Sep 26" when the invoice falls due in the
+    month. No due date -> blank."""
+    if due is None:
+        return None
+    this = cal.period(value_date)
+    if due < this.month_start:
+        return "OD"
+    if due <= this.month_end:
+        return f"OD {this.month_label}"
+    nxt = cal.period(this.month_end + timedelta(days=1))
+    if due <= nxt.month_end:
+        return f"OD {nxt.month_label}"
+    return "NOD"
 
 
 def _rule_row(session, customer_pk: int):
@@ -114,15 +142,19 @@ def build_rows(session, customer_pk: int, date_from: date, date_to: date) -> Lis
         for bill in sorted(bills_by_match.get(m.id, []),
                            key=lambda b: (str(b.bill_number or ""), str(b.submission_ref or ""))):
             zone = _text(bill.zone) or _text(txn.zone_guess)
-            info = db_zones.resolve(zone_table, zone)
+            invoice = _text(bill.bill_number)
+            snap = db_collection.pick_statement(ar.get(invoice) or [], value_date) if invoice else None
+            # the railway Oracle books the bill under (SCoR -> SCR / ECoR)
+            info = db_zones.oracle_zone(zone_table, zone,
+                                        snap["customer_name"] if snap else None,
+                                        bill.org_unit)
             # a bill of a segment the sheet does not cover is left out; an
             # UNKNOWN zone stays in, flagged, rather than vanish unseen
             if info is not None and (info.get("segment") or "").upper() not in segments:
                 continue
-            bills.append((bill, zone, info))
-        for i, (bill, zone, info) in enumerate(bills):
+            bills.append((bill, zone, info, snap))
+        for i, (bill, zone, info, snap) in enumerate(bills):
             invoice = _text(bill.bill_number)
-            snap = db_collection.pick_statement(ar.get(invoice) or [], value_date) if invoice else None
             cat = None
             if snap:
                 cat = cats.category(snap["sales_rep"], snap["sales_order_type"])
@@ -136,7 +168,8 @@ def build_rows(session, customer_pk: int, date_from: date, date_to: date) -> Lis
             if invoice is None:
                 issues.append("NO_INVOICE")
             if info is None:
-                issues.append("NO_ZONE")
+                issues.append("NO_LEGACY_ZONE" if db_zones.needs_legacy_zone(zone_table, zone)
+                              else "NO_ZONE")
             if invoice is not None and snap is None:
                 issues.append("NO_AR_INVOICE")
             if snap is not None and cat is None:
@@ -150,8 +183,10 @@ def build_rows(session, customer_pk: int, date_from: date, date_to: date) -> Lis
                 "Bank Ref": _text(txn.bank_ref),
                 "Region": info.get("region") if info else None,
                 # as the source spells it (IREPS writes NFR, the team's
-                # sheet too); the directory supplies the region
-                "RLY": zone.upper() if zone else None,
+                # sheet too) — except SCoR, which Oracle books under its
+                # legacy railway; the directory supplies the region
+                "RLY": (info["code"] if info and info.get("legacy")
+                        else zone.upper() if zone else None),
                 "EFT AMOUNT": txn.amount if i == 0 else None,
                 "BILL NO.": invoice,
                 "Bill Date": _day(bill.bill_date),
@@ -162,7 +197,7 @@ def build_rows(session, customer_pk: int, date_from: date, date_to: date) -> Lis
                 "TOTAL COLLECTION": None,
                 "BRANCH": branch,
                 "Invoice Value": snap["functional_amount_open"] if snap else None,
-                "OD/NOD": (("OD" if value_date > due else "NOD") if due else None),
+                "OD/NOD": od_nod(cal, value_date, due),
                 "Category": cat["category"] if cat else None,
                 "Week": period.week_label,
                 # display-only

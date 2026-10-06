@@ -173,7 +173,7 @@ def world(tmp_path):
                                 category=category, subcategory=subcategory,
                                 functional_amount=open_amt, functional_amount_open=open_amt))
 
-        # Mon 24 Aug 2026 (Sep 26, 1st week): one bill, due later -> NOD
+        # Mon 24 Aug 2026 (Sep 26, 1st week): one bill, due 1 Sep -> inside the month
         match("UTR-A", 1000.0, [bill("1331000001", "SR", 1000.0)], date(2026, 8, 24))
         ar("1331000001", date(2026, 7, 31), date(2026, 9, 1), 1100.0)
         ar("1331000001", date(2026, 8, 31), date(2026, 9, 1), 0.0)
@@ -216,7 +216,7 @@ def test_rows(world):
 
     # AR: the statement known that day (31 Jul), not the later one
     assert a["Invoice Value"] == 1100.0 and a["ar_statement_date"] == date(2026, 7, 31)
-    assert a["OD/NOD"] == "NOD" and b1["OD/NOD"] == "OD"
+    assert a["OD/NOD"] == "OD Sep 26" and b1["OD/NOD"] == "OD" and c["OD/NOD"] == "NOD"
     assert (a["Category"], a["BRANCH"]) == ("S&T", "ST")
     assert (b1["Category"], b1["BRANCH"]) == ("Rohtak Friction", "FR")
     assert b2["issues"] == ["NO_AR_INVOICE"] and b2["Invoice Value"] is None
@@ -234,6 +234,19 @@ def test_rows(world):
     summ = x.summarize(rows)
     assert summ["credits"] == 4 and summ["eft_amount"] == 1610.0
     assert summ["by_month"] == {"Sep 26": 4, "Oct 26": 1}
+
+
+def test_od_nod_is_a_fiscal_month_due_date_bucket():
+    from recon.fiscal import FiscalCalendar
+    cal, credit = FiscalCalendar(), date(2026, 9, 10)     # fiscal Sep 26: 24 Aug-27 Sep
+    assert x.od_nod(cal, credit, date(2026, 8, 23)) == "OD"            # before the month
+    assert x.od_nod(cal, credit, date(2026, 8, 24)) == "OD Sep 26"     # first day
+    assert x.od_nod(cal, credit, date(2026, 9, 27)) == "OD Sep 26"     # last day
+    assert x.od_nod(cal, credit, date(2026, 9, 28)) == "OD Oct 26"     # next month
+    assert x.od_nod(cal, credit, date(2026, 10, 26)) == "NOD"
+    assert x.od_nod(cal, credit, None) is None
+    # due AFTER the credit but inside the month is still "OD <month>"
+    assert x.od_nod(cal, date(2026, 9, 1), date(2026, 9, 20)) == "OD Sep 26"
 
 
 def test_window_snaps_to_fiscal_month(world):

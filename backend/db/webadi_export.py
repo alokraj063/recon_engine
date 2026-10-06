@@ -41,6 +41,7 @@ from sqlalchemy import select
 
 from recon.report import WEBADI_META_KEYS
 
+from . import collection as db_collection
 from . import zones as db_zones
 from .models import (GoldBankTxn, GoldBill, GoldRecovery, MatchLedger,
                      MatchLedgerBill, MatchRuleSetRow)
@@ -81,6 +82,7 @@ _BLANK = {"", "-", "----", "NAN", "NONE"}
 ISSUE_TEXT = {
     "NO_UNIT": "No operating unit (PartyCode)",
     "NO_CUSTOMER": "Zone not in the zone directory",
+    "NO_LEGACY_ZONE": "South Coast zone: legacy railway not readable from the AR customer or division",
     "NO_RECEIPT_METHOD": "No receipt method for the unit",
     "NO_INVOICE": "No bill number",
     "NO_ADJUSTMENT_TYPE": "Recovery head has no Oracle adjustment type",
@@ -122,8 +124,9 @@ def adjustment_type(head, unit: Optional[str], segment: Optional[str]) -> Option
     return f"{prefix} {suffix}"
 
 
-def customer_name(zone_table: dict, zone) -> Optional[str]:
-    info = db_zones.resolve(zone_table, _text(zone))
+def customer_name(info: Optional[dict]) -> Optional[str]:
+    """Oracle customer name from the zone directory entry Oracle books the
+    bill under (db_zones.oracle_zone)."""
     if not info or not info.get("name"):
         return None
     return f"{info['code']}-{str(info['name']).upper()}"
@@ -170,6 +173,9 @@ def build_records(session, customer_pk: int, date_from: date, date_to: date,
                 .order_by(GoldRecovery.bronze_file_id, GoldRecovery.row_seq)).scalars():
             lines_by_bill.setdefault(rec.gold_bill_id, []).append(rec)
 
+    ar = db_collection.ar_lookup(
+        session, customer_pk, [_text(b.bill_number) for _m, b in links])
+
     out: List[dict] = []
     for m, txn in pairs:
         label = f"M-{m.seq}" if m.seq is not None else m.id[:8]
@@ -181,13 +187,19 @@ def build_records(session, customer_pk: int, date_from: date, date_to: date,
                 continue
             prefix = UNIT_PREFIX.get(unit or "")
             zone = _text(bill.zone)
-            info = db_zones.resolve(zone_table, zone)
-            segment = info.get("segment") if info else None
             invoice = _text(bill.bill_number)
+            snap = (db_collection.pick_statement(ar.get(invoice) or [], txn.value_date)
+                    if invoice else None)
+            # the railway Oracle books the bill under: SCoR has no Oracle
+            # customer, its invoices sit under SCR / ECoR
+            info = db_zones.oracle_zone(zone_table, zone,
+                                        snap["customer_name"] if snap else None,
+                                        bill.org_unit)
+            segment = info.get("segment") if info else None
             base = {
                 "Upl": "O",
                 "Operating Unit ID Selected": OU_NAMES.get(unit or ""),
-                "Customer Name": customer_name(zone_table, zone),
+                "Customer Name": customer_name(info),
                 "Receipt Method": RECEIPT_METHOD.format(prefix=prefix) if prefix else None,
                 "Receipt Number": _text(txn.bank_ref),
                 "Currency": CURRENCY,
@@ -213,7 +225,8 @@ def build_records(session, customer_pk: int, date_from: date, date_to: date,
             if unit is None:
                 issues.append("NO_UNIT")
             if base["Customer Name"] is None:
-                issues.append("NO_CUSTOMER")
+                issues.append("NO_LEGACY_ZONE" if db_zones.needs_legacy_zone(zone_table, zone)
+                              else "NO_CUSTOMER")
             if base["Receipt Method"] is None and unit is not None:
                 issues.append("NO_RECEIPT_METHOD")
             if invoice is None:

@@ -7,7 +7,7 @@ cannot say (unmapped head, unknown zone, Friction's method).
 
 import sys
 import uuid
-from datetime import date
+from datetime import datetime, date
 from io import BytesIO
 from pathlib import Path
 
@@ -156,6 +156,11 @@ def test_download(world):
         assert ws["B15"].value == "Upl" and ws["R15"].value == "Messages"
         assert [ws.cell(row=r, column=6).value for r in (17, 18, 19)] == ["UTR001"] * 3
         assert ws["B20"].value is None
+        # dates are real Excel dates in the template's format, not text
+        for ref in ("I17", "J17", "D9"):
+            assert isinstance(ws[ref].value, datetime), ref
+        assert ws["I17"].value == datetime(2025, 10, 10)
+        assert ws["I17"].number_format == "dd\\-mmm\\-yyyy"
 
         # the unit filter narrows the download; preview agrees
         prev = client.get("/api/export/webadi/preview",
