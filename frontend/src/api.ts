@@ -1,6 +1,7 @@
 import {
   ApiError,
   type AdapterRegistry,
+  type AdminUser,
   type ArView,
   type AuthUser,
   type AuditEventRow,
@@ -9,6 +10,7 @@ import {
   type ZoneEntry,
   type CustomerInfo,
   type CustomerRules,
+  type Role,
   type FrameName,
   type GoldFileInfo,
   type GoldFrameName,
@@ -362,6 +364,25 @@ export async function fetchMe(): Promise<AuthUser> {
 
 export async function signIn(email: string, password: string): Promise<AuthUser> {
   return postJson('/api/auth/login', { email, password })
+}
+
+/** What the login screen may offer (public). */
+export async function fetchProviders(): Promise<{ password: boolean; okta: boolean }> {
+  return getJson('/api/auth/providers')
+}
+
+export async function fetchUsers(): Promise<AdminUser[]> {
+  return getJson('/api/users')
+}
+
+export async function createUser(email: string, name: string, role: Role): Promise<AdminUser> {
+  return postJson('/api/users', { email, name: name || null, role })
+}
+
+export async function updateUser(
+  id: number, patch: { name?: string; role?: Role; is_active?: boolean },
+): Promise<AdminUser> {
+  return sendJson('PATCH', `/api/users/${id}`, patch)
 }
 
 export async function signOut(): Promise<{ status: string }> {

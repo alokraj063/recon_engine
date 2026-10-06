@@ -5,15 +5,18 @@ import { fetchAdapters, fetchCustomerConfig } from '../api'
 import { MatchingConfigPanel } from './MatchingConfigPanel'
 import { ZoneDirectoryPanel } from './ZoneDirectoryPanel'
 import { CollectionSettingsPanel } from './CollectionSettingsPanel'
+import { UsersPanel } from './UsersPanel'
+import { useAuth } from '../auth'
 import { CustomerSelect, Notice, PageHeader, TextLink } from './ui'
 
-type Tab = 'matching' | 'zones' | 'collection' | 'sources'
+type Tab = 'matching' | 'zones' | 'collection' | 'sources' | 'users'
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'matching', label: 'Matching config' },
   { key: 'zones', label: 'Zones' },
   { key: 'collection', label: 'Daily collection' },
   { key: 'sources', label: 'Source setup' },
+  { key: 'users', label: 'Users' },
 ]
 
 /** the fixed slots' names; extra lineage slots read "Lineage · <key>" */
@@ -40,6 +43,7 @@ export function SettingsView({ customers, customerId, onCustomerChange, onGoToIn
   onGoToIngest: () => void
 }) {
   const [tab, setTab] = useState<Tab>('matching')
+  const isAdmin = useAuth().user.role === 'admin'
   const customerName = customers.find((c) => c.key === customerId)?.name ?? customerId
 
   return (
@@ -51,7 +55,7 @@ export function SettingsView({ customers, customerId, onCustomerChange, onGoToIn
       <section className="ui-card">
         <div className="ui-tabbar">
           <div className="ui-tabs" role="tablist">
-            {TABS.map((t) => (
+            {TABS.filter((t) => t.key !== 'users' || isAdmin).map((t) => (
               <button key={t.key} type="button" role="tab" aria-selected={tab === t.key}
                       className={`ui-tab${tab === t.key ? ' is-on' : ''}`} onClick={() => setTab(t.key)}>
                 {t.label}
@@ -60,6 +64,7 @@ export function SettingsView({ customers, customerId, onCustomerChange, onGoToIn
           </div>
           <span className="ui-tabbar-note">Every change is logged in the Audit trail</span>
         </div>
+        {!isAdmin && <Notice tone="warn">Read-only. Saving settings needs the admin role.</Notice>}
         {tab === 'matching' && (
           <div className="ui-card-body config-body">
             <MatchingConfigPanel customerId={customerId} />
@@ -73,6 +78,11 @@ export function SettingsView({ customers, customerId, onCustomerChange, onGoToIn
         {tab === 'collection' && (
           <div className="ui-card-body config-body">
             <CollectionSettingsPanel customerId={customerId} />
+          </div>
+        )}
+        {tab === 'users' && isAdmin && (
+          <div className="ui-card-body config-body">
+            <UsersPanel />
           </div>
         )}
         {tab === 'sources' && <SourceSetup customerId={customerId} onGoToIngest={onGoToIngest} />}

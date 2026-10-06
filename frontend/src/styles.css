@@ -1875,6 +1875,17 @@ table.data td { padding: 6px 8px; }
   color: var(--ink-faint);
 }
 
+.login-or {
+  display: flex; align-items: center; gap: 10px; margin: 2px 0;
+  font-size: var(--fs-micro); color: var(--ink-faint);
+}
+.login-or::before, .login-or::after { content: ''; flex: 1; border-top: 1px solid var(--rule, #d9dde0); }
+.login-okta { justify-content: center; text-decoration: none; }
+
+.users-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.users-add input { min-width: 220px; }
+.users-table .is-off td { color: var(--ink-faint); }
+
 .login-foot {
   margin: 4px 0 0;
   font-size: var(--fs-micro);

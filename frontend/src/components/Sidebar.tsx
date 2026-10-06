@@ -120,8 +120,8 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
       <nav className="sidebar-nav">
         <div className="nav-group-label">Operate</div>
         {openItem({ view: 'command', label: 'Command Center', icon: LayoutDashboard })}
-        {openItem({ view: 'ingest', label: 'Ingest documents', icon: Upload })}
-        {openItem({ view: 'reconcile', label: 'Reconcile', icon: GitMerge })}
+        {user.role !== 'viewer' && openItem({ view: 'ingest', label: 'Ingest documents', icon: Upload })}
+        {user.role !== 'viewer' && openItem({ view: 'reconcile', label: 'Reconcile', icon: GitMerge })}
 
         <div className="nav-group-label">Workspace</div>
         {openItem({ view: 'ledger', label: 'Analyst queue', icon: ListChecks })}
@@ -140,7 +140,7 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
 
       <div className="sidebar-foot">
         <div className="side-user">
-          <span className="side-user-name" title={user.email}>{user.name}</span>
+          <span className="side-user-name" title={`${user.email}${user.role ? ` · ${user.role}` : ''}`}>{user.name}</span>
           <button className="side-signout btn-ic" onClick={() => void signOut()} title="Sign out">
             <LogOut size={13} strokeWidth={1.75} /> Sign out
           </button>

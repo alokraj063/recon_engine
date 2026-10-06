@@ -138,6 +138,24 @@ export interface AuthUser {
   id: number
   email: string
   name: string
+  /** admin | analyst | viewer — the server enforces it; the UI only hides
+   *  what the role cannot do */
+  role: Role | null
+}
+
+export type Role = 'admin' | 'analyst' | 'viewer'
+
+/** A login as the admin Users page sees it (GET /api/users). */
+export interface AdminUser {
+  id: number
+  email: string
+  name: string
+  role: Role | null
+  is_active: boolean
+  has_password: boolean
+  okta_linked: boolean
+  last_login_at: string | null
+  created_at: string
 }
 
 export type RunMode = 'snapshot' | 'incremental'
