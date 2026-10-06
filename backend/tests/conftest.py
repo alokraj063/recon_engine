@@ -42,7 +42,7 @@ def _init_with_test_user(self, *args, **kwargs):
     # deferred: an engine-only test run never imports app.* at all
     from app.auth import AuthUser, require_user
     from db.audit import set_actor
-    user = AuthUser(id=TEST_USER_ID, email=TEST_USER_EMAIL, name="Test User")
+    user = AuthUser(id=TEST_USER_ID, email=TEST_USER_EMAIL, name="Test User", role="admin")
 
     # async + set_actor, like the real gate, so events and ledger
     # decisions made through a test app are stamped with this user

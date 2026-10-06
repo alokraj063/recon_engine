@@ -119,7 +119,7 @@ def main() -> int:
 
         if row is None:
             row = User(email=email, name=args.name or email,
-                       password_hash=hashed)
+                       password_hash=hashed, role="admin")
             session.add(row)
             audit(session, "user.created", row)
             action = "created"

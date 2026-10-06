@@ -39,7 +39,7 @@ def analyst(world):  # noqa: F811
         s.add(u)
         s.commit()
         uid = u.id
-    user = AuthUser(id=uid, email="a@example.com", name="Asha Analyst")
+    user = AuthUser(id=uid, email="a@example.com", name="Asha Analyst", role="admin")
 
     async def _signed_in():
         set_actor(uid)

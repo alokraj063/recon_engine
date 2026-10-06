@@ -97,7 +97,15 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(200))
     # bcrypt output is 60 chars; the column is wider so a future algorithm
     # swap is a code change, not a migration
-    password_hash: Mapped[str] = mapped_column(String(255))
+    # NULL = an Okta-only account (no password login possible)
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # admin | analyst | viewer; NULL = no access yet ("contact your
+    # administrator"). Applies to every sign-in method.
+    role: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    # Okta's stable subject, bound on the first Okta sign-in and matched on
+    # from then on (email is only the first-bind key)
+    okta_sub: Mapped[Optional[str]] = mapped_column(
+        String(255), unique=True, index=True, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

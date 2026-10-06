@@ -138,7 +138,8 @@ def seed_admin_user(session, logger=None):
                 "details": {"reason": str(exc)}})
         return None
 
-    user = User(email=normalize_email(email), name=email, password_hash=hashed)
+    user = User(email=normalize_email(email), name=email, password_hash=hashed,
+                role="admin")
     session.add(user)
     session.flush()
     # a login appearing is an access change: durable audit row, not just a

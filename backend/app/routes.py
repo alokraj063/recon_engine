@@ -50,7 +50,7 @@ from recon.rules import COPY_SECTIONS, FieldMapping
 from recon.sources import resolve_adapter, role_of
 
 from . import runs
-from .auth import require_user
+from .auth import require_role, require_user
 from .serialize import clean, df_to_records, summary_records
 
 # Every route below is gated in ONE place. A route added later is
@@ -2022,7 +2022,7 @@ def _audited_rules(rule_row) -> dict:
     return json.loads(json.dumps(d, default=str))
 
 
-@router.put("/customers/{customer_key}/config")
+@router.put("/customers/{customer_key}/config", dependencies=[Depends(require_role("admin"))])
 def put_customer_config(customer_key: str, body: RulesBody):
     """Save the customer's matching configuration (six tunables +
     paid_statuses + weights + field mapping)."""
@@ -2126,7 +2126,7 @@ def _validate_slot_params(source_type: str, params: dict):
                   f"list of {frame} gold columns")
 
 
-@router.put("/customers/{customer_key}/sources")
+@router.put("/customers/{customer_key}/sources", dependencies=[Depends(require_role("admin"))])
 def put_customer_sources(customer_key: str, body: SourcesBody):
     """Persist adapter choice per slot (partial map allowed). Lineage
     slots are 0..N: name a new lineage_<key> slot to add it, send null
@@ -2230,7 +2230,7 @@ def get_customer_zones(customer_key: str):
         return _zones_payload(customer_key, rule_row)
 
 
-@router.put("/customers/{customer_key}/zones")
+@router.put("/customers/{customer_key}/zones", dependencies=[Depends(require_role("admin"))])
 def put_customer_zones(customer_key: str, body: ZonesBody):
     """Replace the zone directory (or reset it with zones=null). Display
     only — no reconcile needed; the Analyst queue reads it live."""
@@ -2305,7 +2305,7 @@ def get_customer_collection(customer_key: str):
         return _collection_payload(customer_key, rule_row)
 
 
-@router.put("/customers/{customer_key}/collection")
+@router.put("/customers/{customer_key}/collection", dependencies=[Depends(require_role("admin"))])
 def put_customer_collection(customer_key: str, body: CollectionBody):
     """Replace the Daily Collection settings. A section left out (or
     equal to its default) follows the default."""
@@ -2339,7 +2339,7 @@ class CustomerBody(BaseModel):
     name: str
 
 
-@router.post("/customers")
+@router.post("/customers", dependencies=[Depends(require_role("admin"))])
 def create_customer(body: CustomerBody):
     """Create a customer with the default sources + rule set cloned —
     the fast path for onboarding someone on a different bank/ERP: create,
