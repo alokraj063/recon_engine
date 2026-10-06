@@ -42,6 +42,8 @@ cd backend && ../.venv/bin/python -m alembic upgrade head
 # Logins (every /api route except /api/health and /api/auth/* needs one)
 cd backend && ../.venv/bin/python scripts/create_user.py -e you@example.com -n "You"
 cd backend && ../.venv/bin/python scripts/create_user.py --list
+cd backend && ../.venv/bin/python scripts/create_user.py -e a@wabtec.com --okta --role analyst   # Okta user, no password
+cd backend && ../.venv/bin/python scripts/create_user.py --import-csv people.csv                  # email,name,role
 # a blank database has NO users — nobody can sign in until one is made
 # (or ADMIN_EMAIL/ADMIN_PASSWORD are set for an unattended first boot)
 
@@ -486,7 +488,15 @@ backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/inge
                SESSION_MAX_AGE / COOKIE_SECURE, all documented in
                docs/configuration.md. AUTHENTICATION ONLY: every signed-in user
                still sees every customer, and customer_id is still a request
-               field — binding a user to a tenant is the follow-up.
+               field — binding a user to a tenant is the follow-up. Roles
+               (admin/analyst/viewer, global) and the Okta + bearer paths
+               are layered on top — see "Okta sign-in is an ADD-ON" below.
+  okta.py      Okta OIDC sign-in (/api/auth/okta/login|callback,
+               /api/auth/providers — public, mounted beside auth_router),
+               resolve_okta_user (shared by the callback and bearer_user),
+               bearer-token validation (validate_access_token/bearer_user).
+  users.py     /api/users admin routes (list/create/patch), admin-only,
+               mounted inside routes.py's gated router.
   routes.py    legacy POST /api/runs (multipart one-shot) KEPT for compat/tests
                but retired from the UI; GET /api/runs/{id}[/frames/{name}|
                /workbook], GET /api/customers, GET /api/runs, GET /api/ledger,
@@ -628,7 +638,14 @@ BILL_TAKEN_BY_HIGH|OUTSIDE_PAIRING_WINDOW/exceptions_reopened),
 `NO_SUCH_USER`/`INACTIVE`/`BAD_PASSWORD` — and an email address NEVER appears in a
 log line or an audit row, it is PII like any other)/`auth.logout`,
 `auth.admin_seeded`/`auth.admin_seed_rejected`/`auth.ephemeral_session_secret`
-(WARNING — no SESSION_SECRET set). PLATFORM SETTINGS ARE FULLY AUDITED:
+(WARNING — no SESSION_SECRET set), `auth.okta_login_succeeded`/
+`auth.okta_login_failed` (WARNING; `details.reason` NO_SUCH_USER | NO_ROLE |
+INACTIVE | SUB_MISMATCH | EMAIL_UNVERIFIED | NO_EMAIL_CLAIM | BAD_TOKEN — codes
+only) and `auth.okta_token_rejected`/`auth.token_rejected` (WARNING, log only —
+a rejected Okta ID token / bearer token; error class or reason code, never the
+token), `user.role_changed` (from/to role names; also `user.created`/
+`user.updated`/`user.activated`/`user.deactivated` via "api", from
+/api/users). PLATFORM SETTINGS ARE FULLY AUDITED:
 `config.rules_updated`/`config.sources_updated`/`config.zones_updated`/`config.collection_updated` carry `details.changes`
 [{field, from, to}], compared in FULL and only shortened (160 chars) for the
 record; `customer.created` carries its starting config the same way (from
@@ -1016,10 +1033,12 @@ frontend/        Vite + React + TS; auth.tsx's <AuthGate> wraps <App/> in main.t
 - **Zone extraction** tests longer railway zone codes first so `NER` isn't read as `ER` (`bank_hsbc.ZONE_CODES` order matters). Since 2026-09-30 it returns the CANONICAL code the bills carry, whichever rule found it (`bank_hsbc.ZONE_ALIASES`: `SEC` -> `SECR`, `DMW` -> `PLW`, `DLW` -> `BLW` — the matcher's zone check is an exact string compare, so an alias failed it and an unread `SEC` made an SECR payment a non-IREPS receipt); `SEC` is read only at Rule A's anchored position on an SBI NEFT, after `SECR`, never as the head of SECURITY/SECTION and never by the unanchored Rule C search. Bank txns are immutable on re-ingest, so gold rows ingested earlier keep their old `zone_guess` until repaired.
 - **Bank self-check is fail-loud**: the HSBC adapter's `selfcheck` ties parsed credits to the totals printed on the statement's last page and raises `SelfCheckError` on mismatch; everything downstream depends on that parse.
 - **Money is Float end-to-end** (golden parity). Moving to Numeric/Decimal is a deliberate future migration that requires re-baselining the golden master — do not change it casually.
+- **Okta sign-in is an ADD-ON, and roles are global (2026-10-06, feat/okta-auth).** `app/okta.py` runs the OIDC authorization-code + PKCE flow (Authlib; backend = confidential Web client; state/nonce ride the existing SessionMiddleware cookie) and ends in the SAME `recon_session` cookie as the password login, so `require_user`, `set_actor` and every `api.ts` call are unchanged. Enabled only when `OKTA_ISSUER` + `OKTA_CLIENT_ID` + `OKTA_CLIENT_SECRET` are all set (`okta_settings()` reads them at request time; `GET /api/auth/providers` tells the login screen). Okta proves WHO; `users` decides WHAT: `resolve_okta_user` matches `users.okta_sub` first and only an UNBOUND row by email (which binds `sub`, so a later Okta email change cannot take the row over; a row bound to a different sub is refused), and refuses no row / inactive / no role — nobody is auto-created, admins provision by email (Settings › Users, `/api/users`, `create_user.py --okta/--import-csv`). Refusals redirect `/?auth_error=<code>` with NO session. `users.password_hash` is NULLABLE (an Okta-only account; password login treats NULL as a wrong password at equal cost), `role` is admin|analyst|viewer|NULL (NULL = "Please contact Admin for access"); the migration backfilled every pre-existing user as admin. `require_user` re-reads the role per request: NULL -> 403 NO_ACCESS, viewer -> GET/HEAD/OPTIONS only (403 FORBIDDEN), and `require_role("admin")` guards customer create + the config/sources/zones/collection PUTs and all of `/api/users` (mounted INSIDE routes.py's router so it inherits the gate; the last active admin cannot be demoted/deactivated, 409 LAST_ADMIN). BEARER: `require_user` takes `Authorization: Bearer <Okta access token>` BEFORE the cookie when Okta is configured — signature via JWKS (PyJWT), iss, aud (`OKTA_AUDIENCE`, default `api://default`), exp, optional `OKTA_REQUIRED_SCOPE`; it resolves the token's `uid` (the same Okta user id the browser flow binds as `sub`) through the same `resolve_okta_user`, so row/role/active/viewer rules are identical; a token WITHOUT `uid` (client_credentials) is refused — service identities are a deliberate non-goal for now. Sign-out is local only (no `id_token_hint`; the Okta session survives). tests/conftest.py's override user is an admin; tests/test_auth.py, test_okta.py (fake Authlib client), test_okta_bearer.py (local RSA key), test_users_admin.py are the guards.
 - **Authentication is a gate, not tenant isolation.** Signing in proves WHO you
   are; it does not narrow WHAT you can see. Every signed-in user still reaches
   every customer, because `customer_id` is still a request field — the `users`
-  table deliberately has no `customer_id`. Taking the tenant from the session
+  table deliberately has no `customer_id` (a role is global, not per customer).
+  Taking the tenant from the session
   instead is the follow-up, and it touches all 28 routes.
 - **Known deferrals (by decision, not oversight)**: no tenant isolation yet
   (authentication landed on feat/auth; customer_id is still a request field), runs execute synchronously in a request threadpool (no job queue), single-worker uvicorn assumed, run-file retention keeps last 20 workbooks (DB rows kept forever).

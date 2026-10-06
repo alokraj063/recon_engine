@@ -144,6 +144,83 @@ cd backend && ../.venv/bin/python scripts/create_user.py -e person@example.com -
 Deactivating takes effect on that user's **next request** — the gate reloads
 the row every time, which is the only way to withdraw a stateless cookie.
 
+### Roles
+
+Every user has one role, global across customers (there is still no tenant
+isolation). It applies to every way of signing in, and is re-read on every
+request, so changing it takes effect on the person's next call.
+
+| Role | May |
+|---|---|
+| `admin` | Everything, including Settings saves (matching config, sources, zones, daily collection), creating customers and managing users. |
+| `analyst` | Ingest, reconcile, decide matches and exceptions, exports. Cannot save Settings or manage users. |
+| `viewer` | Read only: every `GET`, no writes. |
+| *(none)* | No access: "Please contact Admin for access." |
+
+Users made before roles existed were migrated to `admin`. Manage users in
+**Settings › Users** (admins), or with the CLI:
+
+```bash
+# an Okta user: no password, signs in with Okta
+../.venv/bin/python scripts/create_user.py -e person@wabtec.com -n "Their Name" --okta --role analyst
+# many at once — CSV with a header row: email,name,role (all-or-nothing)
+../.venv/bin/python scripts/create_user.py --import-csv people.csv
+```
+
+The last active admin cannot be demoted or deactivated.
+
+### Okta sign-in (optional add-on)
+
+OIDC authorization-code flow with PKCE; the backend is the confidential
+client (Okta app type **Web**). It **adds** to the password login — nothing
+about the password login changes — and ends in the same session cookie.
+See [`backend/app/okta.py`](../backend/app/okta.py). Okta is on only when the
+first three variables are set.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `OKTA_ISSUER` | *(unset)* | e.g. `https://wabtec.oktapreview.com/oauth2/default` (Preview). Production has its own issuer and its own Okta app. |
+| `OKTA_CLIENT_ID` | *(unset)* | The Okta app's client ID. |
+| `OKTA_CLIENT_SECRET` | *(unset)* | **A secret**: `backend/.env` locally (gitignored), Secrets Manager in AWS. Never commit or log it. |
+| `OKTA_REDIRECT_URI` | *(built from the request)* | The exact registered sign-in redirect URI, `https://<host>/api/auth/okta/callback`. **Set it explicitly** — behind the ALB the app would otherwise build an `http://` URL Okta rejects. |
+| `OKTA_SCOPES` | `openid profile email` | |
+| `OKTA_AUDIENCE` | `api://default` | Audience an API access token must carry. |
+| `OKTA_REQUIRED_SCOPE` | *(none)* | If set, bearer tokens must carry this scope. |
+| `OKTA_JWKS_URI` | `<issuer>/v1/keys` | |
+
+Register these in the Okta app (one pair per environment):
+
+| | Local | Staging |
+|---|---|---|
+| Sign-in redirect URI | `http://localhost:5173/api/auth/okta/callback` | `https://wabtec.reconalpha-staging.joulestowatts.com/api/auth/okta/callback` |
+| Sign-out redirect URI | `http://localhost:5173/` | `https://wabtec.reconalpha-staging.joulestowatts.com/` |
+
+**Who may sign in.** Anyone with an Okta account can reach Okta, but the app
+lets in only people with a `users` row that is active and has a role — nobody
+is created on first sign-in. An Okta user without one is sent back to the
+login screen with "Please contact Admin for access." The first sign-in
+matches the row by email and binds Okta's stable user id to it; from then on
+the id is what matches, so a changed email in Okta cannot take over the row.
+
+**API access with tokens.** When Okta is configured, any `/api` route also
+accepts `Authorization: Bearer <Okta access token>`. The token's signature,
+issuer, audience and expiry are verified, and its `uid` claim is matched to a
+user exactly like a browser sign-in, so the same role applies (a viewer's
+token is read-only). A token with no `uid` — a machine-to-machine
+`client_credentials` token — is refused: it names no person. A bearer token
+takes precedence over a cookie.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" https://<host>/api/auth/me
+```
+
+**Deploying.** Add `OKTA_CLIENT_SECRET` to the task definition's `secrets`
+(like `SESSION_SECRET`) and the rest to `environment`. Run uvicorn with
+`--proxy-headers` behind the ALB.
+
+**Sign-out** ends the app's own session only; the Okta session is not
+closed, so "Sign in with Okta" may log straight back in.
+
 ## Container defaults
 
 Set in the [`Dockerfile`](../Dockerfile). Any of them can be overridden with `-e` or by the task definition.
