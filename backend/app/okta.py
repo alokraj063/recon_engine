@@ -17,6 +17,18 @@ first three are set — otherwise the app behaves exactly as before):
                       behind the ALB the app would otherwise build an http://
                       URL Okta rejects.
   OKTA_SCOPES         default "openid profile email"
+  OKTA_AUDIENCE       audience an API access token must carry
+                      (default "api://default", the default server's)
+  OKTA_REQUIRED_SCOPE optional scope an access token must carry (`scp`)
+  OKTA_JWKS_URI       default <issuer>/v1/keys
+
+Bearer tokens: `Authorization: Bearer <Okta access token>` is accepted on
+every gated route (app/auth.py require_user calls bearer_user). The token
+is verified (signature, issuer, audience, expiry, optional scope) and its
+`uid` claim — the same Okta user id the browser flow binds as `sub` — is
+resolved with the very same resolve_okta_user, so the row, role, active
+flag and viewer read-only rule apply identically. A token without `uid`
+(a client_credentials / machine token) is refused: it names no person.
 
 Matching a person to a row (resolve_okta_user): the stable Okta `sub` first;
 only an unbound row is matched by email, and that match binds `sub` — so a
@@ -38,7 +50,7 @@ from db.models import User, utcnow
 from logging_setup import get_logger
 from passwords import normalize_email
 
-from .auth import ROLES, SESSION_KEY
+from .auth import ROLES, SESSION_KEY, AuthUser
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = get_logger(__name__)
@@ -53,6 +65,9 @@ class OktaSettings:
     client_secret: str
     redirect_uri: str
     scopes: str
+    audience: str
+    required_scope: str
+    jwks_uri: str
 
 
 def okta_settings() -> Optional[OktaSettings]:
@@ -65,7 +80,11 @@ def okta_settings() -> Optional[OktaSettings]:
     return OktaSettings(
         issuer=issuer, client_id=client_id, client_secret=secret,
         redirect_uri=os.environ.get("OKTA_REDIRECT_URI", "").strip(),
-        scopes=os.environ.get("OKTA_SCOPES", "").strip() or DEFAULT_SCOPES)
+        scopes=os.environ.get("OKTA_SCOPES", "").strip() or DEFAULT_SCOPES,
+        audience=os.environ.get("OKTA_AUDIENCE", "").strip() or "api://default",
+        required_scope=os.environ.get("OKTA_REQUIRED_SCOPE", "").strip(),
+        jwks_uri=(os.environ.get("OKTA_JWKS_URI", "").strip()
+                  or f"{issuer}/v1/keys"))
 
 
 _client = None
@@ -124,6 +143,78 @@ def resolve_okta_user(session, sub: Optional[str], email: Optional[str],
     if row.role not in ROLES:
         return row, "NO_ROLE"
     return row, None
+
+
+# --- bearer tokens -----------------------------------------------------------
+
+class BearerError(Exception):
+    """A bearer token that cannot be used. `reason` is a code for the log;
+    `status` is what the caller gets (401 unless the person is known but
+    not allowed)."""
+
+    def __init__(self, reason: str, status: int = 401):
+        super().__init__(reason)
+        self.reason = reason
+        self.status = status
+
+
+_jwks_clients: dict = {}
+
+
+def _jwks_client(uri: str):
+    """One cached-key client per JWKS URI (PyJWT caches the keys and
+    refetches on an unknown `kid`, which is how Okta key rotation lands)."""
+    client = _jwks_clients.get(uri)
+    if client is None:
+        import jwt
+        client = _jwks_clients[uri] = jwt.PyJWKClient(uri, cache_keys=True)
+    return client
+
+
+def validate_access_token(token: str) -> dict:
+    """Verified claims of an Okta access token. Blocking (may fetch the
+    JWKS) — call from a worker thread."""
+    import jwt
+    cfg = okta_settings()
+    if cfg is None:
+        raise BearerError("OKTA_NOT_CONFIGURED")
+    try:
+        key = _jwks_client(cfg.jwks_uri).get_signing_key_from_jwt(token).key
+        claims = jwt.decode(
+            token, key, algorithms=["RS256"], audience=cfg.audience,
+            issuer=cfg.issuer, options={"require": ["exp", "iss", "aud"]})
+    except jwt.ExpiredSignatureError:
+        raise BearerError("EXPIRED")
+    except jwt.PyJWTError:
+        # signature, issuer, audience, malformed, unknown key...: one code,
+        # no detail — the message can echo parts of the token
+        raise BearerError("BAD_TOKEN")
+    if cfg.required_scope:
+        scopes = claims.get("scp") or []
+        if isinstance(scopes, str):
+            scopes = scopes.split()
+        if cfg.required_scope not in scopes:
+            raise BearerError("INSUFFICIENT_SCOPE", 403)
+    return claims
+
+
+def bearer_user(token: str) -> AuthUser:
+    """The signed-in user a bearer token stands for. Blocking."""
+    claims = validate_access_token(token)
+    sub = claims.get("uid")
+    if not sub:
+        raise BearerError("NO_UID_CLAIM")
+    email = claims.get("email")
+    if not email and "@" in str(claims.get("sub") or ""):
+        email = claims["sub"]       # the default server's sub is the login name
+    with SessionLocal() as session:
+        row, reason = resolve_okta_user(session, sub, email)
+        if reason is not None:
+            session.rollback()
+            raise BearerError(
+                reason, 403 if reason in ("NO_SUCH_USER", "NO_ROLE") else 401)
+        session.commit()            # a first bind by email is kept
+        return AuthUser(id=row.id, email=row.email, name=row.name, role=row.role)
 
 
 # --- routes ----------------------------------------------------------------

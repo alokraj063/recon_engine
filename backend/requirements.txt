@@ -9,6 +9,7 @@ itsdangerous>=2.1       # signs the session cookie (SessionMiddleware)
 bcrypt>=4.1             # password hashing (backend/passwords.py)
 authlib>=1.3            # Okta OIDC sign-in (app/okta.py)
 httpx>=0.27             # Authlib's HTTP client
+pyjwt[crypto]>=2.8      # verifies Okta access tokens (bearer auth)
 sqlalchemy>=2.0,<2.1
 alembic>=1.13
 psycopg[binary]>=3.2    # Postgres (RDS) driver; unused with local SQLite

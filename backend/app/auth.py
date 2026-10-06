@@ -119,9 +119,9 @@ def _forbidden(code: str, detail: str) -> HTTPException:
                          detail={"error": code, "detail": detail})
 
 
-def _unauthenticated() -> HTTPException:
+def _unauthenticated(headers: Optional[dict] = None) -> HTTPException:
     # same shape every route in this app uses: {detail: {error, detail}}
-    return HTTPException(status_code=401,
+    return HTTPException(status_code=401, headers=headers,
                          detail={"error": "NOT_AUTHENTICATED",
                                  "detail": "Sign in to continue."})
 
@@ -133,6 +133,34 @@ def _load_active_user(user_id: int) -> Optional[AuthUser]:
             return None
         return AuthUser(id=row.id, email=row.email, name=row.name,
                         role=row.role)
+
+
+def _bearer_token(request: Request) -> Optional[str]:
+    """The token of an `Authorization: Bearer` header, when Okta is on.
+    A bearer token wins over a cookie: it is an explicit credential."""
+    scheme, _, value = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not value.strip():
+        return None
+    from .okta import okta_settings           # okta imports this module
+    return value.strip() if okta_settings() is not None else None
+
+
+async def _bearer_user(token: str) -> AuthUser:
+    from .okta import BearerError, bearer_user
+    try:
+        return await run_in_threadpool(bearer_user, token)
+    except BearerError as exc:
+        # a reason code only: never the token, never an address
+        logger.warning("auth.token_rejected", extra={
+            "event_type": "auth.token_rejected",
+            "details": {"reason": exc.reason}})
+        if exc.status == 403:
+            raise _forbidden("NO_ACCESS" if exc.reason != "INSUFFICIENT_SCOPE"
+                             else "INSUFFICIENT_SCOPE",
+                             "Please contact Admin for access."
+                             if exc.reason != "INSUFFICIENT_SCOPE"
+                             else "The token lacks the required scope.")
+        raise _unauthenticated({"WWW-Authenticate": "Bearer"})
 
 
 async def require_user(request: Request) -> AuthUser:
@@ -151,14 +179,18 @@ async def require_user(request: Request) -> AuthUser:
     from there, copied by anyio, into a sync route's worker thread. The
     user lookup itself is blocking SQLAlchemy, so it goes to the threadpool.
     """
-    user_id = request.session.get(SESSION_KEY)
-    if not user_id:
-        raise _unauthenticated()
-    user = await run_in_threadpool(_load_active_user, user_id)
-    if user is None:
-        # deleted or deactivated since the cookie was issued
-        request.session.clear()
-        raise _unauthenticated()
+    bearer = _bearer_token(request)
+    if bearer is not None:
+        user = await _bearer_user(bearer)
+    else:
+        user_id = request.session.get(SESSION_KEY)
+        if not user_id:
+            raise _unauthenticated()
+        user = await run_in_threadpool(_load_active_user, user_id)
+        if user is None:
+            # deleted or deactivated since the cookie was issued
+            request.session.clear()
+            raise _unauthenticated()
     # the role is re-read with the row, so withdrawing it (like
     # deactivating) takes effect on the user's next call
     if user.role not in ROLES:
