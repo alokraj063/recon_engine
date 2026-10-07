@@ -25,8 +25,9 @@ from db import SessionLocal, init_db  # noqa: E402
 from db.bronze import register_file  # noqa: E402
 from db.ingest import ingest_gold_frames  # noqa: E402
 from db.models import (AuditLog, BronzeFile, Customer, GoldBankTxn,  # noqa: E402
-                       GoldBill, GoldFileRow, GoldRecovery, MatchLedger,
-                       MatchLedgerBill, SilverRecord)
+                       GoldBill, GoldFileRow, GoldRecovery,
+                       IngestConflict, MatchLedger, MatchLedgerBill,
+                       SilverRecord)
 from db.recovery_backfill import backfill_recovery_lines  # noqa: E402
 from db.storage import storage  # noqa: E402
 from recon.gold import ensure_schema  # noqa: E402
@@ -52,7 +53,7 @@ def customer(tmp_path):
     with SessionLocal() as s:
         ids = [m.id for m in s.query(MatchLedger).filter_by(customer_id=pk)]
         s.execute(delete(MatchLedgerBill).where(MatchLedgerBill.match_ledger_id.in_(ids)))
-        for model in (MatchLedger, AuditLog, GoldFileRow, GoldRecovery, GoldBill,
+        for model in (MatchLedger, AuditLog, IngestConflict, GoldFileRow, GoldRecovery, GoldBill,
                       GoldBankTxn, SilverRecord, BronzeFile):
             s.execute(delete(model).where(model.customer_id == pk))
         s.execute(delete(Customer).where(Customer.id == pk))
