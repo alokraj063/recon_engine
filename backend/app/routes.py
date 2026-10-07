@@ -26,13 +26,15 @@ from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
 from db import SessionLocal, incremental, reconcile_gold
-from db import ledger_export
+from db import collection as db_collection
+from db import daily_collection_export, ledger_export, webadi_export
 from db import overview as db_overview
 from db import zones as db_zones
 from db.audit import record_event
 from db.bronze import register_file
 from db.ingest import ingest_gold_frames
-from db.models import BronzeFile, Customer, MatchRuleSetRow, SourceConfig
+from db.models import (BronzeFile, Customer, GoldArInvoice, MatchRuleSetRow,
+                       SourceConfig)
 from db.silver import persist_silver
 from db.storage import file_sha256, is_s3_ref, storage
 from logging_setup import customer_id_var, get_logger
@@ -40,13 +42,16 @@ from recon import (REGISTRY, MatchRuleSet, PipelineSinks, SelfCheckError,
                    get_adapter, run_pipeline, write_workbook)
 from recon.engine import DEFAULT_COPY, DEFAULT_LABELS, resolve_copy
 from recon.pipeline import check_signal_coverage
-from recon.report import append_ledger_sheets, write_ledger_workbook
+from recon.report import (append_ledger_sheets,
+                          write_daily_collection_workbook,
+                          write_ledger_workbook, write_webadi_workbook)
 from recon.gold import GOLD_COLUMNS
 from recon.rules import COPY_SECTIONS, FieldMapping
 from recon.sources import resolve_adapter, role_of
 
 from . import runs
-from .auth import require_user
+from .auth import require_role, require_user
+from .users import router as users_router
 from .serialize import clean, df_to_records, summary_records
 
 # Every route below is gated in ONE place. A route added later is
@@ -54,6 +59,7 @@ from .serialize import clean, df_to_records, summary_records
 # remembered to decorate it. Public by construction: /api/health and
 # /api/auth/* are registered elsewhere (app/main.py, app/auth.py).
 router = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
+router.include_router(users_router)
 logger = get_logger(__name__)
 
 # legacy upload field -> slot source_type. Slots beyond these four (extra
@@ -276,6 +282,7 @@ def _effective_rules(rule_row, form_config):
             "amount_decimals": rule_row.amount_decimals,
             "ar_overdue_days": rule_row.ar_overdue_days,
             "awaiting_status_days": rule_row.awaiting_status_days,
+            "max_pairing_gap_days": rule_row.max_pairing_gap_days,
         }
     return MatchRuleSet().merged(db_overrides).merged(form_config)
 
@@ -334,6 +341,7 @@ def _build_payload(out, form_config, selfcheck, names, customer_key,
             "copy_overridden": bool(rules.copy_overrides),
             "batch_amount_slack": rules.batch_amount_slack,
             "amount_decimals": rules.amount_decimals,
+            "max_pairing_gap_days": rules.max_pairing_gap_days,
         }
     return payload
 
@@ -782,6 +790,164 @@ def download_ledger_workbook(customer_id: str = "default"):
                         background=BackgroundTask(_cleanup, out))
 
 
+# --- WebADI export (Oracle AR Receipt Upload) ---------------------------
+
+def _webadi_scope(session, customer_id: str, date_from: Optional[date],
+                  date_to: Optional[date]):
+    customer = _get_customer(session, customer_id)
+    if date_from is None:
+        date_from = webadi_export.latest_date(session, customer.id) or date.today()
+    if date_to is None:
+        date_to = date_from
+    if date_to < date_from:
+        _fail(400, "INVALID_INPUT", "'to' is before 'from'")
+    return customer, date_from, date_to
+
+
+@router.get("/export/webadi/preview")
+def preview_webadi(customer_id: str = "default",
+                   date_from: Optional[date] = Query(None, alias="from"),
+                   date_to: Optional[date] = Query(None, alias="to"),
+                   unit: Optional[list[str]] = Query(None),
+                   gl_date: Optional[date] = None):
+    """The records the WebADI download would carry, as JSON. With no
+    `from`, the day is the newest credit date with a confirmed match."""
+    with SessionLocal() as session:
+        customer, date_from, date_to = _webadi_scope(
+            session, customer_id, date_from, date_to)
+        records = webadi_export.build_records(
+            session, customer.id, date_from, date_to, units=unit, gl_date=gl_date)
+        return clean({
+            "from": date_from.isoformat(), "to": date_to.isoformat(),
+            "latest_date": _iso_or_none(webadi_export.latest_date(session, customer.id)),
+            "summary": webadi_export.summarize(records),
+            "issue_text": webadi_export.ISSUE_TEXT,
+            "records": records,
+        })
+
+
+def _iso_or_none(d):
+    return d.isoformat() if d else None
+
+
+@router.get("/export/webadi")
+def download_webadi(customer_id: str = "default",
+                    date_from: Optional[date] = Query(None, alias="from"),
+                    date_to: Optional[date] = Query(None, alias="to"),
+                    unit: Optional[list[str]] = Query(None),
+                    gl_date: Optional[date] = None):
+    """Oracle AR Receipt Upload (WebADI) workbook: one sheet per operating
+    unit, laid out like the ADI template."""
+    with SessionLocal() as session:
+        customer, date_from, date_to = _webadi_scope(
+            session, customer_id, date_from, date_to)
+        customer_id_var.set(customer.key)
+        records = webadi_export.build_records(
+            session, customer.id, date_from, date_to, units=unit, gl_date=gl_date)
+        summary = webadi_export.summarize(records)
+        out = _tmp_xlsx("recon_webadi_")
+        write_webadi_workbook(webadi_export.sheets(records, date.today()), out)
+        record_event(session, logger, event_type="export.webadi_downloaded",
+                     customer_id=customer.id, entity_type="webadi_export",
+                     details={"from": date_from.isoformat(), "to": date_to.isoformat(),
+                              "units": sorted(unit) if unit else None,
+                              "records": summary["records"],
+                              "receipts": summary["receipts"],
+                              "bills": summary["bills"],
+                              "by_unit": summary["by_unit"],
+                              "issues": summary["issues"]})
+        session.commit()
+    span = date_from.strftime("%d%m%Y") + (
+        "" if date_to == date_from else "_" + date_to.strftime("%d%m%Y"))
+    return FileResponse(str(out), media_type=XLSX,
+                        filename=f"AR_Receipt_Upload_{span}_WebADI.xlsx",
+                        background=BackgroundTask(_cleanup, out))
+
+
+# --- Daily Collection export ---------------------------------------------
+
+def _collection_scope(session, customer_id: str, date_from: Optional[date],
+                      date_to: Optional[date]):
+    customer = _get_customer(session, customer_id)
+    date_from, date_to = daily_collection_export.window(
+        session, customer.id, date_from, date_to)
+    if date_to < date_from:
+        _fail(400, "INVALID_INPUT", "'to' is before 'from'")
+    return customer, date_from, date_to
+
+
+@router.get("/export/daily-collection/preview")
+def preview_daily_collection(customer_id: str = "default",
+                             date_from: Optional[date] = Query(None, alias="from"),
+                             date_to: Optional[date] = Query(None, alias="to")):
+    """The rows the Daily Collection download would carry, as JSON. The
+    window starts on the first day of `from`'s 4-4-5 fiscal month (the
+    sheet is month-to-date); with no dates it is that month up to the
+    newest credit date with a confirmed match."""
+    with SessionLocal() as session:
+        customer, date_from, date_to = _collection_scope(
+            session, customer_id, date_from, date_to)
+        rows = daily_collection_export.build_rows(session, customer.id,
+                                                  date_from, date_to)
+        cfg = db_collection.effective(_default_rule_row(session, customer.id))
+        return clean({
+            "from": date_from.isoformat(), "to": date_to.isoformat(),
+            "latest_date": _iso_or_none(webadi_export.latest_date(session, customer.id)),
+            "ar_statements": _ar_statements(session, customer.id),
+            "recipients": cfg["recipients"],
+            "summary": daily_collection_export.summarize(rows),
+            "issue_text": daily_collection_export.ISSUE_TEXT,
+            "rows": rows,
+        })
+
+
+def _ar_statements(session, customer_pk: int) -> list:
+    """Every AR statement ingested: its date and invoice count."""
+    from sqlalchemy import func
+    return [{"statement_date": _iso_or_none(d), "invoices": n}
+            for d, n in session.execute(
+                select(GoldArInvoice.statement_date, func.count())
+                .where(GoldArInvoice.customer_id == customer_pk)
+                .group_by(GoldArInvoice.statement_date)
+                .order_by(GoldArInvoice.statement_date)).all()]
+
+
+def _default_rule_row(session, customer_pk: int):
+    return session.execute(
+        select(MatchRuleSetRow).where(MatchRuleSetRow.customer_id == customer_pk,
+                                      MatchRuleSetRow.is_default.is_(True))
+    ).scalar_one_or_none()
+
+
+@router.get("/export/daily-collection")
+def download_daily_collection(customer_id: str = "default",
+                              date_from: Optional[date] = Query(None, alias="from"),
+                              date_to: Optional[date] = Query(None, alias="to")):
+    """The collections team's DAILY COLLECTION workbook: one sheet per
+    fiscal month, laid out like theirs."""
+    with SessionLocal() as session:
+        customer, date_from, date_to = _collection_scope(
+            session, customer_id, date_from, date_to)
+        customer_id_var.set(customer.key)
+        rows = daily_collection_export.build_rows(session, customer.id,
+                                                  date_from, date_to)
+        summary = daily_collection_export.summarize(rows)
+        out = _tmp_xlsx("recon_daily_collection_")
+        write_daily_collection_workbook(daily_collection_export.sheets(rows), out)
+        record_event(session, logger, event_type="export.daily_collection_downloaded",
+                     customer_id=customer.id, entity_type="daily_collection_export",
+                     details={"from": date_from.isoformat(), "to": date_to.isoformat(),
+                              "rows": summary["rows"], "credits": summary["credits"],
+                              "days": summary["days"],
+                              "by_month": summary["by_month"],
+                              "issues": summary["issues"]})
+        session.commit()
+    return FileResponse(
+        str(out), media_type=XLSX,
+        filename=f"DAILY COLLECTION {daily_collection_export.file_date(date_to)}.xlsx",
+        background=BackgroundTask(_cleanup, out))
+
+
 # --- ledger (incremental mode) -----------------------------------------
 
 class DecisionBody(BaseModel):
@@ -1111,14 +1277,15 @@ async def ingest(
     the whole submission (422), as a single file would."""
     tmpdir = Path(tempfile.mkdtemp(prefix="recon_ingest_"))
     try:
-        # extra lineage slots upload under their slot key (source_type);
-        # discover them from the customer's configured sources
+        # extra lineage slots and the AR statement upload under their
+        # slot key (source_type); discover them from the customer's
+        # configured sources
         with SessionLocal() as session:
             _c, pre_source_configs, _r = _load_customer_context(session,
                                                                 customer_id)
         extra_slots = [st for st in pre_source_configs
                        if st not in SOURCE_TYPES.values()
-                       and role_of(st) == "lineage"]
+                       and role_of(st) in ("lineage", "ar_statement")]
         form = await request.form()
         fields = list(SOURCE_TYPES) + extra_slots
         uploads = {
@@ -1666,6 +1833,14 @@ class ExactSignalBody(BaseModel):
     key: str | None = None
 
 
+class ReferenceSignalBody(BaseModel):
+    bank_field: str
+    bill_field: str
+    weight: int = 8
+    key: str | None = None
+    min_length: int = 6
+
+
 class FieldMapBody(BaseModel):
     bank_amount_field: str
     bill_amount_field: str
@@ -1675,6 +1850,9 @@ class FieldMapBody(BaseModel):
     exact_signals: list[ExactSignalBody] = []
     eligibility_field: str
     fallback_due_statuses: list[str] = []
+    # None = keep the default reference signals (a client that predates
+    # them must not switch them off by saving); [] = explicitly none
+    reference_signals: list[ReferenceSignalBody] | None = None
 
 
 class RulesBody(BaseModel):
@@ -1695,6 +1873,8 @@ class RulesBody(BaseModel):
     amount_decimals: int = 2
     ar_overdue_days: int = 30
     awaiting_status_days: int = 7
+    # None = no pairing window
+    max_pairing_gap_days: int | None = None
 
 
 def _validate_rules(body: RulesBody):
@@ -1719,6 +1899,12 @@ def _validate_rules(body: RulesBody):
         need(sig.bill_field, bill_fields, "signal bill field")
         if sig.weight < 1:
             _fail(400, "INVALID_INPUT", "signal weights must be positive")
+    for sig in fm.reference_signals or []:
+        need(sig.bank_field, bank_fields, "reference signal bank field")
+        need(sig.bill_field, bill_fields, "reference signal bill field")
+        if sig.weight < 1 or sig.min_length < 1:
+            _fail(400, "INVALID_INPUT",
+                  "reference signal weight and min_length must be positive")
     if any(w < 1 for w in body.weights.values()):
         _fail(400, "INVALID_INPUT", "weights must be positive")
     if body.date_tolerance_days < 0 or body.amount_tolerance < 0 \
@@ -1736,6 +1922,8 @@ def _validate_rules(body: RulesBody):
         _fail(400, "INVALID_INPUT", "ar_overdue_days must be >= 0")
     if body.awaiting_status_days < 0:
         _fail(400, "INVALID_INPUT", "awaiting_status_days must be >= 0")
+    if body.max_pairing_gap_days is not None and body.max_pairing_gap_days < 0:
+        _fail(400, "INVALID_INPUT", "max_pairing_gap_days must be >= 0")
     if body.copy_overrides:
         known_codes = {code for section in DEFAULT_COPY.values()
                        for code in section}
@@ -1775,6 +1963,7 @@ def _rules_to_dict(rules: MatchRuleSet) -> dict:
         "amount_decimals": rules.amount_decimals,
         "ar_overdue_days": rules.ar_overdue_days,
         "awaiting_status_days": rules.awaiting_status_days,
+        "max_pairing_gap_days": rules.max_pairing_gap_days,
     }
 
 
@@ -1835,13 +2024,16 @@ def _audited_rules(rule_row) -> dict:
     return json.loads(json.dumps(d, default=str))
 
 
-@router.put("/customers/{customer_key}/config")
+@router.put("/customers/{customer_key}/config", dependencies=[Depends(require_role("admin"))])
 def put_customer_config(customer_key: str, body: RulesBody):
     """Save the customer's matching configuration (six tunables +
     paid_statuses + weights + field mapping)."""
     _validate_rules(body)
     # normalize the field map through the dataclass round-trip
-    field_map = FieldMapping.from_dict(body.field_map.model_dump()).to_dict()
+    fm_dict = body.field_map.model_dump()
+    if fm_dict.get("reference_signals") is None:
+        fm_dict.pop("reference_signals", None)
+    field_map = FieldMapping.from_dict(fm_dict).to_dict()
     with SessionLocal() as session:
         customer, _sources, rule_row = _load_customer_context(
             session, customer_key)
@@ -1876,6 +2068,7 @@ def put_customer_config(customer_key: str, body: RulesBody):
         rule_row.amount_decimals = body.amount_decimals
         rule_row.ar_overdue_days = body.ar_overdue_days
         rule_row.awaiting_status_days = body.awaiting_status_days
+        rule_row.max_pairing_gap_days = body.max_pairing_gap_days
         session.flush()
         changes = config_changes(before, _audited_rules(rule_row))
         # a save that changed nothing is not a configuration change
@@ -1900,7 +2093,7 @@ class SourcesBody(BaseModel):
 
 
 def _validate_slot(source_type: str, adapter_key: str | None):
-    fixed = set(SOURCE_TYPES.values())
+    fixed = set(SOURCE_TYPES.values()) | {"ar_statement"}
     if source_type not in fixed and not LINEAGE_SLOT_RE.fullmatch(source_type):
         _fail(400, "INVALID_INPUT",
               f"invalid slot '{source_type}': fixed slots are "
@@ -1935,7 +2128,7 @@ def _validate_slot_params(source_type: str, params: dict):
                   f"list of {frame} gold columns")
 
 
-@router.put("/customers/{customer_key}/sources")
+@router.put("/customers/{customer_key}/sources", dependencies=[Depends(require_role("admin"))])
 def put_customer_sources(customer_key: str, body: SourcesBody):
     """Persist adapter choice per slot (partial map allowed). Lineage
     slots are 0..N: name a new lineage_<key> slot to add it, send null
@@ -2039,7 +2232,7 @@ def get_customer_zones(customer_key: str):
         return _zones_payload(customer_key, rule_row)
 
 
-@router.put("/customers/{customer_key}/zones")
+@router.put("/customers/{customer_key}/zones", dependencies=[Depends(require_role("admin"))])
 def put_customer_zones(customer_key: str, body: ZonesBody):
     """Replace the zone directory (or reset it with zones=null). Display
     only — no reconcile needed; the Analyst queue reads it live."""
@@ -2072,12 +2265,83 @@ def put_customer_zones(customer_key: str, body: ZonesBody):
         return _zones_payload(customer_key, rule_row)
 
 
+class CategoryRow(BaseModel):
+    region: str | None = None
+    sales_rep: str
+    order_type: str | None = None
+    category: str | None = None
+    subcategory: str
+
+
+class FiscalCalendarBody(BaseModel):
+    pattern: list[int]
+    year_starts: dict[str, str] = {}
+
+
+class CollectionBody(BaseModel):
+    # None = back to every default
+    fiscal_calendar: FiscalCalendarBody | None = None
+    category_master: list[CategoryRow] | None = None
+    branch_codes: dict[str, str] | None = None
+    recipients: list[str] | None = None
+    segments: list[str] | None = None
+
+
+def _collection_payload(customer_key: str, rule_row) -> dict:
+    stored = (rule_row.collection_config if rule_row is not None else None) or {}
+    return {"key": customer_key,
+            "defaults": sorted(k for k in ("fiscal_calendar", "category_master",
+                                           "branch_codes", "recipients",
+                                           "segments")
+                               if not stored.get(k)),
+            **db_collection.effective(rule_row)}
+
+
+@router.get("/customers/{customer_key}/collection")
+def get_customer_collection(customer_key: str):
+    """Daily Collection settings: 4-4-5 calendar, category master, branch
+    codes, recipient list."""
+    with SessionLocal() as session:
+        _customer, _sources, rule_row = _load_customer_context(
+            session, customer_key)
+        return _collection_payload(customer_key, rule_row)
+
+
+@router.put("/customers/{customer_key}/collection", dependencies=[Depends(require_role("admin"))])
+def put_customer_collection(customer_key: str, body: CollectionBody):
+    """Replace the Daily Collection settings. A section left out (or
+    equal to its default) follows the default."""
+    try:
+        stored = db_collection.normalize(body.model_dump())
+    except db_collection.CollectionConfigError as e:
+        _fail(400, "INVALID_INPUT", str(e))
+    with SessionLocal() as session:
+        customer, _sources, rule_row = _load_customer_context(
+            session, customer_key)
+        customer_id_var.set(customer_key)
+        before = db_collection.effective(rule_row)
+        if rule_row is None:
+            rule_row = MatchRuleSetRow(customer_id=customer.id,
+                                       name="default", is_default=True)
+            session.add(rule_row)
+        rule_row.collection_config = stored
+        session.flush()
+        changes = config_changes({"collection": before},
+                                 {"collection": db_collection.effective(rule_row)})
+        if changes:
+            record_event(session, logger, event_type="config.collection_updated",
+                         customer_id=customer.id, entity_type="collection_config",
+                         details={"changes": changes})
+        session.commit()
+        return _collection_payload(customer_key, rule_row)
+
+
 class CustomerBody(BaseModel):
     key: str
     name: str
 
 
-@router.post("/customers")
+@router.post("/customers", dependencies=[Depends(require_role("admin"))])
 def create_customer(body: CustomerBody):
     """Create a customer with the default sources + rule set cloned —
     the fast path for onboarding someone on a different bank/ERP: create,

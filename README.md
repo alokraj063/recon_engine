@@ -47,6 +47,11 @@ Excel, and the FastAPI app only moves files in and frames out.
     # terminal 2 - frontend (proxies /api to :8000)
     cd frontend && npm run dev        # open http://localhost:5173
 
+    # :8000 taken by another app? run the backend on another port and
+    # point the dev proxy at it
+    cd backend && ../.venv/bin/uvicorn app.main:app --reload --port 8001
+    cd frontend && BACKEND_PORT=8001 npm run dev
+
 Settings (database, S3 storage, logging) are environment variables, optionally
 in `backend/.env` (template: `backend/.env.example`). Zero config means SQLite
 and local files. Every setting, the Docker image and the AWS/CI setup are

@@ -82,6 +82,8 @@ const CATEGORY_TONE: Record<Category, 'ok' | 'bad' | 'info' | 'warn' | 'neutral'
  *  always shown beside it, so nothing is hidden. */
 const EVENT_NAME: Record<string, string> = {
   'ingestion.completed': 'Documents ingested',
+  'export.webadi_downloaded': 'WebADI exported',
+  'export.daily_collection_downloaded': 'Daily collection exported',
   'bronze.file_registered': 'File registered',
   'bronze.file_deduped': 'Duplicate file recognised',
   'silver.rows_persisted': 'Parsed rows stored',
@@ -114,6 +116,7 @@ const EVENT_NAME: Record<string, string> = {
   'config.rules_updated': 'Matching rules updated',
   'config.sources_updated': 'Document sources updated',
   'config.zones_updated': 'Zone directory updated',
+  'config.collection_updated': 'Daily collection settings updated',
   'customer.created': 'Customer created',
   'config.rules_update_rejected': 'Matching rules change refused',
   'config.sources_update_rejected': 'Document sources change refused',
@@ -148,6 +151,9 @@ const ENTITY_NAME: Record<string, string> = {
   match_rule_set: 'Matching config',
   source_config: 'Source setup',
   zone_directory: 'Zone directory',
+  collection_config: 'Daily collection settings',
+  webadi_export: 'WebADI export',
+  daily_collection_export: 'Daily collection',
   customer: 'Customer',
   user: 'User',
 }
@@ -177,6 +183,7 @@ const DETAIL_LABEL: Record<string, string> = {
   via: 'Changed from',
   confidence: 'Confidence',
   exceptions_resolved: 'Exceptions closed',
+  zero_net_closed: 'Nil-payable bills closed',
   was_confidence: 'Was',
   superseded_by_seq: 'Replaced by match',
   exceptions_reopened: 'Exceptions reopened',

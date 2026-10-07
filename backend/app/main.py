@@ -22,6 +22,7 @@ from logging_setup import configure_logging, customer_id_var, get_logger, reques
 from .auth import (SESSION_COOKIE, cookie_secure, session_max_age,
                    session_secret)
 from .auth import router as auth_router
+from .okta import router as okta_router
 from .frontend import frontend_dist, mount_frontend
 from .routes import router
 
@@ -128,6 +129,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # auth FIRST: its own router carries no gate, so /api/auth/login is
 # reachable by someone who has no session yet
 app.include_router(auth_router)
+app.include_router(okta_router)
 app.include_router(router)
 
 

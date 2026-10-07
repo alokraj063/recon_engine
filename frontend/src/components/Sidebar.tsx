@@ -2,7 +2,7 @@ import type { ComponentType } from 'react'
 import {
   ArrowDownLeft, Boxes, FileSearch, FileStack, GitMerge,
   Landmark, LayoutDashboard, ListChecks, ListMinus, ReceiptText,
-  Upload, Download, LogOut, Settings,
+  Upload, Download, FileOutput, FileSpreadsheet, LogOut, Settings,
 } from 'lucide-react'
 import type { ReconResponse } from '../types'
 import { workbookUrl } from '../api'
@@ -19,6 +19,8 @@ export type View =
   | 'ledger'
   | 'ar'
   | 'audit'
+  | 'export'
+  | 'collection'
   | 'architecture'
   | 'settings'
   | 'summary'
@@ -118,13 +120,15 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
       <nav className="sidebar-nav">
         <div className="nav-group-label">Operate</div>
         {openItem({ view: 'command', label: 'Command Center', icon: LayoutDashboard })}
-        {openItem({ view: 'ingest', label: 'Ingest documents', icon: Upload })}
-        {openItem({ view: 'reconcile', label: 'Reconcile', icon: GitMerge })}
+        {user.role !== 'viewer' && openItem({ view: 'ingest', label: 'Ingest documents', icon: Upload })}
+        {user.role !== 'viewer' && openItem({ view: 'reconcile', label: 'Reconcile', icon: GitMerge })}
 
         <div className="nav-group-label">Workspace</div>
         {openItem({ view: 'ledger', label: 'Analyst queue', icon: ListChecks })}
         {openItem({ view: 'ar', label: 'AR Reconciliation', icon: ArrowDownLeft })}
         {openItem({ view: 'audit', label: 'Audit trail', icon: FileSearch })}
+        {openItem({ view: 'export', label: 'WebADI export', icon: FileOutput })}
+        {openItem({ view: 'collection', label: 'Daily collection', icon: FileSpreadsheet })}
 
         <div className="nav-group-label">Data</div>
         {DATA_PAGES.map(dataItem)}
@@ -136,7 +140,7 @@ export function Sidebar({ view, onNavigate, result, dataScope }: Props) {
 
       <div className="sidebar-foot">
         <div className="side-user">
-          <span className="side-user-name" title={user.email}>{user.name}</span>
+          <span className="side-user-name" title={`${user.email}${user.role ? ` · ${user.role}` : ''}`}>{user.name}</span>
           <button className="side-signout btn-ic" onClick={() => void signOut()} title="Sign out">
             <LogOut size={13} strokeWidth={1.75} /> Sign out
           </button>

@@ -157,6 +157,7 @@ def run_pipeline(inputs: Dict[str, object],
         copy_overrides=rules.copy_overrides,
         batch_amount_slack=rules.batch_amount_slack,
         amount_decimals=rules.amount_decimals,
+        max_pairing_gap_days=rules.max_pairing_gap_days,
     )
     out["bank"] = bank
     out["bank_all"] = bank_all

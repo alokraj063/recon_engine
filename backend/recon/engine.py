@@ -342,7 +342,8 @@ def reconcile(bank_df, bill_df, lineage_df=None, extra_lineage_df=None,
               amount_tolerance=0.0, allow_batched=True, max_batch_size=3,
               paid_statuses=None, weights=None, field_map=None,
               copy_overrides=None, batch_amount_slack=0.5, amount_decimals=2,
-              unmatchable=None, expected_from=None):
+              unmatchable=None, expected_from=None,
+              max_pairing_gap_days=None):
     """
     Returns a dict of frames: matched, bank_only, bill_only, summary,
     bills_enriched. lineage_df is the canonical unified lineage frame
@@ -360,6 +361,8 @@ def reconcile(bank_df, bill_df, lineage_df=None, extra_lineage_df=None,
     passes the earliest credit its ledger has seen, because its wide-open
     window would otherwise report every advised bill since the first
     export as unpaid. None (snapshot / CLI / golden) changes nothing.
+    max_pairing_gap_days: MatchRuleSet's pairing window, handed to the
+    matcher (None = no window).
     """
     from .rules import FieldMapping
     mapping = field_map or FieldMapping()
@@ -383,6 +386,7 @@ def reconcile(bank_df, bill_df, lineage_df=None, extra_lineage_df=None,
         batch_amount_slack=batch_amount_slack,
         amount_decimals=amount_decimals,
         unmatchable=unmatchable,
+        max_pairing_gap_days=max_pairing_gap_days,
     )
     # Stable id per match, and the settlement stamped onto the bills so a
     # bill row can say which credit paid it. All confidences are recorded;

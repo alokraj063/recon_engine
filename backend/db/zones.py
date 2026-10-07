@@ -80,6 +80,46 @@ def resolve(table: dict, zone) -> Optional[dict]:
     return table.get(_key(zone))
 
 
+# Oracle has NO customer for the South Coast zone (formed 2019 out of SCR and
+# ECoR divisions): its invoices sit under the legacy railway's customer, and
+# the collections team's sheet writes that railway too. On 2026-09 data every
+# SCoR bill the AR statement lists (45 of 45) carries SOUTH CENTRAL or EAST
+# COAST, and the division on the bill says which. Read from the AR customer
+# name first (Oracle's own answer), else from the IREPS division, else
+# unresolved — never guessed.
+ZONES_WITHOUT_ORACLE_CUSTOMER = {"SCOR"}
+LEGACY_ZONE_BY_DIVISION = (
+    ("ECOR", ("VISH", "VISAKH", "WALTAIR")),     # Visakhapatnam / Waltair
+    ("SCR", ("VIJAY", "GUNT", "TIRUPATI")),      # Vijayawada / Guntur / Guntakal / Tirupati
+)
+
+
+def needs_legacy_zone(table: dict, zone) -> bool:
+    info = resolve(table, zone)
+    return bool(info) and _key(info["code"]) in ZONES_WITHOUT_ORACLE_CUSTOMER
+
+
+def oracle_zone(table: dict, zone, ar_customer=None, division=None) -> Optional[dict]:
+    """The directory entry of the zone Oracle books `zone` under. An
+    ordinary zone is itself; a zone Oracle has no customer for resolves to
+    its legacy railway (entry gains legacy=True), or None when neither the
+    AR customer name nor the division says which."""
+    info = resolve(table, zone)
+    if info is None or _key(info["code"]) not in ZONES_WITHOUT_ORACLE_CUSTOMER:
+        return info
+    name = " ".join(str(ar_customer or "").upper().split())
+    if name:
+        for entry in table.values():
+            if (entry["code"] != info["code"] and entry.get("name")
+                    and " ".join(str(entry["name"]).upper().split()) == name):
+                return {**entry, "legacy": True}
+    div = str(division or "").upper()
+    for code, words in LEGACY_ZONE_BY_DIVISION:
+        if any(w in div for w in words) and resolve(table, code):
+            return {**resolve(table, code), "legacy": True}
+    return None
+
+
 def normalize(entries: list) -> dict:
     """API list [{code, name, region, segment, aliases}] -> stored dict.
     Codes and aliases are upper-cased; every code/alias must be unique

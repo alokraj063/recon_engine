@@ -33,7 +33,14 @@ CASES = [
     ("NEFT FROM 1101CLWHIGH REACH PANTOGR SBINN52026070291743281", "CLW"),
     ("NEFT FROM 2501RCFEP BRAKE SYSTEM ME SBINN52026071008508016", "RCF"),
     ("NEFT FROM 1301ICF1331000197 100 In SBINN52026072837723162", "ICF"),
-    ("NEFT FROM 1501DMW13310001 SBINN5", "DMW"),
+    # DMW / DLW are PLW / BLW's old names: extracted, returned canonical
+    ("NEFT FROM 1501DMW13310001 SBINN5", "PLW"),
+    ("NEFT FROM 1501DMWE70 BR SYS WAG9 PL SBINN52026090520266773 SBOI /ATTN ", "PLW"),
+    ("NEFT FROM 1501DMW1331000436PLW08082 SBINN52026090520266638 SBOI /ATTN ", "PLW"),
+    ("NEFT FROM 1201DLWBrake control syst SBINN52026091639419761 SBOI /ATTN ", "BLW"),
+    ("NEFT FROM 1201DLW1331000 SBINN5", "BLW"),
+    ("NEFT FROM 1501PLW1331000 SBINN5", "PLW"),
+    ("NEFT FROM 1201BLWBrake SBINN5", "BLW"),
     ("NEFT FROM RCFLHB BRAKE SYSTEM SLR W SBINN52026071415036664", "RCF"),
     ("NEFT FROM MCFAxle mounted disc SBINN5", "MCF"),
     ("NEFT FROM ICF332026010 SBINN5", "ICF"),
@@ -56,6 +63,25 @@ CASES = [
     ("NEFT FROM MEDHA SERVO DRIVES PVT LT ICICN22026082144212285 ICIB VENDOR PAYMENTS", None),
     ("NEFT FROM 0701HQ SERSET OF MK FOR D ICICN22026081881167091 ICIB", None),
     ("NEFT FROM 0701HQ SERSET OF MK FOR D SBINN52026081881167091 SBOI /ATTN", "SER"),
+    # SECR's divisions (34xx) often write the zone as SEC -> SECR, but
+    # only at Rule A's anchored position on an SBI NEFT
+    ("NEFT FROM 3403RAIP SECVENTURI VALVE SBINN52026090825281744 SBOI /ATTN ", "SECR"),
+    ("NEFT FROM 3403RAIP SECDOUBLE CHECK SBINN52026091132760017 SBOI /ATTN 2", "SECR"),
+    ("NEFT FROM 3404WRSR SECTOGGLE BOLT F SBINN52026091435991226 SBOI /ATTN ", "SECR"),
+    ("NEFT FROM 3403RAIP SECKit for set o SBINN52026091537656480 SBOI /ATTN ", "SECR"),
+    ("NEFT FROM RAIP SECVENTURIEP MANIFOL SBINN52026091740261090 SBOI /ATTN ", "SECR"),
+    ("NEFT FROM RAIP SECOH kit for FT1 Fe SBINN52026091740261143 SBOI /ATTN ", "SECR"),
+    ("NEFT FROM 3402BSP SECCC I Final AC SBINN52026081374060653 SBOI /ATTN 2", "SECR"),
+    ("NEFT FROM 3406MBWS SECYES SBINN52026081476954053 SBOI /ATTN 2026/08/14", "SECR"),
+    # genuine SECR spellings keep working (longest spelling first)
+    ("NEFT FROM 3401HQ SECRKIT FOR 114 CH SBINN52026090826366141 SBOI /ATTN ", "SECR"),
+    ("NEFT FROM 3403RAIP SECRepair rehab SBINN52026081273343107 SBOI /ATTN 2", "SECR"),
+    # SEC through a non-SBI bank is not an IREPS payment
+    ("NEFT FROM 3403RAIP SECVENTURI VALVE ICICN22026090825281744 ICIB", None),
+    # SEC never fires through the unanchored legacy search
+    ("NEFT FROM 3403RAIPSECVENTURI SBINN5", None),
+    ("NEFT FROM 3403RAIP Sec kit SBINN5", None),               # case-sensitive
+    ("NEFT FROM ICICI SECURITIES L NPS CO ICICN22026081237096492 ICIB REFUND", None),
     ("", None),
     (None, None),
 ]
@@ -64,8 +90,24 @@ CASES = [
 def test_unit_code_in_a_vendor_name_is_not_a_unit():
     """Rules A/B only apply after 'NEFT FROM' (the IREPS payer prefix);
     a vendor whose name starts with a unit code keeps whatever the legacy
-    search says — never DMW."""
-    assert zone("DMW CNC SOLUTIONS INDIA (P) LTD D218000279350002 /5750000103") != "DMW"
+    search says — never DMW, nor its canonical PLW."""
+    assert zone("DMW CNC SOLUTIONS INDIA (P) LTD D218000279350002 /5750000103") not in ("DMW", "PLW")
+
+
+@pytest.mark.parametrize("narrative", [
+    "NEFT FROM ABC SECURITY SERVICES SBINN52026090825281744 SBOI",
+    "NEFT FROM 3403RAIP SECTION ENGINEER SBINN5",
+    "NEFT FROM 1234XYZ SECURITIES LTD SBINN5",
+])
+def test_sec_word_is_never_secr(narrative):
+    """SEC is read as SECR only as a zone glued to a description, never as
+    the head of SECURITY / SECTION — even on an SBI-routed NEFT."""
+    assert zone(narrative) != "SECR"
+
+
+def test_aliases_are_canonical_bill_codes():
+    from recon.parsers.bank_hsbc import ZONE_ALIASES
+    assert ZONE_ALIASES == {"SEC": "SECR", "DMW": "PLW", "DLW": "BLW"}
 
 
 @pytest.mark.parametrize("narrative,expected", CASES)

@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from 'react'
-import { LogIn } from 'lucide-react'
-import { signIn } from '../api'
+import { useEffect, useState, type FormEvent } from 'react'
+import { LogIn, ShieldCheck } from 'lucide-react'
+import { fetchProviders, signIn } from '../api'
 import { ApiError, type AuthUser } from '../types'
 import logo from '../assets/jouletowatts_logo.png'
 
@@ -28,7 +28,30 @@ function messageFor(error: ApiError): string {
   }
 }
 
+/** Why an Okta sign-in came back without a session (?auth_error=<code>). */
+const OKTA_ERRORS: Record<string, string> = {
+  NO_ACCESS: 'Please contact Admin for access.',
+  INACTIVE: 'This account is deactivated. Please contact Admin.',
+  OKTA_NOT_CONFIGURED: 'Okta sign-in is not set up.',
+  FAILED: 'Okta sign-in failed. Try again.',
+}
+
+/** Read the code once and drop it from the address bar, so a reload does
+ *  not show the same message again. */
+function takeAuthError(): string | null {
+  const code = new URLSearchParams(window.location.search).get('auth_error')
+  if (!code) return null
+  window.history.replaceState(null, '', window.location.pathname + window.location.hash)
+  return OKTA_ERRORS[code] ?? OKTA_ERRORS.FAILED
+}
+
 export function LoginView({ onSignedIn, expired }: Props) {
+  const [okta, setOkta] = useState(false)
+  const [oktaError] = useState<string | null>(takeAuthError)
+  useEffect(() => {
+    fetchProviders().then((p) => setOkta(p.okta)).catch(() => setOkta(false))
+  }, [])
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -86,12 +109,22 @@ export function LoginView({ onSignedIn, expired }: Props) {
           />
         </label>
 
-        {error && <p className="login-error" role="alert">{error}</p>}
+        {(error || oktaError) && <p className="login-error" role="alert">{error ?? oktaError}</p>}
 
         <button className="btn-run btn-ic" type="submit" disabled={busy || !email || !password}>
           <LogIn size={15} strokeWidth={1.75} />
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
+
+        {okta && (
+          <>
+            <p className="login-or"><span>or</span></p>
+            <a className="ui-btn btn-ic login-okta" href="/api/auth/okta/login">
+              <ShieldCheck size={15} strokeWidth={1.75} />
+              Sign in with Okta
+            </a>
+          </>
+        )}
 
         <p className="login-foot">
           Contact your administrator for access.

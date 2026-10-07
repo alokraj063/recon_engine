@@ -23,6 +23,7 @@ export function sourceRoleTag(sourceType: string): string {
   if (sourceType === 'bank_statement' || sourceType === 'bank_txns') return 'BANK'
   if (sourceType === 'bill_status' || sourceType === 'bills') return 'BILLS'
   if (sourceType === 'recoveries') return 'RECOV'
+  if (sourceType === 'ar_statement' || sourceType === 'ar_invoices') return 'AR'
   return sourceType.replace(/^lineage_?/, '').toUpperCase() || 'DOC'
 }
 
@@ -79,6 +80,18 @@ function kindLine(frame: string, s: FrameIngestStats): KindLine {
       frame,
       title: 'Recovery lines',
       chips: [{ key: 'inserted', label: 'New recovery lines', value: s.inserted }],
+    }
+  }
+  if (frame === 'ar_invoices') {
+    // an AR statement is a snapshot: every invoice line is a new record
+    return {
+      frame,
+      title: 'AR invoices',
+      chips: [
+        { key: 'total', label: 'Invoice lines', value: s.reported, tone: 'total' },
+        { key: 'inserted', label: 'New', value: s.inserted },
+        { key: 'unchanged', label: 'Already ingested', value: s.unchanged },
+      ],
     }
   }
   // lineage_<slot> — any upstream document kind (RNOTE, CRN, GRN, …)

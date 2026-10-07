@@ -151,6 +151,8 @@ def audit_events(session, customer_pk: int, limit: int = 500) -> list:
             e = {"label": "Source setup", "context": None}
         if e is None and r.entity_type == "zone_directory":
             e = {"label": "Zone directory", "context": None}
+        if e is None and r.entity_type == "collection_config":
+            e = {"label": "Daily collection settings", "context": None}
         out.append({
             "id": r.id,
             "event_type": r.event_type,

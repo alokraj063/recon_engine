@@ -50,12 +50,14 @@ RAILWAY_COPY = {
 }
 
 # (slot source_type, role, adapter_key, params) — lineage is 0..N slots
-# per customer; these two are the seeded IREPS pair.
+# per customer; the two lineage rows are the seeded IREPS pair.
 DEFAULT_SOURCES = [
     ("bank_statement", "bank_statement", "hsbc", {}),
     ("bill_status", "bill_status", "ireps", {}),
     ("lineage_rnote", "lineage", "ireps_rnote", {"sheet": 0}),
     ("lineage_crn", "lineage", "ireps_crn", {"sheet": 0}),
+    # the ERP's AR statement — feeds the Daily Collection export only
+    ("ar_statement", "ar_statement", "oracle_ar", {}),
 ]
 
 
@@ -136,7 +138,8 @@ def seed_admin_user(session, logger=None):
                 "details": {"reason": str(exc)}})
         return None
 
-    user = User(email=normalize_email(email), name=email, password_hash=hashed)
+    user = User(email=normalize_email(email), name=email, password_hash=hashed,
+                role="admin")
     session.add(user)
     session.flush()
     # a login appearing is an access change: durable audit row, not just a

@@ -55,7 +55,7 @@ def user():
     """A throwaway login, deleted afterwards along with its audit rows."""
     email = f"auth-{uuid.uuid4().hex[:8]}@example.com"
     with SessionLocal() as s:
-        row = User(email=email, name="Auth Test",
+        row = User(email=email, name="Auth Test", role="admin",
                    password_hash=hash_password(PASSWORD))
         s.add(row)
         s.commit()
@@ -99,7 +99,8 @@ def test_sign_in_then_call_an_api_route(client, user):
     email, user_id = user
     r = login(client, email)
     assert r.status_code == 200, r.text
-    assert r.json() == {"id": user_id, "email": email, "name": "Auth Test"}
+    assert r.json() == {"id": user_id, "email": email, "name": "Auth Test",
+                         "role": "admin"}
 
     me = client.get("/api/auth/me")
     assert me.status_code == 200
@@ -187,3 +188,67 @@ def test_a_failed_login_is_audited_without_the_email(client, user):
     # ids and reason codes only — no address anywhere in the trail
     for row in rows:
         assert email not in str(row.details or {})
+
+
+# --- roles ---------------------------------------------------------------
+
+def _set_role(user_id, role):
+    with SessionLocal() as s:
+        s.get(User, user_id).role = role
+        s.commit()
+
+
+def _sign_in(client, email):
+    r = client.post("/api/auth/login", json={"email": email, "password": PASSWORD})
+    assert r.status_code == 200, r.text
+    return r
+
+
+def test_login_without_a_role_says_contact_admin(client, user):
+    email, user_id = user
+    _set_role(user_id, None)
+    r = client.post("/api/auth/login", json={"email": email, "password": PASSWORD})
+    assert r.status_code == 403 and r.json()["detail"]["error"] == "NO_ACCESS"
+    assert client.get("/api/auth/me").status_code == 401
+
+
+def test_okta_only_user_cannot_use_password_login(client, user):
+    email, user_id = user
+    with SessionLocal() as s:
+        s.get(User, user_id).password_hash = None
+        s.commit()
+    r = client.post("/api/auth/login", json={"email": email, "password": PASSWORD})
+    assert r.status_code == 401 and r.json()["detail"]["error"] == "INVALID_CREDENTIALS"
+
+
+def test_viewer_is_read_only_and_me_reports_role(client, user):
+    email, user_id = user
+    _set_role(user_id, "viewer")
+    _sign_in(client, email)
+    assert client.get("/api/auth/me").json()["role"] == "viewer"
+    assert client.get("/api/customers").status_code == 200
+    r = client.post("/api/customers", json={"key": "viewer-try", "name": "x"})
+    assert r.status_code == 403 and r.json()["detail"]["error"] == "FORBIDDEN"
+
+
+def test_role_withdrawn_mid_session_takes_effect(client, user):
+    email, user_id = user
+    _sign_in(client, email)
+    assert client.get("/api/customers").status_code == 200
+    _set_role(user_id, None)
+    r = client.get("/api/customers")
+    assert r.status_code == 403 and r.json()["detail"]["error"] == "NO_ACCESS"
+
+
+def test_config_changes_are_admin_only(client, user):
+    email, user_id = user
+    _set_role(user_id, "analyst")
+    _sign_in(client, email)
+    for method, path in [("put", "/api/customers/default/config"),
+                         ("put", "/api/customers/default/sources"),
+                         ("put", "/api/customers/default/zones"),
+                         ("put", "/api/customers/default/collection"),
+                         ("post", "/api/customers")]:
+        r = getattr(client, method)(path, json={})
+        assert r.status_code == 403, (path, r.status_code)
+        assert r.json()["detail"]["error"] == "FORBIDDEN"

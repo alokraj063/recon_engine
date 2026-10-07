@@ -129,7 +129,7 @@ def test_late_bill_supersedes_a_weak_match(world):
 
     old, new = _matches(cust)
     assert rescored == {"provisional_reviewed": 1, "provisional_superseded": 1,
-                        "provisional_kept_conflict": 0}
+                        "provisional_kept_conflict": 0, "provisional_released": 0}
     assert (old.status, old.locked_by) == ("REJECTED", incremental.SUPERSEDED_BY)
     assert old.decided_by_user_id is None and f"M-{new.seq}" in old.decision_note
     assert (new.confidence, new.status, new.locked_by) == ("HIGH", "LOCKED", "AUTO_HIGH")

@@ -11,6 +11,7 @@ A plain-language walk-through of every screen in the app — what you're looking
 ## Contents
 
 - [The big idea](#the-big-idea)
+- [Signing in and roles](#signing-in-and-roles)
 - [Getting around](#getting-around)
 - [Command Center](#command-center)
 - [Ingest files](#ingest-files)
@@ -48,6 +49,24 @@ Two more things worth knowing before you start clicking around:
 
 - **Ingesting** (uploading files) and **reconciling** (matching bank credits to bills) are two separate steps, on two separate pages. Uploading a file never runs a match by itself — you always go and click "Run reconciliation" afterwards.
 - Two kinds of tab look similar but behave completely differently: the **Gold data** tabs (in the left sidebar) are always live — open them any time and they show what's true right now. The **Reconciliation result** tabs (Summary, Matched, Exceptions, and the four "Run data" tabs) are a frozen photograph of one specific run and never change on their own.
+
+---
+
+## Signing in and roles
+
+**Sign in** with your email and password, or with **Sign in with Okta** (your Wabtec Okta account) when that button is shown. Both give you the same session.
+
+**Roles** decide what you can do. An administrator assigns them in **Settings › Users**:
+
+| Role | You can |
+|---|---|
+| Admin | Everything, including Settings and managing users. |
+| Analyst | Ingest, reconcile, accept/reject matches, decide exceptions, export. Settings are read-only. |
+| Viewer | Look at everything; change nothing. Ingest and Reconcile are hidden. |
+
+If you sign in with Okta but have not been given a role, you come back to the login screen with **"Please contact Admin for access."** Ask an administrator to add your email with a role; it works on your next sign-in.
+
+**For administrators:** Settings › Users lists everyone, lets you change a role, switch someone off (effective on their next click) and add a person by email and role. People you add sign in with Okta. At least one active admin must always remain. Every change is recorded in the Audit trail.
 
 ---
 

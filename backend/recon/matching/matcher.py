@@ -17,7 +17,8 @@ import pandas as pd
 
 from ..rules import FieldMapping
 from .scoring import (DEFAULT_MAPPING, PAID_STATUSES, confidence_label,
-                      norm_text, pick_bill_date, score_pair)
+                      norm_text, pairing_allowed, pick_bill_date,
+                      reference_hits, score_pair)
 
 
 @dataclass
@@ -96,13 +97,16 @@ def _eligible_bills(bill_df, paid_statuses=PAID_STATUSES,
 # --------------------------------------------------------------------- #
 def _score_all_pairs(bank_df, candidates, amt_index, date_tolerance_days,
                      amount_tolerance, weights=None,
-                     mapping=DEFAULT_MAPPING, decimals=2):
+                     mapping=DEFAULT_MAPPING, decimals=2,
+                     max_pairing_gap_days=None):
     """
     Score everything, assign nothing.
 
     Returns (pairs, no_candidate). `pairs` is one dict per credit/bill
     combination sharing an amount. `no_candidate` is the positions of
-    credits where no bill matched on amount at all.
+    credits where no bill matched on amount at all — or none whose date
+    lies inside the pairing window (max_pairing_gap_days; None = no
+    window), which is the same thing: no bill could be this payment.
     """
     def lookup(amt):
         if amount_tolerance == 0.0:
@@ -116,6 +120,11 @@ def _score_all_pairs(bank_df, candidates, amt_index, date_tolerance_days,
     pairs, no_candidate = [], []
     for pos, b in bank_df.iterrows():
         cand = lookup(round(b[mapping.bank_amount_field], decimals))
+        if max_pairing_gap_days is not None:
+            bank_date = b.get(mapping.bank_date_field)
+            cand = [i for i in cand if pairing_allowed(
+                bank_date, pick_bill_date(candidates.loc[i], mapping)[0],
+                date_tolerance_days, max_pairing_gap_days)]
         if not cand:
             no_candidate.append(pos)
             continue
@@ -128,6 +137,7 @@ def _score_all_pairs(bank_df, candidates, amt_index, date_tolerance_days,
                 "zone_check": zc, "date_check": dc,
                 "date_gap": gap, "date_source": dsrc,
                 "n_candidates": len(cand),
+                "named": bool(reference_hits(b, candidates.loc[i], mapping)),
             })
     return pairs, no_candidate
 
@@ -254,6 +264,9 @@ def _assign(bank_df, candidates, pairs, top_score, tied, top_pairs,
                     f"REVIEW - amount matched only; {failed_sigs} and date "
                     f"both unconfirmed")
 
+        if p.get("named") and flags:
+            flags.append(f"bill {row.get('bill_number')} is named in the "
+                         f"credit's narrative")
         results.append(MatchResult(
             bank_ref=b.get("bank_ref", ""),
             narrative=b["narrative"],
@@ -396,6 +409,7 @@ def match_bank_to_billstatus(
     batch_amount_slack=0.5,
     amount_decimals=2,
     unmatchable=None,
+    max_pairing_gap_days=None,
 ):
     """
     Returns (results, unmatched_bank).
@@ -407,6 +421,11 @@ def match_bank_to_billstatus(
     out of matching — the incremental pool's non-IREPS receipts. They are
     never scored and go straight to unmatched_bank, tagged like any other
     unmatched credit. None (every existing caller) changes nothing.
+
+    `max_pairing_gap_days` (MatchRuleSet) drops, before scoring, every bill
+    whose date lies outside the pairing window around the credit; None =
+    no window. The batch pass needs no such filter: it already requires
+    every bill's date within date_tolerance_days.
     """
     mapping = mapping or FieldMapping()
     candidates = _eligible_bills(bill_df, paid_statuses, mapping)
@@ -417,7 +436,7 @@ def match_bank_to_billstatus(
 
     pairs, no_candidate = _score_all_pairs(
         scored_bank, candidates, amt_index, date_tolerance_days, amount_tolerance,
-        weights, mapping, amount_decimals)
+        weights, mapping, amount_decimals, max_pairing_gap_days)
     top_score, tied, top_pairs = _ceilings(pairs)
     results, used_bills, used_bank = _assign(
         bank_df, candidates, pairs, top_score, tied, top_pairs, mapping)

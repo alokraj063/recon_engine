@@ -1,0 +1,1554 @@
+﻿[
+    {
+        "Day":  "12",
+        "Ingest":  {
+                       "customer":  "wabtec",
+                       "files":  [
+                                     {
+                                         "field":  "statement",
+                                         "source_type":  "bank_statement",
+                                         "original_name":  "HSBCINRHSBCINR2026-08-12-03.00.03.000974.PDF",
+                                         "bronze_file_id":  94,
+                                         "outcome":  "registered",
+                                         "size_bytes":  82504
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Friction-12082026.xlsx",
+                                         "bronze_file_id":  95,
+                                         "outcome":  "registered",
+                                         "size_bytes":  9674
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Hosur-12082026.xlsx",
+                                         "bronze_file_id":  96,
+                                         "outcome":  "registered",
+                                         "size_bytes":  317571
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Rohtak-12082026.xlsx",
+                                         "bronze_file_id":  97,
+                                         "outcome":  "registered",
+                                         "size_bytes":  22957
+                                     }
+                                 ],
+                       "stats":  {
+                                     "files_reused":  0,
+                                     "rows_inserted":  6845,
+                                     "bills_updated":  0,
+                                     "rows_reused":  0,
+                                     "conflicts":  0,
+                                     "rows_reported":  6845,
+                                     "by_frame":  {
+                                                      "bank_txns":  {
+                                                                        "inserted":  158,
+                                                                        "updated":  0,
+                                                                        "unchanged":  0,
+                                                                        "conflicts":  0,
+                                                                        "reported":  158
+                                                                    },
+                                                      "bills":  {
+                                                                    "inserted":  2486,
+                                                                    "updated":  0,
+                                                                    "unchanged":  0,
+                                                                    "conflicts":  0,
+                                                                    "reported":  2486
+                                                                },
+                                                      "recoveries":  {
+                                                                         "inserted":  4201,
+                                                                         "updated":  0,
+                                                                         "unchanged":  0,
+                                                                         "conflicts":  0,
+                                                                         "reported":  4201
+                                                                     }
+                                                  }
+                                 },
+                       "selfcheck":  null,
+                       "selfchecks":  [
+
+                                      ]
+                   },
+        "Reconcile":  {
+                          "counts":  {
+                                         "matched":  32,
+                                         "bank_only":  50,
+                                         "bill_only":  1,
+                                         "match_review":  0,
+                                         "bank_credits":  82,
+                                         "unrecognised_receipts":  50,
+                                         "bank_txns":  82,
+                                         "bills":  2486,
+                                         "bills_grouped":  2244,
+                                         "recoveries":  4201
+                                     },
+                          "selfcheck":  null,
+                          "signal_coverage":  null,
+                          "config":  {
+                                         "window_days":  null,
+                                         "co7_lookback_days":  null,
+                                         "date_tolerance_days":  null,
+                                         "amount_tolerance":  null,
+                                         "allow_batched":  null,
+                                         "max_batch_size":  null
+                                     },
+                          "filenames":  {
+                                            "statement":  "HSBCINRHSBCINR2026-08-12-03.00.03.000974.PDF",
+                                            "statements":  [
+                                                               "HSBCINRHSBCINR2026-08-12-03.00.03.000974.PDF"
+                                                           ],
+                                            "bills":  "Rohtak-12082026.xlsx",
+                                            "rnote":  null,
+                                            "crn":  null
+                                        },
+                          "customer":  "wabtec",
+                          "mode":  "incremental",
+                          "ledger":  {
+                                         "matches_created":  32,
+                                         "auto_locked":  32,
+                                         "exceptions_opened":  51,
+                                         "exceptions_resolved":  0,
+                                         "provisional_reviewed":  0,
+                                         "provisional_superseded":  0,
+                                         "provisional_kept_conflict":  0
+                                     },
+                          "statement_bronze_id":  94,
+                          "statement_bronze_ids":  [
+                                                       94
+                                                   ],
+                          "selfchecks":  [
+
+                                         ],
+                          "expected_from":  "2026-08-11",
+                          "rules_effective":  {
+                                                  "field_map":  {
+                                                                    "bank_amount_field":  "amount",
+                                                                    "bill_amount_field":  "net_payable_amount",
+                                                                    "bank_date_field":  "value_date",
+                                                                    "bill_date_primary":  "payment_advice_date",
+                                                                    "bill_date_fallback":  "payment_order_date",
+                                                                    "exact_signals":  [
+                                                                                          {
+                                                                                              "bank_field":  "zone_guess",
+                                                                                              "bill_field":  "zone",
+                                                                                              "weight":  2,
+                                                                                              "key":  "zone"
+                                                                                          }
+                                                                                      ],
+                                                                    "eligibility_field":  "bill_status",
+                                                                    "fallback_due_statuses":  [
+
+                                                                                              ]
+                                                                },
+                                                  "paid_statuses":  [
+                                                                        "PAYMENT MADE"
+                                                                    ],
+                                                  "weights":  {
+                                                                  "zone":  2,
+                                                                  "co7_date":  1,
+                                                                  "advice_date":  4
+                                                              },
+                                                  "copy_overridden":  false,
+                                                  "batch_amount_slack":  0.5,
+                                                  "amount_decimals":  2
+                                              }
+                      }
+    },
+    {
+        "Day":  "13",
+        "Ingest":  {
+                       "customer":  "wabtec",
+                       "files":  [
+                                     {
+                                         "field":  "statement",
+                                         "source_type":  "bank_statement",
+                                         "original_name":  "HSBCINRHSBCINR2026-08-13-03.00.11.000870.PDF",
+                                         "bronze_file_id":  98,
+                                         "outcome":  "registered",
+                                         "size_bytes":  83002
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Friction-13082026.xlsx",
+                                         "bronze_file_id":  99,
+                                         "outcome":  "registered",
+                                         "size_bytes":  9497
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Hosur-13082026.xlsx",
+                                         "bronze_file_id":  100,
+                                         "outcome":  "registered",
+                                         "size_bytes":  315601
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Rohtak-13082026.xlsx",
+                                         "bronze_file_id":  101,
+                                         "outcome":  "registered",
+                                         "size_bytes":  23063
+                                     }
+                                 ],
+                       "stats":  {
+                                     "files_reused":  0,
+                                     "rows_inserted":  165,
+                                     "bills_updated":  2394,
+                                     "rows_reused":  16,
+                                     "conflicts":  32,
+                                     "rows_reported":  2607,
+                                     "by_frame":  {
+                                                      "bank_txns":  {
+                                                                        "inserted":  131,
+                                                                        "updated":  0,
+                                                                        "unchanged":  0,
+                                                                        "conflicts":  0,
+                                                                        "reported":  131
+                                                                    },
+                                                      "bills":  {
+                                                                    "inserted":  26,
+                                                                    "updated":  2394,
+                                                                    "unchanged":  16,
+                                                                    "conflicts":  32,
+                                                                    "reported":  2468
+                                                                },
+                                                      "recoveries":  {
+                                                                         "inserted":  8,
+                                                                         "updated":  0,
+                                                                         "unchanged":  0,
+                                                                         "conflicts":  0,
+                                                                         "reported":  8
+                                                                     }
+                                                  }
+                                 },
+                       "selfcheck":  null,
+                       "selfchecks":  [
+
+                                      ]
+                   },
+        "Reconcile":  {
+                          "counts":  {
+                                         "matched":  14,
+                                         "bank_only":  87,
+                                         "bill_only":  8,
+                                         "match_review":  0,
+                                         "bank_credits":  101,
+                                         "unrecognised_receipts":  86,
+                                         "bank_txns":  101,
+                                         "bills":  2480,
+                                         "bills_grouped":  2231,
+                                         "recoveries":  4144
+                                     },
+                          "selfcheck":  null,
+                          "signal_coverage":  null,
+                          "config":  {
+                                         "window_days":  null,
+                                         "co7_lookback_days":  null,
+                                         "date_tolerance_days":  null,
+                                         "amount_tolerance":  null,
+                                         "allow_batched":  null,
+                                         "max_batch_size":  null
+                                     },
+                          "filenames":  {
+                                            "statement":  "HSBCINRHSBCINR2026-08-13-03.00.11.000870.PDF",
+                                            "statements":  [
+                                                               "HSBCINRHSBCINR2026-08-13-03.00.11.000870.PDF"
+                                                           ],
+                                            "bills":  "Rohtak-13082026.xlsx",
+                                            "rnote":  null,
+                                            "crn":  null
+                                        },
+                          "customer":  "wabtec",
+                          "mode":  "incremental",
+                          "ledger":  {
+                                         "matches_created":  14,
+                                         "auto_locked":  14,
+                                         "exceptions_opened":  45,
+                                         "exceptions_resolved":  1,
+                                         "provisional_reviewed":  0,
+                                         "provisional_superseded":  0,
+                                         "provisional_kept_conflict":  0
+                                     },
+                          "statement_bronze_id":  98,
+                          "statement_bronze_ids":  [
+                                                       98
+                                                   ],
+                          "selfchecks":  [
+
+                                         ],
+                          "expected_from":  "2026-08-11",
+                          "rules_effective":  {
+                                                  "field_map":  {
+                                                                    "bank_amount_field":  "amount",
+                                                                    "bill_amount_field":  "net_payable_amount",
+                                                                    "bank_date_field":  "value_date",
+                                                                    "bill_date_primary":  "payment_advice_date",
+                                                                    "bill_date_fallback":  "payment_order_date",
+                                                                    "exact_signals":  [
+                                                                                          {
+                                                                                              "bank_field":  "zone_guess",
+                                                                                              "bill_field":  "zone",
+                                                                                              "weight":  2,
+                                                                                              "key":  "zone"
+                                                                                          }
+                                                                                      ],
+                                                                    "eligibility_field":  "bill_status",
+                                                                    "fallback_due_statuses":  [
+
+                                                                                              ]
+                                                                },
+                                                  "paid_statuses":  [
+                                                                        "PAYMENT MADE"
+                                                                    ],
+                                                  "weights":  {
+                                                                  "zone":  2,
+                                                                  "co7_date":  1,
+                                                                  "advice_date":  4
+                                                              },
+                                                  "copy_overridden":  false,
+                                                  "batch_amount_slack":  0.5,
+                                                  "amount_decimals":  2
+                                              }
+                      }
+    },
+    {
+        "Day":  "14",
+        "Ingest":  {
+                       "customer":  "wabtec",
+                       "files":  [
+                                     {
+                                         "field":  "statement",
+                                         "source_type":  "bank_statement",
+                                         "original_name":  "HSBCINRHSBCINR2026-08-14-03.00.36.000765.PDF",
+                                         "bronze_file_id":  102,
+                                         "outcome":  "registered",
+                                         "size_bytes":  98423
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Friction-14082026.xlsx",
+                                         "bronze_file_id":  103,
+                                         "outcome":  "registered",
+                                         "size_bytes":  9502
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Hosur-14082026.xlsx",
+                                         "bronze_file_id":  104,
+                                         "outcome":  "registered",
+                                         "size_bytes":  324161
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Rohtak-14082026.xlsx",
+                                         "bronze_file_id":  105,
+                                         "outcome":  "registered",
+                                         "size_bytes":  23008
+                                     }
+                                 ],
+                       "stats":  {
+                                     "files_reused":  0,
+                                     "rows_inserted":  306,
+                                     "bills_updated":  2289,
+                                     "rows_reused":  84,
+                                     "conflicts":  46,
+                                     "rows_reported":  2725,
+                                     "by_frame":  {
+                                                      "bank_txns":  {
+                                                                        "inserted":  196,
+                                                                        "updated":  0,
+                                                                        "unchanged":  0,
+                                                                        "conflicts":  0,
+                                                                        "reported":  196
+                                                                    },
+                                                      "bills":  {
+                                                                    "inserted":  108,
+                                                                    "updated":  2289,
+                                                                    "unchanged":  84,
+                                                                    "conflicts":  46,
+                                                                    "reported":  2527
+                                                                },
+                                                      "recoveries":  {
+                                                                         "inserted":  2,
+                                                                         "updated":  0,
+                                                                         "unchanged":  0,
+                                                                         "conflicts":  0,
+                                                                         "reported":  2
+                                                                     }
+                                                  }
+                                 },
+                       "selfcheck":  null,
+                       "selfchecks":  [
+
+                                      ]
+                   },
+        "Reconcile":  {
+                          "counts":  {
+                                         "matched":  34,
+                                         "bank_only":  144,
+                                         "bill_only":  1,
+                                         "match_review":  2,
+                                         "bank_credits":  178,
+                                         "unrecognised_receipts":  140,
+                                         "bank_txns":  178,
+                                         "bills":  2574,
+                                         "bills_grouped":  2297,
+                                         "recoveries":  4136
+                                     },
+                          "selfcheck":  null,
+                          "signal_coverage":  null,
+                          "config":  {
+                                         "window_days":  null,
+                                         "co7_lookback_days":  null,
+                                         "date_tolerance_days":  null,
+                                         "amount_tolerance":  null,
+                                         "allow_batched":  null,
+                                         "max_batch_size":  null
+                                     },
+                          "filenames":  {
+                                            "statement":  "HSBCINRHSBCINR2026-08-14-03.00.36.000765.PDF",
+                                            "statements":  [
+                                                               "HSBCINRHSBCINR2026-08-14-03.00.36.000765.PDF"
+                                                           ],
+                                            "bills":  "Rohtak-14082026.xlsx",
+                                            "rnote":  null,
+                                            "crn":  null
+                                        },
+                          "customer":  "wabtec",
+                          "mode":  "incremental",
+                          "ledger":  {
+                                         "matches_created":  34,
+                                         "auto_locked":  32,
+                                         "exceptions_opened":  57,
+                                         "exceptions_resolved":  7,
+                                         "provisional_reviewed":  0,
+                                         "provisional_superseded":  0,
+                                         "provisional_kept_conflict":  0
+                                     },
+                          "statement_bronze_id":  102,
+                          "statement_bronze_ids":  [
+                                                       102
+                                                   ],
+                          "selfchecks":  [
+
+                                         ],
+                          "expected_from":  "2026-08-11",
+                          "rules_effective":  {
+                                                  "field_map":  {
+                                                                    "bank_amount_field":  "amount",
+                                                                    "bill_amount_field":  "net_payable_amount",
+                                                                    "bank_date_field":  "value_date",
+                                                                    "bill_date_primary":  "payment_advice_date",
+                                                                    "bill_date_fallback":  "payment_order_date",
+                                                                    "exact_signals":  [
+                                                                                          {
+                                                                                              "bank_field":  "zone_guess",
+                                                                                              "bill_field":  "zone",
+                                                                                              "weight":  2,
+                                                                                              "key":  "zone"
+                                                                                          }
+                                                                                      ],
+                                                                    "eligibility_field":  "bill_status",
+                                                                    "fallback_due_statuses":  [
+
+                                                                                              ]
+                                                                },
+                                                  "paid_statuses":  [
+                                                                        "PAYMENT MADE"
+                                                                    ],
+                                                  "weights":  {
+                                                                  "zone":  2,
+                                                                  "co7_date":  1,
+                                                                  "advice_date":  4
+                                                              },
+                                                  "copy_overridden":  false,
+                                                  "batch_amount_slack":  0.5,
+                                                  "amount_decimals":  2
+                                              }
+                      }
+    },
+    {
+        "Day":  "15",
+        "Ingest":  {
+                       "customer":  "wabtec",
+                       "files":  [
+                                     {
+                                         "field":  "statement",
+                                         "source_type":  "bank_statement",
+                                         "original_name":  "HSBCINRHSBCINR2026-08-15-03.00.05.000602.PDF",
+                                         "bronze_file_id":  106,
+                                         "outcome":  "registered",
+                                         "size_bytes":  125285
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Friction-15082026.xlsx",
+                                         "bronze_file_id":  107,
+                                         "outcome":  "registered",
+                                         "size_bytes":  9495
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Hosur-15082026.xlsx",
+                                         "bronze_file_id":  108,
+                                         "outcome":  "registered",
+                                         "size_bytes":  310395
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Rohtak-15082026.xlsx",
+                                         "bronze_file_id":  109,
+                                         "outcome":  "registered",
+                                         "size_bytes":  22721
+                                     }
+                                 ],
+                       "stats":  {
+                                     "files_reused":  0,
+                                     "rows_inserted":  182,
+                                     "bills_updated":  2129,
+                                     "rows_reused":  226,
+                                     "conflicts":  71,
+                                     "rows_reported":  2608,
+                                     "by_frame":  {
+                                                      "bank_txns":  {
+                                                                        "inserted":  182,
+                                                                        "updated":  0,
+                                                                        "unchanged":  0,
+                                                                        "conflicts":  0,
+                                                                        "reported":  182
+                                                                    },
+                                                      "bills":  {
+                                                                    "inserted":  0,
+                                                                    "updated":  2129,
+                                                                    "unchanged":  226,
+                                                                    "conflicts":  71,
+                                                                    "reported":  2426
+                                                                },
+                                                      "recoveries":  {
+                                                                         "inserted":  0,
+                                                                         "updated":  0,
+                                                                         "unchanged":  0,
+                                                                         "conflicts":  0,
+                                                                         "reported":  0
+                                                                     }
+                                                  }
+                                 },
+                       "selfcheck":  null,
+                       "selfchecks":  [
+
+                                      ]
+                   },
+        "Reconcile":  {
+                          "counts":  {
+                                         "matched":  1,
+                                         "bank_only":  187,
+                                         "bill_only":  1,
+                                         "match_review":  1,
+                                         "bank_credits":  188,
+                                         "unrecognised_receipts":  164,
+                                         "bank_txns":  188,
+                                         "bills":  2540,
+                                         "bills_grouped":  2268,
+                                         "recoveries":  4134
+                                     },
+                          "selfcheck":  null,
+                          "signal_coverage":  null,
+                          "config":  {
+                                         "window_days":  null,
+                                         "co7_lookback_days":  null,
+                                         "date_tolerance_days":  null,
+                                         "amount_tolerance":  null,
+                                         "allow_batched":  null,
+                                         "max_batch_size":  null
+                                     },
+                          "filenames":  {
+                                            "statement":  "HSBCINRHSBCINR2026-08-15-03.00.05.000602.PDF",
+                                            "statements":  [
+                                                               "HSBCINRHSBCINR2026-08-15-03.00.05.000602.PDF"
+                                                           ],
+                                            "bills":  "Rohtak-15082026.xlsx",
+                                            "rnote":  null,
+                                            "crn":  null
+                                        },
+                          "customer":  "wabtec",
+                          "mode":  "incremental",
+                          "ledger":  {
+                                         "matches_created":  1,
+                                         "auto_locked":  0,
+                                         "exceptions_opened":  43,
+                                         "exceptions_resolved":  0,
+                                         "provisional_reviewed":  2,
+                                         "provisional_superseded":  0,
+                                         "provisional_kept_conflict":  0
+                                     },
+                          "statement_bronze_id":  106,
+                          "statement_bronze_ids":  [
+                                                       106
+                                                   ],
+                          "selfchecks":  [
+
+                                         ],
+                          "expected_from":  "2026-08-11",
+                          "rules_effective":  {
+                                                  "field_map":  {
+                                                                    "bank_amount_field":  "amount",
+                                                                    "bill_amount_field":  "net_payable_amount",
+                                                                    "bank_date_field":  "value_date",
+                                                                    "bill_date_primary":  "payment_advice_date",
+                                                                    "bill_date_fallback":  "payment_order_date",
+                                                                    "exact_signals":  [
+                                                                                          {
+                                                                                              "bank_field":  "zone_guess",
+                                                                                              "bill_field":  "zone",
+                                                                                              "weight":  2,
+                                                                                              "key":  "zone"
+                                                                                          }
+                                                                                      ],
+                                                                    "eligibility_field":  "bill_status",
+                                                                    "fallback_due_statuses":  [
+
+                                                                                              ]
+                                                                },
+                                                  "paid_statuses":  [
+                                                                        "PAYMENT MADE"
+                                                                    ],
+                                                  "weights":  {
+                                                                  "zone":  2,
+                                                                  "co7_date":  1,
+                                                                  "advice_date":  4
+                                                              },
+                                                  "copy_overridden":  false,
+                                                  "batch_amount_slack":  0.5,
+                                                  "amount_decimals":  2
+                                              }
+                      }
+    },
+    {
+        "Day":  "16",
+        "Ingest":  {
+                       "customer":  "wabtec",
+                       "files":  [
+                                     {
+                                         "field":  "statement",
+                                         "source_type":  "bank_statement",
+                                         "original_name":  "HSBCINRHSBCINR2026-08-16-03.00.12.000184.PDF",
+                                         "bronze_file_id":  110,
+                                         "outcome":  "registered",
+                                         "size_bytes":  87305
+                                     }
+                                 ],
+                       "stats":  {
+                                     "files_reused":  0,
+                                     "rows_inserted":  99,
+                                     "bills_updated":  0,
+                                     "rows_reused":  0,
+                                     "conflicts":  0,
+                                     "rows_reported":  99,
+                                     "by_frame":  {
+                                                      "bank_txns":  {
+                                                                        "inserted":  99,
+                                                                        "updated":  0,
+                                                                        "unchanged":  0,
+                                                                        "conflicts":  0,
+                                                                        "reported":  99
+                                                                    }
+                                                  }
+                                 },
+                       "selfcheck":  null,
+                       "selfchecks":  [
+
+                                      ]
+                   },
+        "Reconcile":  {
+                          "counts":  {
+                                         "matched":  1,
+                                         "bank_only":  190,
+                                         "bill_only":  1,
+                                         "match_review":  1,
+                                         "bank_credits":  191,
+                                         "unrecognised_receipts":  167,
+                                         "bank_txns":  191,
+                                         "bills":  2539,
+                                         "bills_grouped":  2267,
+                                         "recoveries":  4132
+                                     },
+                          "selfcheck":  null,
+                          "signal_coverage":  null,
+                          "config":  {
+                                         "window_days":  null,
+                                         "co7_lookback_days":  null,
+                                         "date_tolerance_days":  null,
+                                         "amount_tolerance":  null,
+                                         "allow_batched":  null,
+                                         "max_batch_size":  null
+                                     },
+                          "filenames":  {
+                                            "statement":  "HSBCINRHSBCINR2026-08-16-03.00.12.000184.PDF",
+                                            "statements":  [
+                                                               "HSBCINRHSBCINR2026-08-16-03.00.12.000184.PDF"
+                                                           ],
+                                            "bills":  "Rohtak-15082026.xlsx",
+                                            "rnote":  null,
+                                            "crn":  null
+                                        },
+                          "customer":  "wabtec",
+                          "mode":  "incremental",
+                          "ledger":  {
+                                         "matches_created":  1,
+                                         "auto_locked":  0,
+                                         "exceptions_opened":  3,
+                                         "exceptions_resolved":  0,
+                                         "provisional_reviewed":  3,
+                                         "provisional_superseded":  0,
+                                         "provisional_kept_conflict":  0
+                                     },
+                          "statement_bronze_id":  110,
+                          "statement_bronze_ids":  [
+                                                       110
+                                                   ],
+                          "selfchecks":  [
+
+                                         ],
+                          "expected_from":  "2026-08-11",
+                          "rules_effective":  {
+                                                  "field_map":  {
+                                                                    "bank_amount_field":  "amount",
+                                                                    "bill_amount_field":  "net_payable_amount",
+                                                                    "bank_date_field":  "value_date",
+                                                                    "bill_date_primary":  "payment_advice_date",
+                                                                    "bill_date_fallback":  "payment_order_date",
+                                                                    "exact_signals":  [
+                                                                                          {
+                                                                                              "bank_field":  "zone_guess",
+                                                                                              "bill_field":  "zone",
+                                                                                              "weight":  2,
+                                                                                              "key":  "zone"
+                                                                                          }
+                                                                                      ],
+                                                                    "eligibility_field":  "bill_status",
+                                                                    "fallback_due_statuses":  [
+
+                                                                                              ]
+                                                                },
+                                                  "paid_statuses":  [
+                                                                        "PAYMENT MADE"
+                                                                    ],
+                                                  "weights":  {
+                                                                  "zone":  2,
+                                                                  "co7_date":  1,
+                                                                  "advice_date":  4
+                                                              },
+                                                  "copy_overridden":  false,
+                                                  "batch_amount_slack":  0.5,
+                                                  "amount_decimals":  2
+                                              }
+                      }
+    },
+    {
+        "Day":  "17",
+        "Ingest":  {
+                       "customer":  "wabtec",
+                       "files":  [
+                                     {
+                                         "field":  "statement",
+                                         "source_type":  "bank_statement",
+                                         "original_name":  "HSBCINRHSBCINR2026-08-17-03.00.13.000303.PDF",
+                                         "bronze_file_id":  111,
+                                         "outcome":  "registered",
+                                         "size_bytes":  33044
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Friction-17082026.xlsx",
+                                         "bronze_file_id":  112,
+                                         "outcome":  "registered",
+                                         "size_bytes":  9498
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Hosur-17082026.xlsx",
+                                         "bronze_file_id":  113,
+                                         "outcome":  "registered",
+                                         "size_bytes":  303290
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Rohtak-17082026.xlsx",
+                                         "bronze_file_id":  114,
+                                         "outcome":  "registered",
+                                         "size_bytes":  22274
+                                     }
+                                 ],
+                       "stats":  {
+                                     "files_reused":  0,
+                                     "rows_inserted":  1,
+                                     "bills_updated":  2067,
+                                     "rows_reused":  226,
+                                     "conflicts":  75,
+                                     "rows_reported":  2369,
+                                     "by_frame":  {
+                                                      "bank_txns":  {
+                                                                        "inserted":  1,
+                                                                        "updated":  0,
+                                                                        "unchanged":  0,
+                                                                        "conflicts":  0,
+                                                                        "reported":  1
+                                                                    },
+                                                      "bills":  {
+                                                                    "inserted":  0,
+                                                                    "updated":  2067,
+                                                                    "unchanged":  226,
+                                                                    "conflicts":  75,
+                                                                    "reported":  2368
+                                                                },
+                                                      "recoveries":  {
+                                                                         "inserted":  0,
+                                                                         "updated":  0,
+                                                                         "unchanged":  0,
+                                                                         "conflicts":  0,
+                                                                         "reported":  0
+                                                                     }
+                                                  }
+                                 },
+                       "selfcheck":  null,
+                       "selfchecks":  [
+
+                                      ]
+                   },
+        "Reconcile":  {
+                          "counts":  {
+                                         "matched":  0,
+                                         "bank_only":  191,
+                                         "bill_only":  1,
+                                         "match_review":  0,
+                                         "bank_credits":  191,
+                                         "unrecognised_receipts":  168,
+                                         "bank_txns":  191,
+                                         "bills":  2538,
+                                         "bills_grouped":  2266,
+                                         "recoveries":  4130
+                                     },
+                          "selfcheck":  null,
+                          "signal_coverage":  null,
+                          "config":  {
+                                         "window_days":  null,
+                                         "co7_lookback_days":  null,
+                                         "date_tolerance_days":  null,
+                                         "amount_tolerance":  null,
+                                         "allow_batched":  null,
+                                         "max_batch_size":  null
+                                     },
+                          "filenames":  {
+                                            "statement":  "HSBCINRHSBCINR2026-08-17-03.00.13.000303.PDF",
+                                            "statements":  [
+                                                               "HSBCINRHSBCINR2026-08-17-03.00.13.000303.PDF"
+                                                           ],
+                                            "bills":  "Rohtak-17082026.xlsx",
+                                            "rnote":  null,
+                                            "crn":  null
+                                        },
+                          "customer":  "wabtec",
+                          "mode":  "incremental",
+                          "ledger":  {
+                                         "matches_created":  0,
+                                         "auto_locked":  0,
+                                         "exceptions_opened":  1,
+                                         "exceptions_resolved":  0,
+                                         "provisional_reviewed":  4,
+                                         "provisional_superseded":  0,
+                                         "provisional_kept_conflict":  0
+                                     },
+                          "statement_bronze_id":  111,
+                          "statement_bronze_ids":  [
+                                                       111
+                                                   ],
+                          "selfchecks":  [
+
+                                         ],
+                          "expected_from":  "2026-08-11",
+                          "rules_effective":  {
+                                                  "field_map":  {
+                                                                    "bank_amount_field":  "amount",
+                                                                    "bill_amount_field":  "net_payable_amount",
+                                                                    "bank_date_field":  "value_date",
+                                                                    "bill_date_primary":  "payment_advice_date",
+                                                                    "bill_date_fallback":  "payment_order_date",
+                                                                    "exact_signals":  [
+                                                                                          {
+                                                                                              "bank_field":  "zone_guess",
+                                                                                              "bill_field":  "zone",
+                                                                                              "weight":  2,
+                                                                                              "key":  "zone"
+                                                                                          }
+                                                                                      ],
+                                                                    "eligibility_field":  "bill_status",
+                                                                    "fallback_due_statuses":  [
+
+                                                                                              ]
+                                                                },
+                                                  "paid_statuses":  [
+                                                                        "PAYMENT MADE"
+                                                                    ],
+                                                  "weights":  {
+                                                                  "zone":  2,
+                                                                  "co7_date":  1,
+                                                                  "advice_date":  4
+                                                              },
+                                                  "copy_overridden":  false,
+                                                  "batch_amount_slack":  0.5,
+                                                  "amount_decimals":  2
+                                              }
+                      }
+    },
+    {
+        "Day":  "18",
+        "Ingest":  {
+                       "customer":  "wabtec",
+                       "files":  [
+                                     {
+                                         "field":  "statement",
+                                         "source_type":  "bank_statement",
+                                         "original_name":  "HSBCINRHSBCINR2026-08-18-03.00.10.000520.PDF",
+                                         "bronze_file_id":  115,
+                                         "outcome":  "registered",
+                                         "size_bytes":  33043
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Friction-18082026.xlsx",
+                                         "bronze_file_id":  116,
+                                         "outcome":  "registered",
+                                         "size_bytes":  9187
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Hosur-18082026.xlsx",
+                                         "bronze_file_id":  117,
+                                         "outcome":  "registered",
+                                         "size_bytes":  302635
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Rohtak-18082026.xlsx",
+                                         "bronze_file_id":  118,
+                                         "outcome":  "registered",
+                                         "size_bytes":  22253
+                                     }
+                                 ],
+                       "stats":  {
+                                     "files_reused":  0,
+                                     "rows_inserted":  46,
+                                     "bills_updated":  2166,
+                                     "rows_reused":  91,
+                                     "conflicts":  75,
+                                     "rows_reported":  2378,
+                                     "by_frame":  {
+                                                      "bank_txns":  {
+                                                                        "inserted":  0,
+                                                                        "updated":  0,
+                                                                        "unchanged":  1,
+                                                                        "conflicts":  0,
+                                                                        "reported":  1
+                                                                    },
+                                                      "bills":  {
+                                                                    "inserted":  36,
+                                                                    "updated":  2166,
+                                                                    "unchanged":  90,
+                                                                    "conflicts":  75,
+                                                                    "reported":  2367
+                                                                },
+                                                      "recoveries":  {
+                                                                         "inserted":  10,
+                                                                         "updated":  0,
+                                                                         "unchanged":  0,
+                                                                         "conflicts":  0,
+                                                                         "reported":  10
+                                                                     }
+                                                  }
+                                 },
+                       "selfcheck":  null,
+                       "selfchecks":  [
+
+                                      ]
+                   },
+        "Reconcile":  {
+                          "counts":  {
+                                         "matched":  2,
+                                         "bank_only":  189,
+                                         "bill_only":  4,
+                                         "match_review":  0,
+                                         "bank_credits":  191,
+                                         "unrecognised_receipts":  168,
+                                         "bank_txns":  191,
+                                         "bills":  2574,
+                                         "bills_grouped":  2295,
+                                         "recoveries":  4140
+                                     },
+                          "selfcheck":  null,
+                          "signal_coverage":  null,
+                          "config":  {
+                                         "window_days":  null,
+                                         "co7_lookback_days":  null,
+                                         "date_tolerance_days":  null,
+                                         "amount_tolerance":  null,
+                                         "allow_batched":  null,
+                                         "max_batch_size":  null
+                                     },
+                          "filenames":  {
+                                            "statement":  "HSBCINRHSBCINR2026-08-18-03.00.10.000520.PDF",
+                                            "statements":  [
+                                                               "HSBCINRHSBCINR2026-08-18-03.00.10.000520.PDF"
+                                                           ],
+                                            "bills":  "Rohtak-18082026.xlsx",
+                                            "rnote":  null,
+                                            "crn":  null
+                                        },
+                          "customer":  "wabtec",
+                          "mode":  "incremental",
+                          "ledger":  {
+                                         "matches_created":  2,
+                                         "auto_locked":  2,
+                                         "exceptions_opened":  3,
+                                         "exceptions_resolved":  2,
+                                         "provisional_reviewed":  4,
+                                         "provisional_superseded":  1,
+                                         "provisional_kept_conflict":  0
+                                     },
+                          "statement_bronze_id":  115,
+                          "statement_bronze_ids":  [
+                                                       115
+                                                   ],
+                          "selfchecks":  [
+
+                                         ],
+                          "expected_from":  "2026-08-11",
+                          "rules_effective":  {
+                                                  "field_map":  {
+                                                                    "bank_amount_field":  "amount",
+                                                                    "bill_amount_field":  "net_payable_amount",
+                                                                    "bank_date_field":  "value_date",
+                                                                    "bill_date_primary":  "payment_advice_date",
+                                                                    "bill_date_fallback":  "payment_order_date",
+                                                                    "exact_signals":  [
+                                                                                          {
+                                                                                              "bank_field":  "zone_guess",
+                                                                                              "bill_field":  "zone",
+                                                                                              "weight":  2,
+                                                                                              "key":  "zone"
+                                                                                          }
+                                                                                      ],
+                                                                    "eligibility_field":  "bill_status",
+                                                                    "fallback_due_statuses":  [
+
+                                                                                              ]
+                                                                },
+                                                  "paid_statuses":  [
+                                                                        "PAYMENT MADE"
+                                                                    ],
+                                                  "weights":  {
+                                                                  "zone":  2,
+                                                                  "co7_date":  1,
+                                                                  "advice_date":  4
+                                                              },
+                                                  "copy_overridden":  false,
+                                                  "batch_amount_slack":  0.5,
+                                                  "amount_decimals":  2
+                                              }
+                      }
+    },
+    {
+        "Day":  "19",
+        "Ingest":  {
+                       "customer":  "wabtec",
+                       "files":  [
+                                     {
+                                         "field":  "statement",
+                                         "source_type":  "bank_statement",
+                                         "original_name":  "HSBCINRHSBCINR2026-08-19-03.00.08.000694.PDF",
+                                         "bronze_file_id":  119,
+                                         "outcome":  "registered",
+                                         "size_bytes":  71099
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Friction-19082026.xlsx",
+                                         "bronze_file_id":  120,
+                                         "outcome":  "registered",
+                                         "size_bytes":  9165
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Hosur-19082026.xlsx",
+                                         "bronze_file_id":  121,
+                                         "outcome":  "registered",
+                                         "size_bytes":  22131
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Rohtak-19082026.xlsx",
+                                         "bronze_file_id":  122,
+                                         "outcome":  "registered",
+                                         "size_bytes":  300145
+                                     }
+                                 ],
+                       "stats":  {
+                                     "files_reused":  0,
+                                     "rows_inserted":  163,
+                                     "bills_updated":  2166,
+                                     "rows_reused":  84,
+                                     "conflicts":  80,
+                                     "rows_reported":  2493,
+                                     "by_frame":  {
+                                                      "bank_txns":  {
+                                                                        "inserted":  139,
+                                                                        "updated":  0,
+                                                                        "unchanged":  0,
+                                                                        "conflicts":  0,
+                                                                        "reported":  139
+                                                                    },
+                                                      "bills":  {
+                                                                    "inserted":  20,
+                                                                    "updated":  2166,
+                                                                    "unchanged":  84,
+                                                                    "conflicts":  80,
+                                                                    "reported":  2350
+                                                                },
+                                                      "recoveries":  {
+                                                                         "inserted":  4,
+                                                                         "updated":  0,
+                                                                         "unchanged":  0,
+                                                                         "conflicts":  0,
+                                                                         "reported":  4
+                                                                     }
+                                                  }
+                                 },
+                       "selfcheck":  null,
+                       "selfchecks":  [
+
+                                      ]
+                   },
+        "Reconcile":  {
+                          "counts":  {
+                                         "matched":  17,
+                                         "bank_only":  252,
+                                         "bill_only":  10,
+                                         "match_review":  0,
+                                         "bank_credits":  269,
+                                         "unrecognised_receipts":  227,
+                                         "bank_txns":  269,
+                                         "bills":  2592,
+                                         "bills_grouped":  2308,
+                                         "recoveries":  4138
+                                     },
+                          "selfcheck":  null,
+                          "signal_coverage":  null,
+                          "config":  {
+                                         "window_days":  null,
+                                         "co7_lookback_days":  null,
+                                         "date_tolerance_days":  null,
+                                         "amount_tolerance":  null,
+                                         "allow_batched":  null,
+                                         "max_batch_size":  null
+                                     },
+                          "filenames":  {
+                                            "statement":  "HSBCINRHSBCINR2026-08-19-03.00.08.000694.PDF",
+                                            "statements":  [
+                                                               "HSBCINRHSBCINR2026-08-19-03.00.08.000694.PDF"
+                                                           ],
+                                            "bills":  "Rohtak-19082026.xlsx",
+                                            "rnote":  null,
+                                            "crn":  null
+                                        },
+                          "customer":  "wabtec",
+                          "mode":  "incremental",
+                          "ledger":  {
+                                         "matches_created":  17,
+                                         "auto_locked":  17,
+                                         "exceptions_opened":  69,
+                                         "exceptions_resolved":  0,
+                                         "provisional_reviewed":  3,
+                                         "provisional_superseded":  0,
+                                         "provisional_kept_conflict":  0
+                                     },
+                          "statement_bronze_id":  119,
+                          "statement_bronze_ids":  [
+                                                       119
+                                                   ],
+                          "selfchecks":  [
+
+                                         ],
+                          "expected_from":  "2026-08-11",
+                          "rules_effective":  {
+                                                  "field_map":  {
+                                                                    "bank_amount_field":  "amount",
+                                                                    "bill_amount_field":  "net_payable_amount",
+                                                                    "bank_date_field":  "value_date",
+                                                                    "bill_date_primary":  "payment_advice_date",
+                                                                    "bill_date_fallback":  "payment_order_date",
+                                                                    "exact_signals":  [
+                                                                                          {
+                                                                                              "bank_field":  "zone_guess",
+                                                                                              "bill_field":  "zone",
+                                                                                              "weight":  2,
+                                                                                              "key":  "zone"
+                                                                                          }
+                                                                                      ],
+                                                                    "eligibility_field":  "bill_status",
+                                                                    "fallback_due_statuses":  [
+
+                                                                                              ]
+                                                                },
+                                                  "paid_statuses":  [
+                                                                        "PAYMENT MADE"
+                                                                    ],
+                                                  "weights":  {
+                                                                  "zone":  2,
+                                                                  "co7_date":  1,
+                                                                  "advice_date":  4
+                                                              },
+                                                  "copy_overridden":  false,
+                                                  "batch_amount_slack":  0.5,
+                                                  "amount_decimals":  2
+                                              }
+                      }
+    },
+    {
+        "Day":  "20",
+        "Ingest":  {
+                       "customer":  "wabtec",
+                       "files":  [
+                                     {
+                                         "field":  "statement",
+                                         "source_type":  "bank_statement",
+                                         "original_name":  "HSBCINRHSBCINR2026-08-20-03.00.12.000545.PDF",
+                                         "bronze_file_id":  123,
+                                         "outcome":  "registered",
+                                         "size_bytes":  59899
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Friction-20082026.xlsx",
+                                         "bronze_file_id":  124,
+                                         "outcome":  "registered",
+                                         "size_bytes":  9212
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Hosur-20082026.xlsx",
+                                         "bronze_file_id":  125,
+                                         "outcome":  "registered",
+                                         "size_bytes":  301540
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Rohtak-20082026.xlsx",
+                                         "bronze_file_id":  126,
+                                         "outcome":  "registered",
+                                         "size_bytes":  21691
+                                     }
+                                 ],
+                       "stats":  {
+                                     "files_reused":  0,
+                                     "rows_inserted":  110,
+                                     "bills_updated":  2152,
+                                     "rows_reused":  78,
+                                     "conflicts":  95,
+                                     "rows_reported":  2435,
+                                     "by_frame":  {
+                                                      "bank_txns":  {
+                                                                        "inserted":  87,
+                                                                        "updated":  0,
+                                                                        "unchanged":  0,
+                                                                        "conflicts":  0,
+                                                                        "reported":  87
+                                                                    },
+                                                      "bills":  {
+                                                                    "inserted":  20,
+                                                                    "updated":  2152,
+                                                                    "unchanged":  78,
+                                                                    "conflicts":  95,
+                                                                    "reported":  2345
+                                                                },
+                                                      "recoveries":  {
+                                                                         "inserted":  3,
+                                                                         "updated":  0,
+                                                                         "unchanged":  0,
+                                                                         "conflicts":  0,
+                                                                         "reported":  3
+                                                                     }
+                                                  }
+                                 },
+                       "selfcheck":  null,
+                       "selfchecks":  [
+
+                                      ]
+                   },
+        "Reconcile":  {
+                          "counts":  {
+                                         "matched":  14,
+                                         "bank_only":  290,
+                                         "bill_only":  5,
+                                         "match_review":  0,
+                                         "bank_credits":  304,
+                                         "unrecognised_receipts":  261,
+                                         "bank_txns":  304,
+                                         "bills":  2595,
+                                         "bills_grouped":  2309,
+                                         "recoveries":  4137
+                                     },
+                          "selfcheck":  null,
+                          "signal_coverage":  null,
+                          "config":  {
+                                         "window_days":  null,
+                                         "co7_lookback_days":  null,
+                                         "date_tolerance_days":  null,
+                                         "amount_tolerance":  null,
+                                         "allow_batched":  null,
+                                         "max_batch_size":  null
+                                     },
+                          "filenames":  {
+                                            "statement":  "HSBCINRHSBCINR2026-08-20-03.00.12.000545.PDF",
+                                            "statements":  [
+                                                               "HSBCINRHSBCINR2026-08-20-03.00.12.000545.PDF"
+                                                           ],
+                                            "bills":  "Rohtak-20082026.xlsx",
+                                            "rnote":  null,
+                                            "crn":  null
+                                        },
+                          "customer":  "wabtec",
+                          "mode":  "incremental",
+                          "ledger":  {
+                                         "matches_created":  14,
+                                         "auto_locked":  14,
+                                         "exceptions_opened":  39,
+                                         "exceptions_resolved":  6,
+                                         "provisional_reviewed":  3,
+                                         "provisional_superseded":  0,
+                                         "provisional_kept_conflict":  0
+                                     },
+                          "statement_bronze_id":  123,
+                          "statement_bronze_ids":  [
+                                                       123
+                                                   ],
+                          "selfchecks":  [
+
+                                         ],
+                          "expected_from":  "2026-08-11",
+                          "rules_effective":  {
+                                                  "field_map":  {
+                                                                    "bank_amount_field":  "amount",
+                                                                    "bill_amount_field":  "net_payable_amount",
+                                                                    "bank_date_field":  "value_date",
+                                                                    "bill_date_primary":  "payment_advice_date",
+                                                                    "bill_date_fallback":  "payment_order_date",
+                                                                    "exact_signals":  [
+                                                                                          {
+                                                                                              "bank_field":  "zone_guess",
+                                                                                              "bill_field":  "zone",
+                                                                                              "weight":  2,
+                                                                                              "key":  "zone"
+                                                                                          }
+                                                                                      ],
+                                                                    "eligibility_field":  "bill_status",
+                                                                    "fallback_due_statuses":  [
+
+                                                                                              ]
+                                                                },
+                                                  "paid_statuses":  [
+                                                                        "PAYMENT MADE"
+                                                                    ],
+                                                  "weights":  {
+                                                                  "zone":  2,
+                                                                  "co7_date":  1,
+                                                                  "advice_date":  4
+                                                              },
+                                                  "copy_overridden":  false,
+                                                  "batch_amount_slack":  0.5,
+                                                  "amount_decimals":  2
+                                              }
+                      }
+    },
+    {
+        "Day":  "21",
+        "Ingest":  {
+                       "customer":  "wabtec",
+                       "files":  [
+                                     {
+                                         "field":  "statement",
+                                         "source_type":  "bank_statement",
+                                         "original_name":  "HSBCINRHSBCINR2026-08-21-03.00.14.000716.PDF",
+                                         "bronze_file_id":  127,
+                                         "outcome":  "registered",
+                                         "size_bytes":  73472
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Friction-21082026.xlsx",
+                                         "bronze_file_id":  128,
+                                         "outcome":  "registered",
+                                         "size_bytes":  9223
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Hosur-21082026.xlsx",
+                                         "bronze_file_id":  129,
+                                         "outcome":  "registered",
+                                         "size_bytes":  21721
+                                     },
+                                     {
+                                         "field":  "bills",
+                                         "source_type":  "bill_status",
+                                         "original_name":  "Rohtak-21082026.xlsx",
+                                         "bronze_file_id":  130,
+                                         "outcome":  "registered",
+                                         "size_bytes":  303096
+                                     }
+                                 ],
+                       "stats":  {
+                                     "files_reused":  0,
+                                     "rows_inserted":  198,
+                                     "bills_updated":  2112,
+                                     "rows_reused":  91,
+                                     "conflicts":  111,
+                                     "rows_reported":  2512,
+                                     "by_frame":  {
+                                                      "bank_txns":  {
+                                                                        "inserted":  141,
+                                                                        "updated":  0,
+                                                                        "unchanged":  0,
+                                                                        "conflicts":  0,
+                                                                        "reported":  141
+                                                                    },
+                                                      "bills":  {
+                                                                    "inserted":  37,
+                                                                    "updated":  2112,
+                                                                    "unchanged":  91,
+                                                                    "conflicts":  111,
+                                                                    "reported":  2351
+                                                                },
+                                                      "recoveries":  {
+                                                                         "inserted":  20,
+                                                                         "updated":  0,
+                                                                         "unchanged":  0,
+                                                                         "conflicts":  0,
+                                                                         "reported":  20
+                                                                     }
+                                                  }
+                                 },
+                       "selfcheck":  null,
+                       "selfchecks":  [
+
+                                      ]
+                   },
+        "Reconcile":  {
+                          "counts":  {
+                                         "matched":  16,
+                                         "bank_only":  339,
+                                         "bill_only":  4,
+                                         "match_review":  3,
+                                         "bank_credits":  355,
+                                         "unrecognised_receipts":  310,
+                                         "bank_txns":  355,
+                                         "bills":  2618,
+                                         "bills_grouped":  2330,
+                                         "recoveries":  4154
+                                     },
+                          "selfcheck":  null,
+                          "signal_coverage":  null,
+                          "config":  {
+                                         "window_days":  null,
+                                         "co7_lookback_days":  null,
+                                         "date_tolerance_days":  null,
+                                         "amount_tolerance":  null,
+                                         "allow_batched":  null,
+                                         "max_batch_size":  null
+                                     },
+                          "filenames":  {
+                                            "statement":  "HSBCINRHSBCINR2026-08-21-03.00.14.000716.PDF",
+                                            "statements":  [
+                                                               "HSBCINRHSBCINR2026-08-21-03.00.14.000716.PDF"
+                                                           ],
+                                            "bills":  "Rohtak-21082026.xlsx",
+                                            "rnote":  null,
+                                            "crn":  null
+                                        },
+                          "customer":  "wabtec",
+                          "mode":  "incremental",
+                          "ledger":  {
+                                         "matches_created":  16,
+                                         "auto_locked":  13,
+                                         "exceptions_opened":  49,
+                                         "exceptions_resolved":  1,
+                                         "provisional_reviewed":  3,
+                                         "provisional_superseded":  0,
+                                         "provisional_kept_conflict":  0
+                                     },
+                          "statement_bronze_id":  127,
+                          "statement_bronze_ids":  [
+                                                       127
+                                                   ],
+                          "selfchecks":  [
+
+                                         ],
+                          "expected_from":  "2026-08-11",
+                          "rules_effective":  {
+                                                  "field_map":  {
+                                                                    "bank_amount_field":  "amount",
+                                                                    "bill_amount_field":  "net_payable_amount",
+                                                                    "bank_date_field":  "value_date",
+                                                                    "bill_date_primary":  "payment_advice_date",
+                                                                    "bill_date_fallback":  "payment_order_date",
+                                                                    "exact_signals":  [
+                                                                                          {
+                                                                                              "bank_field":  "zone_guess",
+                                                                                              "bill_field":  "zone",
+                                                                                              "weight":  2,
+                                                                                              "key":  "zone"
+                                                                                          }
+                                                                                      ],
+                                                                    "eligibility_field":  "bill_status",
+                                                                    "fallback_due_statuses":  [
+
+                                                                                              ]
+                                                                },
+                                                  "paid_statuses":  [
+                                                                        "PAYMENT MADE"
+                                                                    ],
+                                                  "weights":  {
+                                                                  "zone":  2,
+                                                                  "co7_date":  1,
+                                                                  "advice_date":  4
+                                                              },
+                                                  "copy_overridden":  false,
+                                                  "batch_amount_slack":  0.5,
+                                                  "amount_decimals":  2
+                                              }
+                      }
+    }
+]

@@ -63,6 +63,17 @@ GOLD_COLUMNS = {
         "payment_order_ref", "po_no", "po_date", "receipt_qty",
         "drr_or_challan_no", "bill_reg_no", "invoice_date", "bill_reg_date",
     ],
+    # the ERP's receivables ledger (Oracle "External AR Statement"): one
+    # row per open invoice line AS OF statement_date. Every statement is
+    # its own snapshot (rows are never upserted across files); readers
+    # pick the snapshot that fits the date they care about. Feeds the
+    # Daily Collection export only — the matcher never reads it.
+    "ar_invoices": [
+        "statement_date", "invoice_number", "invoice_date", "due_date",
+        "customer_number", "customer_name", "operating_unit", "sales_rep",
+        "sales_order_type", "category", "subcategory", "currency",
+        "functional_amount", "functional_amount_open",
+    ],
 }
 
 

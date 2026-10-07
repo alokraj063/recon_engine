@@ -21,8 +21,8 @@ from sqlalchemy import Boolean, Date, Float, Integer, String, Text, false, or_, 
 from logging_setup import get_logger
 
 from .audit import record_event
-from .models import (GoldBankTxn, GoldBill, GoldFileRow, GoldLineageDoc,
-                     GoldRecovery)
+from .models import (GoldArInvoice, GoldBankTxn, GoldBill, GoldFileRow,
+                     GoldLineageDoc, GoldRecovery)
 
 logger = get_logger(__name__)
 
@@ -56,6 +56,14 @@ LINEAGE_MAP = {c: c for c in (
     "doc_type", "doc_no", "doc_date", "invoice_no", "submission_ref",
     "payment_order_ref", "po_no", "po_date", "receipt_qty",
     "drr_or_challan_no", "bill_reg_no", "invoice_date", "bill_reg_date",
+)}
+
+# Oracle AR statement rows (snapshot per file, see GoldArInvoice)
+AR_MAP = {c: c for c in (
+    "statement_date", "invoice_number", "invoice_date", "due_date",
+    "customer_number", "customer_name", "operating_unit", "sales_rep",
+    "sales_order_type", "category", "subcategory", "currency",
+    "functional_amount", "functional_amount_open",
 )}
 
 _HELPER_COLS = ("row_seq", "bill_row_seq")

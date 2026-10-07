@@ -138,6 +138,24 @@ export interface AuthUser {
   id: number
   email: string
   name: string
+  /** admin | analyst | viewer — the server enforces it; the UI only hides
+   *  what the role cannot do */
+  role: Role | null
+}
+
+export type Role = 'admin' | 'analyst' | 'viewer'
+
+/** A login as the admin Users page sees it (GET /api/users). */
+export interface AdminUser {
+  id: number
+  email: string
+  name: string
+  role: Role | null
+  is_active: boolean
+  has_password: boolean
+  okta_linked: boolean
+  last_login_at: string | null
+  created_at: string
 }
 
 export type RunMode = 'snapshot' | 'incremental'
@@ -560,6 +578,16 @@ export interface FieldMap {
   exact_signals: ExactSignal[]
   eligibility_field: string
   fallback_due_statuses: string[]
+  /** bill identifiers looked for in a bank text field (narrative); absent = server defaults */
+  reference_signals?: ReferenceSignal[]
+}
+
+export interface ReferenceSignal {
+  bank_field: string
+  bill_field: string
+  weight: number
+  key: string | null
+  min_length: number
 }
 
 /** Advisory-copy dictionaries keyed by section then frozen code. */
@@ -584,6 +612,8 @@ export interface CustomerRules {
   ar_overdue_days: number
   /** days a credit is excused while its bill's status lags (Awaiting data) */
   awaiting_status_days: number
+  /** pairing window: max days a bill's date may precede the credit; null = no window */
+  max_pairing_gap_days: number | null
 }
 
 export interface CustomerConfig {

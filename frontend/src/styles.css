@@ -1875,6 +1875,17 @@ table.data td { padding: 6px 8px; }
   color: var(--ink-faint);
 }
 
+.login-or {
+  display: flex; align-items: center; gap: 10px; margin: 2px 0;
+  font-size: var(--fs-micro); color: var(--ink-faint);
+}
+.login-or::before, .login-or::after { content: ''; flex: 1; border-top: 1px solid var(--rule, #d9dde0); }
+.login-okta { justify-content: center; text-decoration: none; }
+
+.users-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.users-add input { min-width: 220px; }
+.users-table .is-off td { color: var(--ink-faint); }
+
 .login-foot {
   margin: 4px 0 0;
   font-size: var(--fs-micro);
@@ -3548,6 +3559,12 @@ tr.ui-more-row:hover td { background: hsl(220 16% 98.5%) !important; }
 .zone-table input { width: 100%; min-width: 0; }
 .zone-table .zone-code { width: 80px; font-family: var(--font-mono, monospace); }
 .zone-table .zone-short { width: 90px; }
+.collection-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px 16px; margin: 8px 0; }
+.collection-grid textarea { width: 100%; resize: vertical; font: inherit; }
+.collection-pattern { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; margin: 8px 0; }
+.collection-pattern .ui-field input { width: 52px; }
+.chip-note.is-warn { color: var(--sienna); }
+@media (max-width: 720px) { .collection-grid { grid-template-columns: 1fr; } }
 
 /* ── ReviewEvidence: credit strip + one-sentence reason ─────────────── */
 .rv { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
@@ -3631,3 +3648,25 @@ tr.ui-more-row:hover td { background: hsl(220 16% 98.5%) !important; }
   white-space: nowrap;
 }
 .xd-bill-status { font-weight: 600; color: var(--bill); }
+
+/* WebADI export (ExportView) */
+.ui-date input {
+  height: 100%;
+  padding: 0 8px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--fs-body);
+  color: var(--ink);
+}
+.ui-date .ui-date-sep {
+  border: none; background: none; padding: 0 2px;
+}
+.webadi-blank { color: var(--sienna); font-weight: 600; }
+.webadi-table tr.is-flagged td:first-child { box-shadow: inset 3px 0 0 var(--sienna); }
+.webadi-table td.webadi-head { color: var(--ink-faint); font-size: var(--fs-note); }
+/* Daily collection: the row that closes a day carries its totals */
+.collection-table tr.is-day-end td { border-bottom: 1px solid var(--rule-strong); }
+.collection-table tr.is-day-end td:nth-child(10),
+.collection-table tr.is-day-end td:nth-child(11) { font-weight: 600; }
+a.ui-btn.is-disabled { opacity: 0.5; pointer-events: none; }

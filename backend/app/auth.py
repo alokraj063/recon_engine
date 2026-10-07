@@ -106,11 +106,22 @@ class AuthUser:
     id: int
     email: str
     name: str
+    role: Optional[str] = None
 
 
-def _unauthenticated() -> HTTPException:
+ROLES = ("admin", "analyst", "viewer")
+# a viewer may only read; everything that changes state needs analyst+
+READ_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def _forbidden(code: str, detail: str) -> HTTPException:
+    return HTTPException(status_code=403,
+                         detail={"error": code, "detail": detail})
+
+
+def _unauthenticated(headers: Optional[dict] = None) -> HTTPException:
     # same shape every route in this app uses: {detail: {error, detail}}
-    return HTTPException(status_code=401,
+    return HTTPException(status_code=401, headers=headers,
                          detail={"error": "NOT_AUTHENTICATED",
                                  "detail": "Sign in to continue."})
 
@@ -120,7 +131,36 @@ def _load_active_user(user_id: int) -> Optional[AuthUser]:
         row = session.get(User, user_id)
         if row is None or not row.is_active:
             return None
-        return AuthUser(id=row.id, email=row.email, name=row.name)
+        return AuthUser(id=row.id, email=row.email, name=row.name,
+                        role=row.role)
+
+
+def _bearer_token(request: Request) -> Optional[str]:
+    """The token of an `Authorization: Bearer` header, when Okta is on.
+    A bearer token wins over a cookie: it is an explicit credential."""
+    scheme, _, value = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not value.strip():
+        return None
+    from .okta import okta_settings           # okta imports this module
+    return value.strip() if okta_settings() is not None else None
+
+
+async def _bearer_user(token: str) -> AuthUser:
+    from .okta import BearerError, bearer_user
+    try:
+        return await run_in_threadpool(bearer_user, token)
+    except BearerError as exc:
+        # a reason code only: never the token, never an address
+        logger.warning("auth.token_rejected", extra={
+            "event_type": "auth.token_rejected",
+            "details": {"reason": exc.reason}})
+        if exc.status == 403:
+            raise _forbidden("NO_ACCESS" if exc.reason != "INSUFFICIENT_SCOPE"
+                             else "INSUFFICIENT_SCOPE",
+                             "Please contact Admin for access."
+                             if exc.reason != "INSUFFICIENT_SCOPE"
+                             else "The token lacks the required scope.")
+        raise _unauthenticated({"WWW-Authenticate": "Bearer"})
 
 
 async def require_user(request: Request) -> AuthUser:
@@ -139,16 +179,39 @@ async def require_user(request: Request) -> AuthUser:
     from there, copied by anyio, into a sync route's worker thread. The
     user lookup itself is blocking SQLAlchemy, so it goes to the threadpool.
     """
-    user_id = request.session.get(SESSION_KEY)
-    if not user_id:
-        raise _unauthenticated()
-    user = await run_in_threadpool(_load_active_user, user_id)
-    if user is None:
-        # deleted or deactivated since the cookie was issued
-        request.session.clear()
-        raise _unauthenticated()
+    bearer = _bearer_token(request)
+    if bearer is not None:
+        user = await _bearer_user(bearer)
+    else:
+        user_id = request.session.get(SESSION_KEY)
+        if not user_id:
+            raise _unauthenticated()
+        user = await run_in_threadpool(_load_active_user, user_id)
+        if user is None:
+            # deleted or deactivated since the cookie was issued
+            request.session.clear()
+            raise _unauthenticated()
+    # the role is re-read with the row, so withdrawing it (like
+    # deactivating) takes effect on the user's next call
+    if user.role not in ROLES:
+        raise _forbidden("NO_ACCESS", "Please contact Admin for access.")
+    if user.role == "viewer" and request.method not in READ_METHODS:
+        raise _forbidden("FORBIDDEN", "Your role is read-only.")
     set_actor(user.id)
     return user
+
+
+def require_role(*roles: str):
+    """Route dependency: the signed-in user must hold one of `roles`.
+    Adds to the router-level require_user, which already ran."""
+    allowed = set(roles)
+
+    async def _check(user: AuthUser = Depends(require_user)) -> AuthUser:
+        if user.role not in allowed:
+            raise _forbidden("FORBIDDEN",
+                             f"This needs the {' or '.join(sorted(allowed))} role.")
+        return user
+    return _check
 
 
 # --- throttle ----------------------------------------------------------
@@ -203,6 +266,7 @@ class UserOut(BaseModel):
     id: int
     email: str
     name: str
+    role: Optional[str] = None
 
 
 @router.post("/login", response_model=UserOut)
@@ -227,6 +291,10 @@ def login(body: LoginRequest, request: Request) -> UserOut:
             reason = "NO_SUCH_USER"
         elif not row.is_active:
             reason = "INACTIVE"
+        elif row.password_hash is None:
+            # an Okta-only account: same work as a real check, same answer
+            _equal_cost_miss()
+            reason = "BAD_PASSWORD"
         elif not verify_password(body.password, row.password_hash):
             reason = "BAD_PASSWORD"
         else:
@@ -245,6 +313,15 @@ def login(body: LoginRequest, request: Request) -> UserOut:
                 "error": "INVALID_CREDENTIALS",
                 "detail": "Email or password is not correct."})
 
+        if row.role not in ROLES:
+            # the password was right, so there is nothing to hide: say what
+            # to do (an admin has to assign a role)
+            record_event(session, logger, event_type="auth.login_failed",
+                         level=logging.WARNING, entity_type="user",
+                         entity_id=row.id, details={"reason": "NO_ROLE"})
+            session.commit()
+            raise _forbidden("NO_ACCESS", "Please contact Admin for access.")
+
         # clear BEFORE issuing: a pre-existing cookie must not be adopted
         # and carried into the new session (session fixation)
         request.session.clear()
@@ -254,7 +331,7 @@ def login(body: LoginRequest, request: Request) -> UserOut:
         record_event(session, logger, event_type="auth.login_succeeded",
                      entity_type="user", entity_id=row.id, actor_user_id=row.id)
         session.commit()
-        return UserOut(id=row.id, email=row.email, name=row.name)
+        return UserOut(id=row.id, email=row.email, name=row.name, role=row.role)
 
 
 @router.post("/logout")
@@ -276,4 +353,4 @@ def logout(request: Request) -> dict:
 def me(user: AuthUser = Depends(require_user)) -> UserOut:
     """Who am I — the call the SPA's gate makes on load. 401 here is the
     normal, expected answer for someone who has not signed in yet."""
-    return UserOut(id=user.id, email=user.email, name=user.name)
+    return UserOut(id=user.id, email=user.email, name=user.name, role=user.role)

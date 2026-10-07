@@ -1,0 +1,856 @@
+<frozen site>:107: RuntimeWarning: Unexpected value in sys.prefix, expected /home/lehen/Projects/Wabtec/recon_engine/.venv, got /home/lehen/Projects/Wabtec/recon_engine/backend/../.venv
+<frozen site>:107: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /home/lehen/Projects/Wabtec/recon_engine/.venv, got /home/lehen/Projects/Wabtec/recon_engine/backend/../.venv
+/home/lehen/Projects/Wabtec/recon_engine/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+10 days, all files present.
+  12 Aug: 1 statement + 3 bills
+  13 Aug: 1 statement + 3 bills
+  14 Aug: 1 statement + 3 bills
+  15 Aug: 1 statement + 3 bills
+  16 Aug: 1 statement + 0 bills
+  17 Aug: 1 statement + 3 bills
+  18 Aug: 1 statement + 3 bills
+  19 Aug: 1 statement + 3 bills
+  20 Aug: 1 statement + 3 bills
+  21 Aug: 1 statement + 3 bills
+2026-09-29 13:24:32,442 WARNING app.auth               req=- cust=- run=- :: auth.ephemeral_session_secret | {"reason": "SESSION_SECRET not set", "effect": "sessions end at every restart and are not shared between processes"}
+2026-09-29 13:24:32,500 INFO    alembic.runtime.migration req=- cust=- run=- :: Context impl SQLiteImpl.
+2026-09-29 13:24:32,500 INFO    alembic.runtime.migration req=- cust=- run=- :: Will assume non-transactional DDL.
+2026-09-29 13:24:32,516 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade  -> bfc9078a3cc6, initial schema (medallion split)
+2026-09-29 13:24:32,722 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade bfc9078a3cc6 -> 17b3bbe9ec08, add audit_log table
+2026-09-29 13:24:32,739 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade 17b3bbe9ec08 -> 2a94c1e07f31, add match_rule_sets.field_map
+2026-09-29 13:24:32,744 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade 2a94c1e07f31 -> c7d1e4a90b23, canonicalize gold bill columns
+2026-09-29 13:24:32,795 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade c7d1e4a90b23 -> 0309779e4357, add match_ledger seq — durable per-customer match number (UI "M-{seq}")
+2026-09-29 13:24:32,806 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade 0309779e4357 -> e5a2c8f41d07, configurability columns (plan phases 1-4)
+2026-09-29 13:24:32,829 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade e5a2c8f41d07 -> a91b7c3e5d20, backfill default customer's railway advisory copy
+2026-09-29 13:24:32,832 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade a91b7c3e5d20 -> c4d8e2f96b31, rename default customer's display name to Wabtec
+2026-09-29 13:24:32,835 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade c4d8e2f96b31 -> d7e3f5a18c42, rename IREPS-flavoured exception codes to source-neutral ones
+2026-09-29 13:24:32,838 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade d7e3f5a18c42 -> f1c6b2d84a95, add gold.file_rows (which gold rows each ingested file reported)
+2026-09-29 13:24:32,861 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade f1c6b2d84a95 -> a9e4d7c2b301, gold.bills / gold.recoveries: `sheet` -> `operating_unit`, backfilled
+2026-09-29 13:24:32,874 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade a9e4d7c2b301 -> b2d7e9f4c1a8, ledger decisions: how an exception was resolved, manual matches
+2026-09-29 13:24:32,901 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade b2d7e9f4c1a8 -> c3f8a1d27e64, exception_ledger.gap_type — the bank-side gap code on the ledger
+2026-09-29 13:24:32,907 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade c3f8a1d27e64 -> e6c12a7b940f, add users table (the login gate)
+2026-09-29 13:24:32,916 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade e6c12a7b940f -> f4b8d2a6c913, add credit_sources (analyst IREPS / non-IREPS decision per credit)
+2026-09-29 13:24:32,928 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade f4b8d2a6c913 -> a7c3e91d5b24, paid statuses: drop CO7 DONE (a payment order does not guarantee payment)
+2026-09-29 13:24:32,931 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade a7c3e91d5b24 -> c5f1a83b7d20, match_rule_sets.awaiting_status_days (how long a status lag is excused)
+2026-09-29 13:24:32,937 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade c5f1a83b7d20 -> d8a4f2c6e1b9, record WHO: the user behind audit events and ledger decisions, + notes
+2026-09-29 13:24:32,957 INFO    alembic.runtime.migration req=- cust=- run=- :: Running upgrade d8a4f2c6e1b9 -> f3b8d1a6c4e2, match_rule_sets.zone_directory: the customer's zone -> segment directory
+
+== 12 Aug ==
+2026-09-29 13:24:33,011 INFO    db.bronze              req=dd6f7b553ab5 cust=1 run=- :: bronze.file_registered | {"source_type": "bank_statement", "size_bytes": 82504}
+2026-09-29 13:24:33,013 INFO    db.bronze              req=dd6f7b553ab5 cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 9674}
+2026-09-29 13:24:33,015 INFO    db.bronze              req=dd6f7b553ab5 cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 317571}
+2026-09-29 13:24:33,016 INFO    db.bronze              req=dd6f7b553ab5 cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 22957}
+2026-09-29 13:24:34,302 INFO    db.silver              req=dd6f7b553ab5 cust=1 run=- :: silver.rows_persisted | {"frames": ["transactions"], "rows": 158}
+2026-09-29 13:24:34,316 INFO    db.ingest              req=dd6f7b553ab5 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 158, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 158, "by_frame": {"bank_txns": {"inserted": 158, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 158}}, "frames": ["bank_txns"]}
+2026-09-29 13:24:34,319 INFO    db.silver              req=dd6f7b553ab5 cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 29}
+2026-09-29 13:24:34,337 INFO    db.ingest              req=dd6f7b553ab5 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 93, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 93, "by_frame": {"bills": {"inserted": 29, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 29}, "recoveries": {"inserted": 64, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 64}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:34,464 INFO    db.silver              req=dd6f7b553ab5 cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 2336}
+2026-09-29 13:24:34,829 INFO    db.ingest              req=dd6f7b553ab5 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 6271, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 6271, "by_frame": {"bills": {"inserted": 2336, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 2336}, "recoveries": {"inserted": 3935, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 3935}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:34,837 INFO    db.silver              req=dd6f7b553ab5 cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 121}
+2026-09-29 13:24:34,914 INFO    db.ingest              req=dd6f7b553ab5 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 323, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 323, "by_frame": {"bills": {"inserted": 121, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 121}, "recoveries": {"inserted": 202, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 202}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:34,915 INFO    app.routes             req=dd6f7b553ab5 cust=1 run=- :: ingestion.completed | {"files": [{"field": "statement", "source_type": "bank_statement", "bronze_file_id": 1, "outcome": "registered", "size_bytes": 82504}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 2, "outcome": "registered", "size_bytes": 9674}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 3, "outcome": "registered", "size_bytes": 317571}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 4, "outcome": "registered", "size_bytes": 22957}], "selfcheck_passed": null, "stats": {"files_reused": 0, "rows_inserted": 6845, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 6845, "by_frame": {"bank_txns": {"inserted": 158, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 158}, "bills": {"inserted": 2486, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 2486}, "recoveries": {"inserted": 4201, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 4201}}}}
+2026-09-29 13:24:34,945 INFO    app.request            req=dd6f7b553ab5 cust=- run=- :: http.request | {"method": "POST", "path": "/api/ingest", "status_code": 200, "duration_ms": 1960.2, "customer_id": "default"}
+2026-09-29 13:24:34,946 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/ingest "HTTP/1.1 200 OK"
+  ingested: statement bronze id 1
+2026-09-29 13:24:34,960 INFO    db.incremental         req=44926b7e19ab cust=1 run=c556c49ce7ee4b5aba87d0a460080f06 :: run.started | {"mode": "incremental"}
+2026-09-29 13:24:36,737 INFO    db.incremental         req=44926b7e19ab cust=1 run=c556c49ce7ee4b5aba87d0a460080f06 :: ledger.finalized | {"matches_created": 32, "auto_locked": 32, "exceptions_opened": 51, "exceptions_resolved": 0}
+2026-09-29 13:24:38,034 INFO    db.runs_store          req=44926b7e19ab cust=1 run=c556c49ce7ee4b5aba87d0a460080f06 :: run.succeeded | {"mode": "incremental"}
+2026-09-29 13:24:38,111 INFO    app.request            req=44926b7e19ab cust=- run=- :: http.request | {"method": "POST", "path": "/api/reconcile", "status_code": 200, "duration_ms": 3164.1, "customer_id": "default"}
+2026-09-29 13:24:38,111 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/reconcile "HTTP/1.1 200 OK"
+  reconciled: run c556c49ce7ee4b5aba87d0a460080f06  ledger: {"matches_created": 32, "auto_locked": 32, "exceptions_opened": 51, "exceptions_resolved": 0, "provisional_reviewed": 0, "provisional_superseded": 0, "provisional_kept_conflict": 0}
+
+== 13 Aug ==
+2026-09-29 13:24:38,118 INFO    db.bronze              req=f57837daf012 cust=1 run=- :: bronze.file_registered | {"source_type": "bank_statement", "size_bytes": 83002}
+2026-09-29 13:24:38,119 INFO    db.bronze              req=f57837daf012 cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 9497}
+2026-09-29 13:24:38,121 INFO    db.bronze              req=f57837daf012 cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 315601}
+2026-09-29 13:24:38,123 INFO    db.bronze              req=f57837daf012 cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 23063}
+2026-09-29 13:24:39,445 INFO    db.silver              req=f57837daf012 cust=1 run=- :: silver.rows_persisted | {"frames": ["transactions"], "rows": 131}
+2026-09-29 13:24:39,458 INFO    db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 131, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 131, "by_frame": {"bank_txns": {"inserted": 131, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 131}}, "frames": ["bank_txns"]}
+2026-09-29 13:24:39,461 INFO    db.silver              req=f57837daf012 cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 28}
+2026-09-29 13:24:39,511 INFO    db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 25, "rows_reused": 3, "conflicts": 0, "rows_reported": 28, "by_frame": {"bills": {"inserted": 0, "updated": 25, "unchanged": 3, "conflicts": 0, "reported": 28}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:39,613 INFO    db.silver              req=f57837daf012 cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 2318}
+2026-09-29 13:24:39,698 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,698 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,699 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,699 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:24:39,700 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,701 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,702 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,703 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,707 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,709 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,709 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,710 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,710 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,714 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,716 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,717 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,718 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,718 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,719 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,724 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,726 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,735 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,739 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,745 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,745 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,747 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,752 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,752 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 7, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:39,923 INFO    db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 27, "bills_updated": 2262, "rows_reused": 5, "conflicts": 28, "rows_reported": 2322, "by_frame": {"bills": {"inserted": 23, "updated": 2262, "unchanged": 5, "conflicts": 28, "reported": 2318}, "recoveries": {"inserted": 4, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 4}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:39,930 INFO    db.silver              req=f57837daf012 cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 122}
+2026-09-29 13:24:40,009 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 8, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:40,009 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 8, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:24:40,009 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 8, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:40,010 WARNING db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 8, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:40,032 INFO    db.ingest              req=f57837daf012 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 7, "bills_updated": 107, "rows_reused": 8, "conflicts": 4, "rows_reported": 126, "by_frame": {"bills": {"inserted": 3, "updated": 107, "unchanged": 8, "conflicts": 4, "reported": 122}, "recoveries": {"inserted": 4, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 4}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:40,032 INFO    app.routes             req=f57837daf012 cust=1 run=- :: ingestion.completed | {"files": [{"field": "statement", "source_type": "bank_statement", "bronze_file_id": 5, "outcome": "registered", "size_bytes": 83002}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 6, "outcome": "registered", "size_bytes": 9497}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 7, "outcome": "registered", "size_bytes": 315601}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 8, "outcome": "registered", "size_bytes": 23063}], "selfcheck_passed": null, "stats": {"files_reused": 0, "rows_inserted": 165, "bills_updated": 2394, "rows_reused": 16, "conflicts": 32, "rows_reported": 2607, "by_frame": {"bank_txns": {"inserted": 131, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 131}, "bills": {"inserted": 26, "updated": 2394, "unchanged": 16, "conflicts": 32, "reported": 2468}, "recoveries": {"inserted": 8, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 8}}}}
+2026-09-29 13:24:40,060 INFO    app.request            req=f57837daf012 cust=- run=- :: http.request | {"method": "POST", "path": "/api/ingest", "status_code": 200, "duration_ms": 1946.6, "customer_id": "default"}
+2026-09-29 13:24:40,060 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/ingest "HTTP/1.1 200 OK"
+  ingested: statement bronze id 5
+2026-09-29 13:24:40,067 INFO    db.incremental         req=4510f906b337 cust=1 run=d49fb110082e4f17be8723f1b668b984 :: run.started | {"mode": "incremental"}
+2026-09-29 13:24:41,964 INFO    db.incremental         req=4510f906b337 cust=1 run=d49fb110082e4f17be8723f1b668b984 :: ledger.finalized | {"matches_created": 14, "auto_locked": 14, "exceptions_opened": 45, "exceptions_resolved": 1}
+2026-09-29 13:24:43,335 INFO    db.runs_store          req=4510f906b337 cust=1 run=d49fb110082e4f17be8723f1b668b984 :: run.succeeded | {"mode": "incremental"}
+2026-09-29 13:24:43,414 INFO    app.request            req=4510f906b337 cust=- run=- :: http.request | {"method": "POST", "path": "/api/reconcile", "status_code": 200, "duration_ms": 3353.1, "customer_id": "default"}
+2026-09-29 13:24:43,415 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/reconcile "HTTP/1.1 200 OK"
+  reconciled: run d49fb110082e4f17be8723f1b668b984  ledger: {"matches_created": 14, "auto_locked": 14, "exceptions_opened": 45, "exceptions_resolved": 1, "provisional_reviewed": 0, "provisional_superseded": 0, "provisional_kept_conflict": 0}
+
+== 14 Aug ==
+2026-09-29 13:24:43,421 INFO    db.bronze              req=591841934d1d cust=1 run=- :: bronze.file_registered | {"source_type": "bank_statement", "size_bytes": 98423}
+2026-09-29 13:24:43,423 INFO    db.bronze              req=591841934d1d cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 9502}
+2026-09-29 13:24:43,425 INFO    db.bronze              req=591841934d1d cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 324161}
+2026-09-29 13:24:43,426 INFO    db.bronze              req=591841934d1d cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 23008}
+2026-09-29 13:24:44,983 INFO    db.silver              req=591841934d1d cust=1 run=- :: silver.rows_persisted | {"frames": ["transactions"], "rows": 196}
+2026-09-29 13:24:44,999 INFO    db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 196, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 196, "by_frame": {"bank_txns": {"inserted": 196, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 196}}, "frames": ["bank_txns"]}
+2026-09-29 13:24:45,002 INFO    db.silver              req=591841934d1d cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 28}
+2026-09-29 13:24:45,046 INFO    db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 10, "rows_reused": 18, "conflicts": 0, "rows_reported": 28, "by_frame": {"bills": {"inserted": 0, "updated": 10, "unchanged": 18, "conflicts": 0, "reported": 28}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:45,147 INFO    db.silver              req=591841934d1d cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 2378}
+2026-09-29 13:24:45,215 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:24:45,216 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,216 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,216 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,217 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,218 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,219 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,220 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,222 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,223 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,223 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,225 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:24:45,226 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,226 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,228 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:45,228 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:45,229 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,231 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,233 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,233 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,233 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,234 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,238 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,239 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:45,240 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,242 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,248 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,251 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,255 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,257 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,257 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,261 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,262 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,263 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:45,265 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:45,278 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:45,278 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:45,281 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:45,285 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:45,288 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 11, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:45,401 INFO    db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 110, "bills_updated": 2196, "rows_reused": 34, "conflicts": 40, "rows_reported": 2380, "by_frame": {"bills": {"inserted": 108, "updated": 2196, "unchanged": 34, "conflicts": 40, "reported": 2378}, "recoveries": {"inserted": 2, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 2}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:45,407 INFO    db.silver              req=591841934d1d cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 121}
+2026-09-29 13:24:45,481 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 12, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,482 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 12, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:24:45,482 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 12, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:24:45,482 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 12, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:24:45,483 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 12, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,484 WARNING db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 12, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:45,495 INFO    db.ingest              req=591841934d1d cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 83, "rows_reused": 32, "conflicts": 6, "rows_reported": 121, "by_frame": {"bills": {"inserted": 0, "updated": 83, "unchanged": 32, "conflicts": 6, "reported": 121}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:45,496 INFO    app.routes             req=591841934d1d cust=1 run=- :: ingestion.completed | {"files": [{"field": "statement", "source_type": "bank_statement", "bronze_file_id": 9, "outcome": "registered", "size_bytes": 98423}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 10, "outcome": "registered", "size_bytes": 9502}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 11, "outcome": "registered", "size_bytes": 324161}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 12, "outcome": "registered", "size_bytes": 23008}], "selfcheck_passed": null, "stats": {"files_reused": 0, "rows_inserted": 306, "bills_updated": 2289, "rows_reused": 84, "conflicts": 46, "rows_reported": 2725, "by_frame": {"bank_txns": {"inserted": 196, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 196}, "bills": {"inserted": 108, "updated": 2289, "unchanged": 84, "conflicts": 46, "reported": 2527}, "recoveries": {"inserted": 2, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 2}}}}
+2026-09-29 13:24:45,526 INFO    app.request            req=591841934d1d cust=- run=- :: http.request | {"method": "POST", "path": "/api/ingest", "status_code": 200, "duration_ms": 2108.6, "customer_id": "default"}
+2026-09-29 13:24:45,526 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/ingest "HTTP/1.1 200 OK"
+  ingested: statement bronze id 9
+2026-09-29 13:24:45,533 INFO    db.incremental         req=fa1369da1a6f cust=1 run=505374e8abfa474786b56425d387ac1f :: run.started | {"mode": "incremental"}
+2026-09-29 13:24:47,482 INFO    db.incremental         req=fa1369da1a6f cust=1 run=505374e8abfa474786b56425d387ac1f :: ledger.finalized | {"matches_created": 34, "auto_locked": 32, "exceptions_opened": 57, "exceptions_resolved": 7}
+2026-09-29 13:24:49,050 INFO    db.runs_store          req=fa1369da1a6f cust=1 run=505374e8abfa474786b56425d387ac1f :: run.succeeded | {"mode": "incremental"}
+2026-09-29 13:24:49,138 INFO    app.request            req=fa1369da1a6f cust=- run=- :: http.request | {"method": "POST", "path": "/api/reconcile", "status_code": 200, "duration_ms": 3611.2, "customer_id": "default"}
+2026-09-29 13:24:49,139 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/reconcile "HTTP/1.1 200 OK"
+  reconciled: run 505374e8abfa474786b56425d387ac1f  ledger: {"matches_created": 34, "auto_locked": 32, "exceptions_opened": 57, "exceptions_resolved": 7, "provisional_reviewed": 0, "provisional_superseded": 0, "provisional_kept_conflict": 0}
+
+== 15 Aug ==
+2026-09-29 13:24:49,147 INFO    db.bronze              req=c19f5384122a cust=1 run=- :: bronze.file_registered | {"source_type": "bank_statement", "size_bytes": 125285}
+2026-09-29 13:24:49,148 INFO    db.bronze              req=c19f5384122a cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 9495}
+2026-09-29 13:24:49,150 INFO    db.bronze              req=c19f5384122a cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 310395}
+2026-09-29 13:24:49,151 INFO    db.bronze              req=c19f5384122a cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 22721}
+2026-09-29 13:24:50,983 INFO    db.silver              req=c19f5384122a cust=1 run=- :: silver.rows_persisted | {"frames": ["transactions"], "rows": 182}
+2026-09-29 13:24:51,008 INFO    db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 182, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 182, "by_frame": {"bank_txns": {"inserted": 182, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 182}}, "frames": ["bank_txns"]}
+2026-09-29 13:24:51,011 INFO    db.silver              req=c19f5384122a cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 28}
+2026-09-29 13:24:51,090 INFO    db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 8, "rows_reused": 20, "conflicts": 0, "rows_reported": 28, "by_frame": {"bills": {"inserted": 0, "updated": 8, "unchanged": 20, "conflicts": 0, "reported": 28}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:51,210 INFO    db.silver              req=c19f5384122a cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 2278}
+2026-09-29 13:24:51,332 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,333 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,333 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,333 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,334 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,334 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,335 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,336 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,337 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,337 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,338 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,341 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,343 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,345 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,345 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,349 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,349 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,350 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,350 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,351 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,351 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,351 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,353 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,354 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,356 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,357 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,358 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,359 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,359 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,359 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,360 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,360 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,361 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,362 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,363 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,363 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,363 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,364 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,365 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,366 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,367 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,368 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,369 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,369 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,370 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,370 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,372 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,375 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,378 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,379 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,381 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,384 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,384 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,385 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,388 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,390 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,390 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,393 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,403 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,405 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,405 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,406 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,407 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,411 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,414 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 15, "changed_field_names": ["data_row"]}
+2026-09-29 13:24:51,501 INFO    db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 2041, "rows_reused": 172, "conflicts": 65, "rows_reported": 2278, "by_frame": {"bills": {"inserted": 0, "updated": 2041, "unchanged": 172, "conflicts": 65, "reported": 2278}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:51,507 INFO    db.silver              req=c19f5384122a cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 120}
+2026-09-29 13:24:51,553 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 16, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:24:51,553 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 16, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:24:51,553 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 16, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,554 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 16, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,555 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 16, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,555 WARNING db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 16, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:24:51,567 INFO    db.ingest              req=c19f5384122a cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 80, "rows_reused": 34, "conflicts": 6, "rows_reported": 120, "by_frame": {"bills": {"inserted": 0, "updated": 80, "unchanged": 34, "conflicts": 6, "reported": 120}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:24:51,567 INFO    app.routes             req=c19f5384122a cust=1 run=- :: ingestion.completed | {"files": [{"field": "statement", "source_type": "bank_statement", "bronze_file_id": 13, "outcome": "registered", "size_bytes": 125285}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 14, "outcome": "registered", "size_bytes": 9495}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 15, "outcome": "registered", "size_bytes": 310395}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 16, "outcome": "registered", "size_bytes": 22721}], "selfcheck_passed": null, "stats": {"files_reused": 0, "rows_inserted": 182, "bills_updated": 2129, "rows_reused": 226, "conflicts": 71, "rows_reported": 2608, "by_frame": {"bank_txns": {"inserted": 182, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 182}, "bills": {"inserted": 0, "updated": 2129, "unchanged": 226, "conflicts": 71, "reported": 2426}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}}}
+2026-09-29 13:24:51,597 INFO    app.request            req=c19f5384122a cust=- run=- :: http.request | {"method": "POST", "path": "/api/ingest", "status_code": 200, "duration_ms": 2454.7, "customer_id": "default"}
+2026-09-29 13:24:51,597 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/ingest "HTTP/1.1 200 OK"
+  ingested: statement bronze id 13
+2026-09-29 13:24:51,605 INFO    db.incremental         req=1d0fbee6b960 cust=1 run=26e1f59a02cd4ebbaa07c88669da6bf3 :: run.started | {"mode": "incremental"}
+2026-09-29 13:24:55,204 INFO    db.incremental         req=1d0fbee6b960 cust=1 run=26e1f59a02cd4ebbaa07c88669da6bf3 :: ledger.finalized | {"matches_created": 1, "auto_locked": 0, "exceptions_opened": 43, "exceptions_resolved": 0}
+2026-09-29 13:24:56,680 INFO    db.runs_store          req=1d0fbee6b960 cust=1 run=26e1f59a02cd4ebbaa07c88669da6bf3 :: run.succeeded | {"mode": "incremental"}
+2026-09-29 13:24:56,769 INFO    app.request            req=1d0fbee6b960 cust=- run=- :: http.request | {"method": "POST", "path": "/api/reconcile", "status_code": 200, "duration_ms": 5170.8, "customer_id": "default"}
+2026-09-29 13:24:56,770 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/reconcile "HTTP/1.1 200 OK"
+  reconciled: run 26e1f59a02cd4ebbaa07c88669da6bf3  ledger: {"matches_created": 1, "auto_locked": 0, "exceptions_opened": 43, "exceptions_resolved": 0, "provisional_reviewed": 2, "provisional_superseded": 0, "provisional_kept_conflict": 0}
+
+== 16 Aug ==
+2026-09-29 13:24:56,777 INFO    db.bronze              req=1467ad47d02e cust=1 run=- :: bronze.file_registered | {"source_type": "bank_statement", "size_bytes": 87305}
+2026-09-29 13:24:57,523 INFO    db.silver              req=1467ad47d02e cust=1 run=- :: silver.rows_persisted | {"frames": ["transactions"], "rows": 99}
+2026-09-29 13:24:57,567 INFO    db.ingest              req=1467ad47d02e cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 99, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 99, "by_frame": {"bank_txns": {"inserted": 99, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 99}}, "frames": ["bank_txns"]}
+2026-09-29 13:24:57,568 INFO    app.routes             req=1467ad47d02e cust=1 run=- :: ingestion.completed | {"files": [{"field": "statement", "source_type": "bank_statement", "bronze_file_id": 17, "outcome": "registered", "size_bytes": 87305}], "selfcheck_passed": null, "stats": {"files_reused": 0, "rows_inserted": 99, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 99, "by_frame": {"bank_txns": {"inserted": 99, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 99}}}}
+2026-09-29 13:24:57,585 INFO    app.request            req=1467ad47d02e cust=- run=- :: http.request | {"method": "POST", "path": "/api/ingest", "status_code": 200, "duration_ms": 812.6, "customer_id": "default"}
+2026-09-29 13:24:57,586 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/ingest "HTTP/1.1 200 OK"
+  ingested: statement bronze id 17
+2026-09-29 13:24:57,594 INFO    db.incremental         req=d73365daf83c cust=1 run=31ae8ddc3c3b47c580efe430bb6d2557 :: run.started | {"mode": "incremental"}
+2026-09-29 13:25:01,125 INFO    db.incremental         req=d73365daf83c cust=1 run=31ae8ddc3c3b47c580efe430bb6d2557 :: ledger.finalized | {"matches_created": 1, "auto_locked": 0, "exceptions_opened": 3, "exceptions_resolved": 0}
+2026-09-29 13:25:02,687 INFO    db.runs_store          req=d73365daf83c cust=1 run=31ae8ddc3c3b47c580efe430bb6d2557 :: run.succeeded | {"mode": "incremental"}
+2026-09-29 13:25:02,774 INFO    app.request            req=d73365daf83c cust=- run=- :: http.request | {"method": "POST", "path": "/api/reconcile", "status_code": 200, "duration_ms": 5187.9, "customer_id": "default"}
+2026-09-29 13:25:02,775 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/reconcile "HTTP/1.1 200 OK"
+  reconciled: run 31ae8ddc3c3b47c580efe430bb6d2557  ledger: {"matches_created": 1, "auto_locked": 0, "exceptions_opened": 3, "exceptions_resolved": 0, "provisional_reviewed": 3, "provisional_superseded": 0, "provisional_kept_conflict": 0}
+
+== 17 Aug ==
+2026-09-29 13:25:02,783 INFO    db.bronze              req=e1d1c1b5900b cust=1 run=- :: bronze.file_registered | {"source_type": "bank_statement", "size_bytes": 33044}
+2026-09-29 13:25:02,784 INFO    db.bronze              req=e1d1c1b5900b cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 9498}
+2026-09-29 13:25:02,786 INFO    db.bronze              req=e1d1c1b5900b cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 303290}
+2026-09-29 13:25:02,787 INFO    db.bronze              req=e1d1c1b5900b cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 22274}
+2026-09-29 13:25:03,338 INFO    db.silver              req=e1d1c1b5900b cust=1 run=- :: silver.rows_persisted | {"frames": ["transactions"], "rows": 1}
+2026-09-29 13:25:03,353 INFO    db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 1, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 1, "by_frame": {"bank_txns": {"inserted": 1, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 1}}, "frames": ["bank_txns"]}
+2026-09-29 13:25:03,356 INFO    db.silver              req=e1d1c1b5900b cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 28}
+2026-09-29 13:25:03,444 INFO    db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 18, "rows_reused": 10, "conflicts": 0, "rows_reported": 28, "by_frame": {"bills": {"inserted": 0, "updated": 18, "unchanged": 10, "conflicts": 0, "reported": 28}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:03,539 INFO    db.silver              req=e1d1c1b5900b cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 2223}
+2026-09-29 13:25:03,608 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,609 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,609 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,610 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,610 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,610 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,611 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,611 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,611 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,612 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,613 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,613 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,613 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,614 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,616 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,616 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,618 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,618 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,620 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,621 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,621 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,621 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,622 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,622 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,623 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,624 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,625 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,626 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,626 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,627 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,628 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,629 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,629 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,629 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,630 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,631 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,632 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,632 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,632 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,633 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,634 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,635 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,635 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,637 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,638 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,638 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,639 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,639 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,639 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,642 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,645 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,646 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,648 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,649 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,651 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,654 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,655 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,655 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,658 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,660 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,661 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,663 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,673 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,675 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,676 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,677 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,678 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,681 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,685 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 20, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:03,781 INFO    db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 1977, "rows_reused": 177, "conflicts": 69, "rows_reported": 2223, "by_frame": {"bills": {"inserted": 0, "updated": 1977, "unchanged": 177, "conflicts": 69, "reported": 2223}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:03,788 INFO    db.silver              req=e1d1c1b5900b cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 117}
+2026-09-29 13:25:03,831 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 21, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,831 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 21, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:25:03,831 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 21, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,832 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 21, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,832 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 21, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,833 WARNING db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 21, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:03,844 INFO    db.ingest              req=e1d1c1b5900b cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 72, "rows_reused": 39, "conflicts": 6, "rows_reported": 117, "by_frame": {"bills": {"inserted": 0, "updated": 72, "unchanged": 39, "conflicts": 6, "reported": 117}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:03,844 INFO    app.routes             req=e1d1c1b5900b cust=1 run=- :: ingestion.completed | {"files": [{"field": "statement", "source_type": "bank_statement", "bronze_file_id": 18, "outcome": "registered", "size_bytes": 33044}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 19, "outcome": "registered", "size_bytes": 9498}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 20, "outcome": "registered", "size_bytes": 303290}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 21, "outcome": "registered", "size_bytes": 22274}], "selfcheck_passed": null, "stats": {"files_reused": 0, "rows_inserted": 1, "bills_updated": 2067, "rows_reused": 226, "conflicts": 75, "rows_reported": 2369, "by_frame": {"bank_txns": {"inserted": 1, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 1}, "bills": {"inserted": 0, "updated": 2067, "unchanged": 226, "conflicts": 75, "reported": 2368}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}}}
+2026-09-29 13:25:03,867 INFO    app.request            req=e1d1c1b5900b cust=- run=- :: http.request | {"method": "POST", "path": "/api/ingest", "status_code": 200, "duration_ms": 1088.6, "customer_id": "default"}
+2026-09-29 13:25:03,867 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/ingest "HTTP/1.1 200 OK"
+  ingested: statement bronze id 18
+2026-09-29 13:25:03,876 INFO    db.incremental         req=640ee08488aa cust=1 run=1cbc9311b00046b89d55f22fc18d5745 :: run.started | {"mode": "incremental"}
+2026-09-29 13:25:07,287 INFO    db.incremental         req=640ee08488aa cust=1 run=1cbc9311b00046b89d55f22fc18d5745 :: ledger.finalized | {"matches_created": 0, "auto_locked": 0, "exceptions_opened": 1, "exceptions_resolved": 0}
+2026-09-29 13:25:08,678 INFO    db.runs_store          req=640ee08488aa cust=1 run=1cbc9311b00046b89d55f22fc18d5745 :: run.succeeded | {"mode": "incremental"}
+2026-09-29 13:25:08,762 INFO    app.request            req=640ee08488aa cust=- run=- :: http.request | {"method": "POST", "path": "/api/reconcile", "status_code": 200, "duration_ms": 4893.6, "customer_id": "default"}
+2026-09-29 13:25:08,763 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/reconcile "HTTP/1.1 200 OK"
+  reconciled: run 1cbc9311b00046b89d55f22fc18d5745  ledger: {"matches_created": 0, "auto_locked": 0, "exceptions_opened": 1, "exceptions_resolved": 0, "provisional_reviewed": 4, "provisional_superseded": 0, "provisional_kept_conflict": 0}
+
+== 18 Aug ==
+2026-09-29 13:25:08,769 INFO    db.bronze              req=f8702e8b630b cust=1 run=- :: bronze.file_registered | {"source_type": "bank_statement", "size_bytes": 33043}
+2026-09-29 13:25:08,771 INFO    db.bronze              req=f8702e8b630b cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 9187}
+2026-09-29 13:25:08,772 INFO    db.bronze              req=f8702e8b630b cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 302635}
+2026-09-29 13:25:08,774 INFO    db.bronze              req=f8702e8b630b cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 22253}
+2026-09-29 13:25:09,274 INFO    db.silver              req=f8702e8b630b cust=1 run=- :: silver.rows_persisted | {"frames": ["transactions"], "rows": 1}
+2026-09-29 13:25:09,306 INFO    db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 0, "rows_reused": 1, "conflicts": 0, "rows_reported": 1, "by_frame": {"bank_txns": {"inserted": 0, "updated": 0, "unchanged": 1, "conflicts": 0, "reported": 1}}, "frames": ["bank_txns"]}
+2026-09-29 13:25:09,309 INFO    db.silver              req=f8702e8b630b cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 26}
+2026-09-29 13:25:09,399 INFO    db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 2, "bills_updated": 15, "rows_reused": 9, "conflicts": 0, "rows_reported": 26, "by_frame": {"bills": {"inserted": 2, "updated": 15, "unchanged": 9, "conflicts": 0, "reported": 26}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:09,497 INFO    db.silver              req=f8702e8b630b cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 2224}
+2026-09-29 13:25:09,563 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,563 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,564 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,564 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,564 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,564 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,565 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,565 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,566 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,566 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,567 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,568 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,570 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,571 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,574 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,574 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,577 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,578 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,578 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,578 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,580 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,580 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,580 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,581 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,582 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,582 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,583 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,585 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,586 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,587 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,588 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,588 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,588 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,588 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,589 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,590 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,591 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,592 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,592 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,592 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,593 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,594 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,595 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,596 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,597 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,598 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,598 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,599 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,599 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,601 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,607 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,607 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,609 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,611 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,612 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,616 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,616 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,616 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,621 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,622 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,622 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,626 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,635 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,637 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,638 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,639 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,639 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,643 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,645 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 24, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:09,752 INFO    db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 43, "bills_updated": 2094, "rows_reused": 28, "conflicts": 69, "rows_reported": 2234, "by_frame": {"bills": {"inserted": 33, "updated": 2094, "unchanged": 28, "conflicts": 69, "reported": 2224}, "recoveries": {"inserted": 10, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 10}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:09,759 INFO    db.silver              req=f8702e8b630b cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 117}
+2026-09-29 13:25:09,815 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 25, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,815 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 25, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:25:09,816 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 25, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:25:09,816 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 25, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,818 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 25, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,819 WARNING db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 25, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:09,842 INFO    db.ingest              req=f8702e8b630b cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 1, "bills_updated": 57, "rows_reused": 53, "conflicts": 6, "rows_reported": 117, "by_frame": {"bills": {"inserted": 1, "updated": 57, "unchanged": 53, "conflicts": 6, "reported": 117}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:09,843 INFO    app.routes             req=f8702e8b630b cust=1 run=- :: ingestion.completed | {"files": [{"field": "statement", "source_type": "bank_statement", "bronze_file_id": 22, "outcome": "registered", "size_bytes": 33043}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 23, "outcome": "registered", "size_bytes": 9187}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 24, "outcome": "registered", "size_bytes": 302635}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 25, "outcome": "registered", "size_bytes": 22253}], "selfcheck_passed": null, "stats": {"files_reused": 0, "rows_inserted": 46, "bills_updated": 2166, "rows_reused": 91, "conflicts": 75, "rows_reported": 2378, "by_frame": {"bank_txns": {"inserted": 0, "updated": 0, "unchanged": 1, "conflicts": 0, "reported": 1}, "bills": {"inserted": 36, "updated": 2166, "unchanged": 90, "conflicts": 75, "reported": 2367}, "recoveries": {"inserted": 10, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 10}}}}
+2026-09-29 13:25:09,874 INFO    app.request            req=f8702e8b630b cust=- run=- :: http.request | {"method": "POST", "path": "/api/ingest", "status_code": 200, "duration_ms": 1108.6, "customer_id": "default"}
+2026-09-29 13:25:09,874 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/ingest "HTTP/1.1 200 OK"
+  ingested: statement bronze id 22
+2026-09-29 13:25:09,883 INFO    db.incremental         req=ac4edc7ce4ef cust=1 run=062ea12e814b4610afaec9118e841930 :: run.started | {"mode": "incremental"}
+2026-09-29 13:25:11,634 INFO    db.incremental         req=ac4edc7ce4ef cust=1 run=062ea12e814b4610afaec9118e841930 :: ledger.match_superseded | {"was_confidence": "AMOUNT_ONLY", "superseded_by_seq": 83, "exceptions_resolved": 0}
+2026-09-29 13:25:13,368 INFO    db.incremental         req=ac4edc7ce4ef cust=1 run=062ea12e814b4610afaec9118e841930 :: ledger.finalized | {"matches_created": 2, "auto_locked": 2, "exceptions_opened": 3, "exceptions_resolved": 2}
+2026-09-29 13:25:14,835 INFO    db.runs_store          req=ac4edc7ce4ef cust=1 run=062ea12e814b4610afaec9118e841930 :: run.succeeded | {"mode": "incremental"}
+2026-09-29 13:25:14,923 INFO    app.request            req=ac4edc7ce4ef cust=- run=- :: http.request | {"method": "POST", "path": "/api/reconcile", "status_code": 200, "duration_ms": 5048.1, "customer_id": "default"}
+2026-09-29 13:25:14,924 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/reconcile "HTTP/1.1 200 OK"
+  reconciled: run 062ea12e814b4610afaec9118e841930  ledger: {"matches_created": 2, "auto_locked": 2, "exceptions_opened": 3, "exceptions_resolved": 2, "provisional_reviewed": 4, "provisional_superseded": 1, "provisional_kept_conflict": 0}
+
+== 19 Aug ==
+2026-09-29 13:25:14,930 INFO    db.bronze              req=aff88e68e42e cust=1 run=- :: bronze.file_registered | {"source_type": "bank_statement", "size_bytes": 71099}
+2026-09-29 13:25:14,932 INFO    db.bronze              req=aff88e68e42e cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 9165}
+2026-09-29 13:25:14,933 INFO    db.bronze              req=aff88e68e42e cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 22131}
+2026-09-29 13:25:14,935 INFO    db.bronze              req=aff88e68e42e cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 300145}
+2026-09-29 13:25:16,080 INFO    db.silver              req=aff88e68e42e cust=1 run=- :: silver.rows_persisted | {"frames": ["transactions"], "rows": 139}
+2026-09-29 13:25:16,099 INFO    db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 139, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 139, "by_frame": {"bank_txns": {"inserted": 139, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 139}}, "frames": ["bank_txns"]}
+2026-09-29 13:25:16,103 INFO    db.silver              req=aff88e68e42e cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 26}
+2026-09-29 13:25:16,151 INFO    db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 12, "rows_reused": 14, "conflicts": 0, "rows_reported": 26, "by_frame": {"bills": {"inserted": 0, "updated": 12, "unchanged": 14, "conflicts": 0, "reported": 26}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:16,158 INFO    db.silver              req=aff88e68e42e cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 116}
+2026-09-29 13:25:16,199 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 28, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,199 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 28, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:25:16,200 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 28, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:25:16,200 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 28, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:25:16,201 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 28, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,201 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 28, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,202 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 28, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,213 INFO    db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 69, "rows_reused": 40, "conflicts": 7, "rows_reported": 116, "by_frame": {"bills": {"inserted": 0, "updated": 69, "unchanged": 40, "conflicts": 7, "reported": 116}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:16,295 INFO    db.silver              req=aff88e68e42e cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 2208}
+2026-09-29 13:25:16,373 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:25:16,374 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,374 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,375 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,375 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,375 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,375 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,376 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,376 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,376 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,377 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,377 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,378 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,379 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,379 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,380 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,380 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,382 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,383 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,384 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,387 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,388 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,388 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,388 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,388 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,389 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,389 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,389 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,390 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,392 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,393 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,393 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,394 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,395 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,396 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,396 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,396 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,397 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,398 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,399 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,400 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,400 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,400 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,401 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,402 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,403 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,404 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,405 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,407 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,408 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,408 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,408 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,410 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,414 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,414 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,417 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,417 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,419 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,423 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,424 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,424 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,431 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,432 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,433 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,437 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,447 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,448 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:16,449 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,449 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,451 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,452 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,456 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,458 WARNING db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 29, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:16,580 INFO    db.ingest              req=aff88e68e42e cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 24, "bills_updated": 2085, "rows_reused": 30, "conflicts": 73, "rows_reported": 2212, "by_frame": {"bills": {"inserted": 20, "updated": 2085, "unchanged": 30, "conflicts": 73, "reported": 2208}, "recoveries": {"inserted": 4, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 4}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:16,580 INFO    app.routes             req=aff88e68e42e cust=1 run=- :: ingestion.completed | {"files": [{"field": "statement", "source_type": "bank_statement", "bronze_file_id": 26, "outcome": "registered", "size_bytes": 71099}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 27, "outcome": "registered", "size_bytes": 9165}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 28, "outcome": "registered", "size_bytes": 22131}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 29, "outcome": "registered", "size_bytes": 300145}], "selfcheck_passed": null, "stats": {"files_reused": 0, "rows_inserted": 163, "bills_updated": 2166, "rows_reused": 84, "conflicts": 80, "rows_reported": 2493, "by_frame": {"bank_txns": {"inserted": 139, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 139}, "bills": {"inserted": 20, "updated": 2166, "unchanged": 84, "conflicts": 80, "reported": 2350}, "recoveries": {"inserted": 4, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 4}}}}
+2026-09-29 13:25:16,602 INFO    app.request            req=aff88e68e42e cust=- run=- :: http.request | {"method": "POST", "path": "/api/ingest", "status_code": 200, "duration_ms": 1675.2, "customer_id": "default"}
+2026-09-29 13:25:16,602 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/ingest "HTTP/1.1 200 OK"
+  ingested: statement bronze id 26
+2026-09-29 13:25:16,611 INFO    db.incremental         req=bd56ab6dbf60 cust=1 run=2396121be9274cabb97acc784817a7f1 :: run.started | {"mode": "incremental"}
+2026-09-29 13:25:20,458 INFO    db.incremental         req=bd56ab6dbf60 cust=1 run=2396121be9274cabb97acc784817a7f1 :: ledger.finalized | {"matches_created": 17, "auto_locked": 17, "exceptions_opened": 69, "exceptions_resolved": 0}
+2026-09-29 13:25:21,974 INFO    db.runs_store          req=bd56ab6dbf60 cust=1 run=2396121be9274cabb97acc784817a7f1 :: run.succeeded | {"mode": "incremental"}
+2026-09-29 13:25:22,062 INFO    app.request            req=bd56ab6dbf60 cust=- run=- :: http.request | {"method": "POST", "path": "/api/reconcile", "status_code": 200, "duration_ms": 5458.9, "customer_id": "default"}
+2026-09-29 13:25:22,062 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/reconcile "HTTP/1.1 200 OK"
+  reconciled: run 2396121be9274cabb97acc784817a7f1  ledger: {"matches_created": 17, "auto_locked": 17, "exceptions_opened": 69, "exceptions_resolved": 0, "provisional_reviewed": 3, "provisional_superseded": 0, "provisional_kept_conflict": 0}
+
+== 20 Aug ==
+2026-09-29 13:25:22,070 INFO    db.bronze              req=5dcbafe659ff cust=1 run=- :: bronze.file_registered | {"source_type": "bank_statement", "size_bytes": 59899}
+2026-09-29 13:25:22,071 INFO    db.bronze              req=5dcbafe659ff cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 9212}
+2026-09-29 13:25:22,073 INFO    db.bronze              req=5dcbafe659ff cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 301540}
+2026-09-29 13:25:22,074 INFO    db.bronze              req=5dcbafe659ff cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 21691}
+2026-09-29 13:25:22,987 INFO    db.silver              req=5dcbafe659ff cust=1 run=- :: silver.rows_persisted | {"frames": ["transactions"], "rows": 87}
+2026-09-29 13:25:23,028 INFO    db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 87, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 87, "by_frame": {"bank_txns": {"inserted": 87, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 87}}, "frames": ["bank_txns"]}
+2026-09-29 13:25:23,031 INFO    db.silver              req=5dcbafe659ff cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 26}
+2026-09-29 13:25:23,103 INFO    db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 12, "rows_reused": 14, "conflicts": 0, "rows_reported": 26, "by_frame": {"bills": {"inserted": 0, "updated": 12, "unchanged": 14, "conflicts": 0, "reported": 26}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:23,242 INFO    db.silver              req=5dcbafe659ff cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 2207}
+2026-09-29 13:25:23,309 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,309 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,310 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,310 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,310 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,310 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,311 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,311 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,311 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,311 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,312 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,312 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,312 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,313 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,313 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,314 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,314 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,314 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,315 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,315 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,315 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,316 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,316 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,317 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,319 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,319 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,320 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,321 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,322 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,323 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,323 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,323 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,325 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,325 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,326 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,327 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,328 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,329 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,330 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,330 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,331 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,331 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,332 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,332 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,332 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,332 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,333 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,333 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,335 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,335 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,336 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,336 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,336 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,337 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,338 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,339 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,339 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,339 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,340 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,341 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,342 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,343 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,343 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,344 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,344 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,344 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,346 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,349 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,350 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,353 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,354 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,355 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,358 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,359 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,359 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,362 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,365 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,366 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,368 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,378 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,379 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,380 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,380 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,382 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,382 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,386 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,388 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 32, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,481 INFO    db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 23, "bills_updated": 2057, "rows_reused": 43, "conflicts": 87, "rows_reported": 2210, "by_frame": {"bills": {"inserted": 20, "updated": 2057, "unchanged": 43, "conflicts": 87, "reported": 2207}, "recoveries": {"inserted": 3, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 3}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:23,487 INFO    db.silver              req=5dcbafe659ff cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 112}
+2026-09-29 13:25:23,530 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 33, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,531 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 33, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:25:23,531 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 33, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,531 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 33, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,531 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 33, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,532 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 33, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,533 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 33, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:23,533 WARNING db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 33, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:23,545 INFO    db.ingest              req=5dcbafe659ff cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 83, "rows_reused": 21, "conflicts": 8, "rows_reported": 112, "by_frame": {"bills": {"inserted": 0, "updated": 83, "unchanged": 21, "conflicts": 8, "reported": 112}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:23,545 INFO    app.routes             req=5dcbafe659ff cust=1 run=- :: ingestion.completed | {"files": [{"field": "statement", "source_type": "bank_statement", "bronze_file_id": 30, "outcome": "registered", "size_bytes": 59899}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 31, "outcome": "registered", "size_bytes": 9212}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 32, "outcome": "registered", "size_bytes": 301540}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 33, "outcome": "registered", "size_bytes": 21691}], "selfcheck_passed": null, "stats": {"files_reused": 0, "rows_inserted": 110, "bills_updated": 2152, "rows_reused": 78, "conflicts": 95, "rows_reported": 2435, "by_frame": {"bank_txns": {"inserted": 87, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 87}, "bills": {"inserted": 20, "updated": 2152, "unchanged": 78, "conflicts": 95, "reported": 2345}, "recoveries": {"inserted": 3, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 3}}}}
+2026-09-29 13:25:23,577 INFO    app.request            req=5dcbafe659ff cust=- run=- :: http.request | {"method": "POST", "path": "/api/ingest", "status_code": 200, "duration_ms": 1511.3, "customer_id": "default"}
+2026-09-29 13:25:23,577 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/ingest "HTTP/1.1 200 OK"
+  ingested: statement bronze id 30
+2026-09-29 13:25:23,588 INFO    db.incremental         req=f6f44d3e0dd0 cust=1 run=5a087ced8deb4811a591aff78b2430da :: run.started | {"mode": "incremental"}
+2026-09-29 13:25:27,180 INFO    db.incremental         req=f6f44d3e0dd0 cust=1 run=5a087ced8deb4811a591aff78b2430da :: ledger.finalized | {"matches_created": 14, "auto_locked": 14, "exceptions_opened": 39, "exceptions_resolved": 6}
+2026-09-29 13:25:28,799 INFO    db.runs_store          req=f6f44d3e0dd0 cust=1 run=5a087ced8deb4811a591aff78b2430da :: run.succeeded | {"mode": "incremental"}
+2026-09-29 13:25:28,890 INFO    app.request            req=f6f44d3e0dd0 cust=- run=- :: http.request | {"method": "POST", "path": "/api/reconcile", "status_code": 200, "duration_ms": 5311.8, "customer_id": "default"}
+2026-09-29 13:25:28,891 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/reconcile "HTTP/1.1 200 OK"
+  reconciled: run 5a087ced8deb4811a591aff78b2430da  ledger: {"matches_created": 14, "auto_locked": 14, "exceptions_opened": 39, "exceptions_resolved": 6, "provisional_reviewed": 3, "provisional_superseded": 0, "provisional_kept_conflict": 0}
+
+== 21 Aug ==
+2026-09-29 13:25:28,898 INFO    db.bronze              req=1e8027e99301 cust=1 run=- :: bronze.file_registered | {"source_type": "bank_statement", "size_bytes": 73472}
+2026-09-29 13:25:28,899 INFO    db.bronze              req=1e8027e99301 cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 9223}
+2026-09-29 13:25:28,901 INFO    db.bronze              req=1e8027e99301 cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 21721}
+2026-09-29 13:25:28,902 INFO    db.bronze              req=1e8027e99301 cust=1 run=- :: bronze.file_registered | {"source_type": "bill_status", "size_bytes": 303096}
+2026-09-29 13:25:30,128 INFO    db.silver              req=1e8027e99301 cust=1 run=- :: silver.rows_persisted | {"frames": ["transactions"], "rows": 141}
+2026-09-29 13:25:30,149 INFO    db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 141, "bills_updated": 0, "rows_reused": 0, "conflicts": 0, "rows_reported": 141, "by_frame": {"bank_txns": {"inserted": 141, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 141}}, "frames": ["bank_txns"]}
+2026-09-29 13:25:30,152 INFO    db.silver              req=1e8027e99301 cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 26}
+2026-09-29 13:25:30,201 INFO    db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 13, "rows_reused": 13, "conflicts": 0, "rows_reported": 26, "by_frame": {"bills": {"inserted": 0, "updated": 13, "unchanged": 13, "conflicts": 0, "reported": 26}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:30,207 INFO    db.silver              req=1e8027e99301 cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 112}
+2026-09-29 13:25:30,250 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 36, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,250 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 36, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,250 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 36, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:25:30,251 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 36, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,251 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 36, "changed_field_names": ["payment_order_ref"]}
+2026-09-29 13:25:30,251 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 36, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,252 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 36, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,252 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 36, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,253 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 36, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,264 INFO    db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 0, "bills_updated": 49, "rows_reused": 54, "conflicts": 9, "rows_reported": 112, "by_frame": {"bills": {"inserted": 0, "updated": 49, "unchanged": 54, "conflicts": 9, "reported": 112}, "recoveries": {"inserted": 0, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 0}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:30,357 INFO    db.silver              req=1e8027e99301 cust=1 run=- :: silver.rows_persisted | {"frames": ["bills"], "rows": 2213}
+2026-09-29 13:25:30,440 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,440 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,440 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,440 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,441 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,441 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,441 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,441 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,441 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,441 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,442 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,442 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,442 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,443 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,443 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,443 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,444 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,444 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,445 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,445 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,446 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,446 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,446 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,447 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,447 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,447 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,447 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,448 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,451 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,451 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,453 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,453 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,454 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,454 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,455 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,455 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,455 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,456 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,457 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,457 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,458 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,459 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,461 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,462 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,462 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,462 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,463 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,464 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,464 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,464 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,464 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,465 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,465 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,465 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,467 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,467 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,467 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,468 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,469 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,469 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,469 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,470 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,470 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,471 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,471 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,472 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,472 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,474 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,475 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,475 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,476 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,476 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,476 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,478 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,481 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,482 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,482 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,484 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,486 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,488 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,491 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,491 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,492 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,493 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,495 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,496 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,497 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,498 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,498 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,499 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,502 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,503 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,510 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,511 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,513 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["payment_order_ref", "data_row"]}
+2026-09-29 13:25:30,515 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,515 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,517 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,519 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,525 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,529 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,531 WARNING db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_conflict | {"bronze_file_id": 37, "changed_field_names": ["data_row"]}
+2026-09-29 13:25:30,661 INFO    db.ingest              req=1e8027e99301 cust=1 run=- :: gold.ingest_completed | {"files_reused": 0, "rows_inserted": 57, "bills_updated": 2050, "rows_reused": 24, "conflicts": 102, "rows_reported": 2233, "by_frame": {"bills": {"inserted": 37, "updated": 2050, "unchanged": 24, "conflicts": 102, "reported": 2213}, "recoveries": {"inserted": 20, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 20}}, "frames": ["bills", "recoveries"]}
+2026-09-29 13:25:30,661 INFO    app.routes             req=1e8027e99301 cust=1 run=- :: ingestion.completed | {"files": [{"field": "statement", "source_type": "bank_statement", "bronze_file_id": 34, "outcome": "registered", "size_bytes": 73472}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 35, "outcome": "registered", "size_bytes": 9223}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 36, "outcome": "registered", "size_bytes": 21721}, {"field": "bills", "source_type": "bill_status", "bronze_file_id": 37, "outcome": "registered", "size_bytes": 303096}], "selfcheck_passed": null, "stats": {"files_reused": 0, "rows_inserted": 198, "bills_updated": 2112, "rows_reused": 91, "conflicts": 111, "rows_reported": 2512, "by_frame": {"bank_txns": {"inserted": 141, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 141}, "bills": {"inserted": 37, "updated": 2112, "unchanged": 91, "conflicts": 111, "reported": 2351}, "recoveries": {"inserted": 20, "updated": 0, "unchanged": 0, "conflicts": 0, "reported": 20}}}}
+2026-09-29 13:25:30,689 INFO    app.request            req=1e8027e99301 cust=- run=- :: http.request | {"method": "POST", "path": "/api/ingest", "status_code": 200, "duration_ms": 1794.8, "customer_id": "default"}
+2026-09-29 13:25:30,689 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/ingest "HTTP/1.1 200 OK"
+  ingested: statement bronze id 34
+2026-09-29 13:25:30,700 INFO    db.incremental         req=554d9136cfb3 cust=1 run=d5046ca767824bb2ab76d217cdd5db5e :: run.started | {"mode": "incremental"}
+2026-09-29 13:25:34,320 INFO    db.incremental         req=554d9136cfb3 cust=1 run=d5046ca767824bb2ab76d217cdd5db5e :: ledger.finalized | {"matches_created": 16, "auto_locked": 13, "exceptions_opened": 49, "exceptions_resolved": 1}
+2026-09-29 13:25:36,079 INFO    db.runs_store          req=554d9136cfb3 cust=1 run=d5046ca767824bb2ab76d217cdd5db5e :: run.succeeded | {"mode": "incremental"}
+2026-09-29 13:25:36,179 INFO    app.request            req=554d9136cfb3 cust=- run=- :: http.request | {"method": "POST", "path": "/api/reconcile", "status_code": 200, "duration_ms": 5488.3, "customer_id": "default"}
+2026-09-29 13:25:36,179 INFO    httpx                  req=- cust=- run=- :: HTTP Request: POST http://testserver/api/reconcile "HTTP/1.1 200 OK"
+  reconciled: run d5046ca767824bb2ab76d217cdd5db5e  ledger: {"matches_created": 16, "auto_locked": 13, "exceptions_opened": 49, "exceptions_resolved": 1, "provisional_reviewed": 3, "provisional_superseded": 0, "provisional_kept_conflict": 0}
+
+Done. Full per-day JSON: /home/lehen/Projects/Wabtec/recon_engine/backend/../scripts/load_12_21aug_results_local.json

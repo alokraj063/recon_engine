@@ -152,3 +152,27 @@ def test_lineage_slots_add_remove(client, customer):
                            "params": {"bill_status":
                                       {"entity_key": ["not_a_column"]}}})
     assert bad.status_code == 400
+
+
+def test_pairing_window_and_reference_signals_roundtrip(client, customer):
+    rules = client.get(f"/api/customers/{customer}/config").json()["rules"]
+    assert rules["max_pairing_gap_days"] is None
+    assert [s["key"] for s in rules["field_map"]["reference_signals"]] == ["bill_ref"]
+
+    body = {**rules, "max_pairing_gap_days": 10}
+    # a client that predates reference signals must not switch them off
+    body["field_map"] = {k: v for k, v in rules["field_map"].items()
+                         if k != "reference_signals"}
+    r = client.put(f"/api/customers/{customer}/config", json=body)
+    assert r.status_code == 200, r.text
+    got = client.get(f"/api/customers/{customer}/config").json()["rules"]
+    assert got["max_pairing_gap_days"] == 10
+    assert got["field_map"]["reference_signals"] == rules["field_map"]["reference_signals"]
+
+    # an explicit empty list turns them off; a negative window is refused
+    body = {**got, "field_map": {**got["field_map"], "reference_signals": []}}
+    assert client.put(f"/api/customers/{customer}/config", json=body).status_code == 200
+    got = client.get(f"/api/customers/{customer}/config").json()["rules"]
+    assert got["field_map"]["reference_signals"] == []
+    bad = {**got, "max_pairing_gap_days": -1}
+    assert client.put(f"/api/customers/{customer}/config", json=bad).status_code == 400

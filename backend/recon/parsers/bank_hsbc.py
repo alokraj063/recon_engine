@@ -193,17 +193,37 @@ ZONE_CODES = [
 # case-SENSITIVELY so a lowercase description word (Erection, Set…) can
 # never be read as a zone; the extracted value is uppercased (ECOR/SCOR),
 # matching how the bills side spells them after norm_text
-ZONE_SPELLINGS = sorted(ZONE_CODES + ["ECoR", "SCoR"], key=len, reverse=True)
+# SEC is how SECR's own divisions (34xx: "3401HQ", "3403RAIP", "3406MBWS")
+# often write it — "3403RAIP SECVENTURI VALVE…". It is only ever read at
+# Rule A's anchored zone position (never by the Rule C search), after SECR
+# in the length order so a real "SECR…" wins, and never as the head of
+# SECURITY / SECTION (_SEC_GUARD); the extracted "SEC" is canonicalised to
+# SECR by ZONE_ALIASES below
+ZONE_SPELLINGS = sorted(ZONE_CODES + ["ECoR", "SCoR", "SEC"], key=len, reverse=True)
+_SEC_GUARD = r"(?!UR|TION)"
 # Production units pay through IREPS too and the bills carry the unit as
 # `zone` (ICF, RCF, CLW, MCF, BLW, PLW, MTPK seen in gold); in the
 # narrative the unit code is glued straight after the 4-digit prefix with
 # no station mnemonic: "1101CLWHIGH REACH…", "2001MCFaxle…", "RCFLHB…"
+# (DLW / DMW are still EXTRACTED — payers keep the old names in the
+# narrative — and canonicalised by ZONE_ALIASES)
 PRODUCTION_UNITS = ["MTPK", "ICF", "RCF", "MCF", "CLW", "BLW", "DLW", "DMW",
                     "PLW", "RWF"]
+# narrative spelling -> the CANONICAL code the bills carry, applied to
+# whatever rule extracted it: the matcher compares zone_guess with the
+# bill's zone by exact normalized string, so an alias left as-is fails the
+# zone check (and an unread SEC made the credit a non-IREPS receipt).
+# DMW / DLW are the old names of PLW / BLW (Diesel Modernisation Works ->
+# Patiala, Diesel Locomotive Works -> Banaras); IREPS bills use the new
+# names. db/zones.py keeps the same aliases for display — recon never
+# imports db, so the parser holds its own copy
+ZONE_ALIASES = {"SEC": "SECR", "DMW": "PLW", "DLW": "BLW"}
 
-_ZONE_ALT = "|".join(ZONE_SPELLINGS)
+_ZONE_ALT = "|".join(z + _SEC_GUARD if z == "SEC" else z
+                     for z in ZONE_SPELLINGS)
 # Rule A — zonal railway: "<4-digit unit><STATION> <ZONE><description>"
-#   e.g. "3003DHN ECRSET OF…", "3712CTPTY SCoRSet of…", "HQ CRSet…"
+#   e.g. "3003DHN ECRSET OF…", "3712CTPTY SCoRSet of…", "HQ CRSet…",
+#   "3403RAIP SECVENTURI…" (SEC -> SECR)
 _RULE_A = re.compile(r"^(?:\d{4})?[A-Z]{1,6}\s+(" + _ZONE_ALT + r")")
 # Rule B — production unit: "<4-digit code><UNIT><description>", no station
 #   e.g. "1101CLWHIGH REACH…", "1301ICF1331000197…", "RCFLHB…"
@@ -223,6 +243,10 @@ _ZONE_RE = re.compile(r"\b(" + "|".join(ZONE_CODES) + r")")
 _SBI_NEFT_REF = re.compile(r"\bSBINN\d")
 
 
+def _canonical(code):
+    return ZONE_ALIASES.get(code, code)
+
+
 def extract_zone_from_narrative(narrative):
     """
     Pull the paying railway zone / production unit out of a NEFT narrative.
@@ -231,11 +255,15 @@ def extract_zone_from_narrative(narrative):
       zonal railway    "<4-digit unit><STATION> <ZONE><description…>"
                        '0406GKPW NER4th Bill of A…'  -> NER
                        '3712CTPTY SCoRSet of WSP…'   -> SCOR
+                       '3403RAIP SECVENTURI VALVE…'  -> SECR (alias)
       production unit  "<4-digit code><UNIT><description…>" (no station)
                        '2001MCFaxle mounted disc…'    -> MCF
                        '1301ICF1331000197 90 Sup…'   -> ICF
+                       '1501DMWE70 BR SYS WAG9…'      -> PLW (alias)
     Rules are tried in that order (both anchored at the head), then the
-    historical unanchored search as a fallback. A NEFT credit that did not
+    historical unanchored search as a fallback. The result is always the
+    canonical code the bills use (ZONE_ALIASES: SEC -> SECR, DMW -> PLW,
+    DLW -> BLW), whichever rule found it. A NEFT credit that did not
     come through SBI (no SBI NEFT reference) is not an IREPS payment and
     gets no zone at all. Anything else — deposit interest, customs
     drawback, ordinary vendors — stays None, which the matcher treats as
@@ -253,13 +281,13 @@ def extract_zone_from_narrative(narrative):
         # code ("DMW CNC SOLUTIONS…") must not be read as that unit
         m = _RULE_A.match(body)
         if m:
-            return m.group(1).upper()
+            return _canonical(m.group(1).upper())
         m = _RULE_B.match(body)
         if m:
-            return m.group(1)
+            return _canonical(m.group(1))
     body = re.sub(r"^[0-9]{4}[A-Z]+\s*", "", body)
     m = _ZONE_RE.search(body)
-    return m.group(1) if m else None
+    return _canonical(m.group(1)) if m else None
 
 
 def bank_selfcheck(df, pdf_path):

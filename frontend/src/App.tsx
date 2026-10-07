@@ -24,6 +24,8 @@ import { ReconcileForm } from './components/ReconcileForm'
 import { SettingsView } from './components/SettingsView'
 import { RunPicker, runLabel } from './components/RunPicker'
 import { Sidebar, type View } from './components/Sidebar'
+import { ExportView } from './components/ExportView'
+import { DailyCollectionView } from './components/DailyCollectionView'
 import {
   type DataPage, type DataScope, dataPageOf, readScopePref, scopeOf, viewForScope,
   writeScopePref,
@@ -42,7 +44,7 @@ const GOLD_VIEWS: Record<string, GoldFrameName> = {
 }
 
 const VIEW_TITLES: Record<
-  Exclude<View, 'command' | 'ingest' | 'reconcile' | 'ledger' | 'ar' | 'audit'
+  Exclude<View, 'command' | 'ingest' | 'reconcile' | 'ledger' | 'ar' | 'audit' | 'export' | 'collection'
     | 'architecture' | 'settings' | 'gold_bank' | 'gold_bills' | 'gold_recoveries'
     | 'gold_lineage'>,
   string
@@ -78,7 +80,7 @@ const PICKER_VIEWS = new Set<View>([...FILTERED_VIEWS, ...FRAME_VIEWS])
 const payloadCache = new Map<string, ReconResponse>()
 
 const VALID_VIEWS = new Set<View>([
-  'command', 'ingest', 'reconcile', 'ledger', 'ar', 'audit', 'architecture', 'settings',
+  'command', 'ingest', 'reconcile', 'ledger', 'ar', 'audit', 'export', 'collection', 'architecture', 'settings',
   'summary', 'matched', 'exceptions', 'bank', 'bills', 'bills_enriched',
   'recoveries', 'gold_bank', 'gold_bills', 'gold_recoveries', 'gold_lineage',
 ])
@@ -597,6 +599,32 @@ export default function App() {
             customers={customers}
             customerId={customerId}
             onCustomerChange={setCustomerId}
+            onGoToIngest={() => setView('ingest')}
+          />
+        )}
+
+        {view === 'export' && (
+          <ExportView
+            customers={customers}
+            customerId={customerId}
+            onCustomerChange={setCustomerId}
+            onOpenMatch={(id) => {
+              setLedgerFocus(id)
+              setView('ledger')
+            }}
+          />
+        )}
+
+        {view === 'collection' && (
+          <DailyCollectionView
+            customers={customers}
+            customerId={customerId}
+            onCustomerChange={setCustomerId}
+            onOpenMatch={(id) => {
+              setLedgerFocus(id)
+              setView('ledger')
+            }}
+            onOpenSettings={() => setView('settings')}
             onGoToIngest={() => setView('ingest')}
           />
         )}
