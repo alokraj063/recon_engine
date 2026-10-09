@@ -18,7 +18,7 @@ from typing import Optional
 from datetime import date
 
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Query,
-                     Request, UploadFile)
+                     Request, Response, UploadFile)
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
@@ -73,6 +73,13 @@ SOURCE_TYPES = {
 }
 
 _FIELD_OF_SLOT = {st: f for f, st in SOURCE_TYPES.items()}
+
+# POST /api/documents: the doc_type a caller names -> the slot it files under
+DOC_TYPES = {
+    "bill_status": "bill_status",
+    "rnote": "lineage_rnote",
+    "crn": "lineage_crn",
+}
 
 LINEAGE_SLOT_RE = re.compile(r"^lineage_[a-z0-9_-]{1,24}$")
 
@@ -416,6 +423,37 @@ def _merge_stats(acc: dict, more: dict) -> dict:
         else:
             acc[k] = v
     return acc
+
+
+def _parse_one(adapter, params, path, name):
+    """One file through its slot's adapter: silver, gold, selfcheck result.
+    A failed selfcheck is re-raised naming the file."""
+    try:
+        silver = adapter.parse(path, params)
+        gold = adapter.to_gold(silver, params)
+        check = adapter.selfcheck(gold, path, params)
+    except SelfCheckError as ex:
+        raise SelfCheckError(f"{name}: {ex}") from ex
+    return silver, gold, check
+
+
+async def _parse_guarded(fn, customer_pk):
+    """Run a parse step in the threadpool, mapping its failures to the
+    422s /api/ingest and /api/documents share."""
+    try:
+        return await run_in_threadpool(fn)
+    except SelfCheckError as e:
+        logger.warning("ingest.selfcheck_failed", extra={
+            "event_type": "ingest.selfcheck_failed",
+            "details": {"customer_id": customer_pk, "detail": str(e)}})
+        _fail(422, "BANK_SELFCHECK_FAILED", str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("ingest.parse_failed", extra={
+            "event_type": "ingest.parse_failed",
+            "details": {"customer_id": customer_pk}})
+        _fail(422, "PARSE_FAILED", f"{type(e).__name__}: {e}")
 
 
 def _persist_ingest_entries(customer_pk, entries, ingestion_event,
@@ -1360,32 +1398,14 @@ async def ingest(
             checks = []
             for e in plan:
                 adapter, p = slot_adapters[e["slot"]]
-                try:
-                    silver = adapter.parse(e["path"], p)
-                    gold = adapter.to_gold(silver, p)
-                    check = adapter.selfcheck(gold, e["path"], p)
-                except SelfCheckError as ex:
-                    raise SelfCheckError(f"{e['name']}: {ex}") from ex
+                silver, gold, check = _parse_one(adapter, p, e["path"], e["name"])
                 e["silver"], e["gold"] = silver, gold
                 if check is not None:
                     checks.append({"slot": e["slot"], "bronze_file_id": e["bronze_id"],
                                    "original_name": e["name"], "check": check})
             return checks
 
-        try:
-            checks = await run_in_threadpool(parse_all)
-        except SelfCheckError as e:
-            logger.warning("ingest.selfcheck_failed", extra={
-                "event_type": "ingest.selfcheck_failed",
-                "details": {"customer_id": customer_pk, "detail": str(e)}})
-            _fail(422, "BANK_SELFCHECK_FAILED", str(e))
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.exception("ingest.parse_failed", extra={
-                "event_type": "ingest.parse_failed",
-                "details": {"customer_id": customer_pk}})
-            _fail(422, "PARSE_FAILED", f"{type(e).__name__}: {e}")
+        checks = await _parse_guarded(parse_all, customer_pk)
 
         bank_checks = [c for c in checks if c["slot"] == "bank_statement"]
         selfchecks = [{"bronze_file_id": c["bronze_file_id"],
@@ -1410,6 +1430,85 @@ async def ingest(
         return {"customer": customer_id, "files": files_resp,
                 "stats": stats, "selfcheck": selfcheck,
                 "selfchecks": selfchecks}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@router.post("/documents", status_code=201)
+async def upload_document(
+    response: Response,
+    request: Request,
+    doc_type: str = Form(...),
+    file: UploadFile = File(...),
+    customer_id: str = Form("default"),
+):
+    """Upload ONE source document (Bill status | RNote | CRN): store it in
+    managed storage (S3 when STORAGE_BACKEND=s3), register it in bronze,
+    then parse it and load silver + gold exactly as POST /api/ingest does.
+
+    Registration commits before parsing (as in /ingest), so a 422 parse
+    failure leaves the file stored but not in gold; re-sending the same
+    bytes retries the parse. Identical bytes already registered answer 200
+    (deduplicated=true) and re-ingest as a no-op at the gold file level."""
+    key = re.sub(r"[\s-]+", "_", (doc_type or "").strip().lower())
+    slot = DOC_TYPES.get(key)
+    if slot is None:
+        _fail(400, "INVALID_INPUT",
+              f"unknown doc_type '{doc_type}'; expected one of "
+              f"{sorted(DOC_TYPES)}")
+    tmpdir = Path(tempfile.mkdtemp(prefix="recon_doc_"))
+    try:
+        path = _save_upload(file, slot, tmpdir)
+
+        def store():
+            with SessionLocal() as session:
+                customer, source_configs, _rule = _load_customer_context(
+                    session, customer_id)
+                if slot not in source_configs:
+                    _fail(400, "INVALID_INPUT",
+                          f"customer '{customer_id}' has no active "
+                          f"'{key}' source")
+                existed = session.execute(
+                    select(BronzeFile.id)
+                    .where(BronzeFile.customer_id == customer.id,
+                           BronzeFile.sha256 == file_sha256(path)).limit(1)
+                ).first()
+                bronze_id = _register_one(session, customer, slot, path,
+                                          file.filename, source_configs)
+                session.commit()
+                row = session.get(BronzeFile, bronze_id)
+                return customer.id, source_configs, existed is not None, {
+                    "bronze_file_id": row.id,
+                    "doc_type": key,
+                    "slot": row.source_type,
+                    "original_name": row.original_name,
+                    "size_bytes": row.size_bytes,
+                    "sha256": row.sha256,
+                    "stored_path": row.stored_path,
+                    "deduplicated": existed is not None,
+                }
+
+        customer_id_var.set(customer_id)
+        request.state.customer_id = customer_id
+        customer_pk, source_configs, existed, out = await run_in_threadpool(store)
+
+        adapter, params = _resolve_slot_adapter(source_configs, slot,
+                                                customer_id)
+        silver, gold, _check = await _parse_guarded(
+            lambda: _parse_one(adapter, params, path, file.filename),
+            customer_pk)
+        stats = await run_in_threadpool(
+            _persist_ingest_entries, customer_pk,
+            [{"slot": slot, "bronze_id": out["bronze_file_id"],
+              "silver": silver, "gold": gold}],
+            {"files": [{"source_type": slot,
+                        "bronze_file_id": out["bronze_file_id"],
+                        "outcome": "deduped" if existed else "registered"}],
+             "selfcheck_passed": None},
+            _entity_keys(source_configs))
+        if existed:
+            response.status_code = 200
+        return {**out, "ingested": True, "stats": stats}
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 

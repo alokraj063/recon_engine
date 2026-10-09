@@ -219,6 +219,40 @@ def test_recovery_details_with_leading_dot_amount():
     assert items == [("OTHER CHARGES", ".31")]
 
 
+def test_recovery_details_multi_amount_head_is_one_line_per_amount():
+    """'<head>: a, b' is the head recovered twice. The old regex kept only
+    'a' and let ', b' leak into the next head's text (verbatim IREPS cells
+    from bills 3230326008056 / 6060426002517 / 33150326005557)."""
+    items = _parse_recovery_details(
+        "GENERAL DAMAGES: 13894.38, 73751.5 GST TDS DEDUCTION: 3347.6 "
+        "INCOME TAX - CONTR(Section-194Q): 168")
+    assert items == [
+        ("GENERAL DAMAGES", "13894.38"),
+        ("GENERAL DAMAGES", "73751.5"),
+        ("GST TDS DEDUCTION", "3347.6"),
+        ("INCOME TAX - CONTR(Section-194Q)", "168"),
+    ]
+    items = _parse_recovery_details(
+        "Recovery against Call Cancellation: 2233.96, 5290.96, 6278.6 "
+        "Recovery against Rejection of Material During Insp: 4994.82")
+    assert [h for h, _ in items] == (
+        ["Recovery against Call Cancellation"] * 3
+        + ["Recovery against Rejection of Material During Insp"])
+    assert [a for _, a in items] == ["2233.96", "5290.96", "6278.6", "4994.82"]
+    # a trailing list, and equal amounts, both survive
+    assert _parse_recovery_details("INCOME TAX: 13 Recovery: 1206.62, 1206.62, 1206.62") == [
+        ("INCOME TAX", "13"), ("Recovery", "1206.62"),
+        ("Recovery", "1206.62"), ("Recovery", "1206.62")]
+
+
+def test_multi_amount_head_recovery_lines_cover_the_deduction():
+    """End to end through to_gold: the lines must sum to the deduction."""
+    from recon.sources.ireps_bills import _parse_recovery_details as parse
+    text = ("GST TDS DEDUCTION: 17218.4 INCOME TAX - CONTR(Section-194Q): 861 "
+            "Recovery against Rejection of Material During Insp: 5900, 5900")
+    assert sum(float(a) for _h, a in parse(text)) == 29879.4
+
+
 # --- Test 8 — CO7 placeholder ----------------------------------------
 
 def test_co7_dashes_become_null_amounts_and_dates_untouched(tmp_path):

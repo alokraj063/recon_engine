@@ -450,7 +450,7 @@ backend/app/     FastAPI wrapper — TWO-STEP flow in the UI: (1) POST /api/inge
                bundled-document fallback — both existed to let the seeded
                `default` customer ingest the repo's sample files for an empty
                slot, which made a run silently differ from what the user chose),
-               (2) POST /api/reconcile (JSON: customer_id, statement_bronze_id,
+               (1b) POST /api/documents (multipart: customer_id, doc_type = bill_status | rnote | crn, file; stores ONE file via db/storage (S3 when STORAGE_BACKEND=s3) + bronze.files, then parses and loads silver/gold through the same _parse_one/_parse_guarded/_persist_ingest_entries helpers as /api/ingest; 201, or 200 deduplicated=true for identical bytes; registration commits BEFORE parsing, so a 422 leaves the file stored but not in gold), (2) POST /api/reconcile (JSON: customer_id, statement_bronze_id,
                mode; six Optional tunables — omitted = customer config applies;
                both modes source purely from gold — snapshot
                keeps legacy semantics/no ledger, incremental feeds the ledger;
