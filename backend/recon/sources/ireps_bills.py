@@ -62,7 +62,11 @@ RECOVERIES_TO_GOLD = {
 # '<head>: <amt> <head>: <amt> ...'. A head never contains a colon, and an
 # amount is always a plain number (never comma-grouped in this export),
 # so 'text up to the next colon, then a number' segments it unambiguously.
-_RECOVERY_ITEM_RE = re.compile(r"([^:]+):\s*(-?\d*\.?\d+)")
+# A head recovered more than once carries a comma-separated amount list
+# ('<head>: 5900, 5900'): each amount is its own deduction line, and the
+# list must be consumed whole or its tail leaks into the NEXT head's text.
+_AMOUNT = r"-?\d*\.?\d+"
+_RECOVERY_ITEM_RE = re.compile(rf"([^:]+):\s*({_AMOUNT}(?:\s*,\s*{_AMOUNT})*)")
 
 
 def _parse_recovery_details(text):
@@ -71,7 +75,8 @@ def _parse_recovery_details(text):
     if text is None:
         return []
     return [(h.strip(), a.strip())
-           for h, a in _RECOVERY_ITEM_RE.findall(str(text))]
+            for h, amounts in _RECOVERY_ITEM_RE.findall(str(text))
+            for a in amounts.split(",")]
 
 
 def _to_amount(text):
